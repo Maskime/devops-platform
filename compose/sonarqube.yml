@@ -5,10 +5,10 @@
 services:
 
   # ---------------------------------------------------------------------------
-  # SonarQube DB — PostgreSQL 15
+  # SonarQube DB — PostgreSQL 17 (SonarQube 26.5 supporte 15 à 17 ; 18 à partir de 26.8)
   # ---------------------------------------------------------------------------
   sonarqube-db:
-    image: postgres:15.19
+    image: postgres:17.11
     container_name: sonarqube-db
     restart: always
     environment:
@@ -27,6 +27,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # SonarQube Community Edition + plugin community branch
+  # Version bornée par le plugin (26.5 = dernière supportée, SonarQube 26.9 publié)
   # Prérequis hôte : sysctl -w vm.max_map_count=524288 (Elasticsearch intégré)
   # ---------------------------------------------------------------------------
   sonarqube:
