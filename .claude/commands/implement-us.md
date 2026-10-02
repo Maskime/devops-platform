@@ -16,8 +16,10 @@ GitHub est la source de vérité. Récupère l'issue :
 .claude/scripts/find-us.sh <N>-<X>
 ```
 
-Affiche son numéro, son titre, son énoncé, ses critères d'acceptation et ses dépendances avant de commencer.
-Si l'issue est déjà fermée, signale-le et demande à l'opérateur s'il faut continuer.
+Affiche son numéro, son titre, son **statut** (nouvelle, en cours, en revue, terminée), son énoncé, ses
+critères d'acceptation et ses dépendances avant de commencer.
+Si la US est **terminée** (issue fermée), signale-le et demande à l'opérateur s'il faut continuer.
+Les statuts **en cours** et **en revue** sont traités à l'étape 0 du workflow.
 
 ---
 
@@ -29,5 +31,5 @@ Lis le fichier `.claude/workflows/us-implementation.md` et applique exactement l
 
 ## Résumé final
 
-Affiche : US traitée (code, issue, lien de la PR), statut de chaque critère, issues backlog créées,
+Affiche : US traitée (code, issue, lien de la PR, statut final de la US), statut de chaque critère, issues backlog créées,
 résultat de `verify.sh`.

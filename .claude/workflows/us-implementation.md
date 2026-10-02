@@ -2,14 +2,36 @@
 
 Six étapes, à appliquer dans l'ordre. `<N>-<X>` désigne le code de la US, `#<num>` son issue GitHub.
 
+## Cycle de vie d'une US
+
+| Statut | Signal sur GitHub | Posé par |
+|---|---|---|
+| **nouvelle** | issue ouverte, sans label d'état, sans branche ni PR | création de l'issue |
+| **en cours** | label `en-cours`, issue assignée, branche `us/<N>-<X>-*` | étape 0 |
+| **en revue** | label `en-revue`, PR ouverte | étape 6 |
+| **terminée** | issue fermée | merge de la PR par l'opérateur (`Closes #<num>`) |
+
+`.claude/scripts/find-us.sh <N>-<X>` affiche le statut calculé à partir de ces signaux ;
+`.claude/scripts/us-status.sh <num> <en-cours|en-revue|aucun>` positionne les labels (idempotent).
+
 ### Étape 0 — Préparation
 
 1. Vérifie que l'arbre de travail est propre (`git status --porcelain` vide). Sinon, arrête-toi et demande à l'opérateur.
 2. Mets `main` à jour : `git switch main && git pull --ff-only` (repo public, pas d'authentification nécessaire).
-3. Vérifie les **dépendances** listées dans l'issue : chaque issue référencée doit être fermée
+3. Vérifie le **statut** de la US (`find-us.sh <N>-<X>`) :
+   - **nouvelle** : continue ;
+   - **en cours** ou **en revue** (branche, PR ou label déjà présents) : ne crée pas de seconde branche.
+     Indique à l'opérateur la branche et la PR existantes et demande s'il faut **reprendre** le travail
+     (bascule sur la branche existante, `git switch <branche>`, puis reprends à l'étape adaptée) ou
+     **abandonner** ;
+   - **terminée** : déjà traité à l'initialisation de la commande.
+4. Vérifie les **dépendances** listées dans l'issue : chaque issue référencée doit être fermée
    (`.claude/scripts/find-us.sh <code>` affiche l'état). Si une dépendance est encore ouverte,
    signale-le à l'opérateur et demande s'il faut continuer.
-4. Crée la branche `us/<N>-<X>-<slug>` (slug court, kebab-case, sans accents) depuis `main`.
+5. Crée la branche `us/<N>-<X>-<slug>` (slug court, kebab-case, sans accents) depuis `main`.
+6. Passe la US **en cours** : `.claude/scripts/us-status.sh <num> en-cours`.
+7. Lance `.claude/scripts/check-epics.sh` : s'il liste des épopées dont toutes les US sont terminées,
+   signale-les à l'opérateur (c'est lui qui les clôture).
 
 ### Étape 1 — Planification
 
@@ -88,8 +110,10 @@ Refs #<num>
    ```
    Corps de la PR : résumé des changements, tableau des critères avec leur statut, points Modéré créés
    (liens vers les issues), `Closes #<num>`, puis la ligne d'attribution Claude Code.
-3. Coche dans le corps de l'issue `#<num>` les critères **satisfaits** (et uniquement eux) :
+3. Passe la US **en revue** : `.claude/scripts/us-status.sh <num> en-revue`.
+4. Coche dans le corps de l'issue `#<num>` les critères **satisfaits** (et uniquement eux) :
    lis le corps avec `gh-api.sh GET /issues/<num>`, remplace `- [ ]` par `- [x]` sur les lignes concernées,
    puis `gh-api.sh PATCH /issues/<num> '{"body":"…"}'` (construis le JSON avec `python3 -c 'import json…'`
    pour un échappement correct).
-4. Ne merge pas la PR : c'est l'opérateur qui merge.
+5. Ne merge pas la PR : c'est l'opérateur qui merge. Le merge ferme l'issue (`Closes #<num>`), qui passe
+   alors **terminée** ; le label `en-revue` restant est sans effet (une issue fermée est toujours terminée).
