@@ -1,0 +1,23 @@
+# =============================================================================
+# Plateforme DevOps — point d'entrée Docker Compose
+#
+# Une brique = un module dans compose/, assemblé ici via `include` :
+#   compose/gitlab.yml         gitlab, gitlab-runner
+#   compose/sonarqube.yml      sonarqube, sonarqube-db
+#   compose/observability.yml  loki, promtail, grafana
+#   compose/tools.yml          portainer, plantuml
+#
+# Toujours piloter la plateforme depuis ce fichier, avec le fichier d'environnement de l'instance :
+#   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
+#   docker compose --env-file envs/<env>.env up -d gitlab gitlab-runner # une seule brique
+# Pour désactiver durablement une brique, commenter sa ligne d'`include` ci-dessous.
+# Un module seul (`-f compose/<module>.yml`) ne sert qu'à `config` : lancé ainsi, il prendrait un
+# autre nom de projet, donc d'autres volumes.
+# =============================================================================
+name: devops-platform
+
+include:
+  - compose/gitlab.yml
+  - compose/sonarqube.yml
+  - compose/observability.yml
+  - compose/tools.yml
