@@ -1,0 +1,75 @@
+# =============================================================================
+# Brique GitLab : forge, tickets et CI/CD
+# Inclus par compose.yml ; ne se lance pas seul (voir l'en-tête de compose.yml).
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # GitLab CE — forge, tickets, CI/CD
+  # ---------------------------------------------------------------------------
+  gitlab:
+    image: gitlab/gitlab-ce:19.4.1-ce.0
+    container_name: gitlab
+    restart: always
+    hostname: gitlab
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url '${GITLAB_EXTERNAL_URL}'
+        gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD}'
+
+        # Memory tuning — cible ~3-4 GB au lieu de 10 GB par défaut
+        puma['worker_processes'] = 2
+        puma['min_threads'] = 1
+        puma['max_threads'] = 4
+        sidekiq['max_concurrency'] = 10
+
+        # Désactive les services de monitoring intégrés
+        prometheus_monitoring['enable'] = false
+        alertmanager['enable'] = false
+
+        # Réduit les buffers PostgreSQL embarqué
+        postgresql['shared_buffers'] = '256MB'
+        postgresql['max_connections'] = 100
+    ports:
+      - "80:80"
+      - "2222:22"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/-/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    volumes:
+      - gitlab_config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+    networks:
+      - factory-network
+
+  # ---------------------------------------------------------------------------
+  # GitLab Runner — exécuteur CI/CD
+  # ---------------------------------------------------------------------------
+  gitlab-runner:
+    image: gitlab/gitlab-runner:v19.4.1
+    container_name: gitlab-runner
+    restart: always
+    volumes:
+      - gitlab_runner_config:/etc/gitlab-runner
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - factory-network
+    depends_on:
+      gitlab:
+        condition: service_healthy
+
+# Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
+networks:
+  factory-network:
+    name: factory-network
+    driver: bridge
+
+volumes:
+  gitlab_config:
+  gitlab_logs:
+  gitlab_data:
+  gitlab_runner_config:

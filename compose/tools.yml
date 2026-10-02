@@ -1,0 +1,54 @@
+# =============================================================================
+# Brique outils : gestion des conteneurs et génération de diagrammes
+# Inclus par compose.yml ; ne se lance pas seul (voir l'en-tête de compose.yml).
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # Portainer CE — gestion des conteneurs (UI web)
+  # UI HTTPS : https://localhost:9443  |  Edge agent tunnel : 8000
+  # ---------------------------------------------------------------------------
+  portainer:
+    image: portainer/portainer-ce:2.45.1
+    container_name: portainer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8000:8000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    networks:
+      - factory-network
+
+  # ---------------------------------------------------------------------------
+  # PlantUML Server — génération de diagrammes PNG/SVG via HTTP
+  # URL : http://localhost:${PLANTUML_PORT:-8081}
+  # API : GET /png/<encoded> ou GET /svg/<encoded>
+  # Interne : http://plantuml:8080
+  # ---------------------------------------------------------------------------
+  plantuml:
+    image: plantuml/plantuml-server:jetty-v1.2026.8
+    container_name: plantuml
+    restart: unless-stopped
+    ports:
+      - "${PLANTUML_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - factory-network
+
+# Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
+networks:
+  factory-network:
+    name: factory-network
+    driver: bridge
+
+volumes:
+  portainer_data:
