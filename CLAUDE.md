@@ -1,0 +1,61 @@
+# CLAUDE.md
+
+Ce fichier guide Claude Code (claude.ai/code) dans ce repo.
+
+## Projet
+
+Plateforme DevOps auto-hébergée, déployable à l'identique sur des serveurs distincts : GitLab CE + Runner,
+SonarQube Community Edition (+ plugin community branch) avec PostgreSQL, Grafana + Loki + Promtail,
+Portainer, PlantUML, Traefik en reverse proxy. Extraite de l'infrastructure de *Software Factory*
+(`~/dev/actual-software-factory/infrastructure/`, source en **lecture seule**).
+
+Hors périmètre : Temporal, serveurs MCP, workers et tout ce qui est propre à Software Factory.
+
+## Principes
+
+- **Une instance = un fichier `envs/<env>.env`.** Aucune valeur propre à une instance (hostname, port,
+  réseau, secret, version) en dur dans les fichiers compose ou les scripts.
+- **Instances vierges.** Le bootstrap ne crée aucune donnée de test ; les données de test vivent dans
+  le smoke test.
+- **`TLS_MODE` ∈ {`letsencrypt`, `custom`, `none`}**, choisi par instance.
+- **Versions épinglées.** Jamais de tag `:latest`.
+- **Repo public.** Aucun secret versionné : `envs/*.env`, `outputs/` et `config/certs/` sont gitignored.
+
+## Conventions
+
+- Scripts Bash : `#!/usr/bin/env bash`, `set -euo pipefail`, **idempotents**, messages et commentaires
+  en français, doivent passer shellcheck.
+- Les scripts ciblent les services via `docker compose exec <service>`, jamais par `container_name`.
+- Documentation, issues, PR et messages de commit en français. Commits au format Conventional Commits
+  (`feat(gitlab): …`, `fix(sonarqube): …`, `docs: …`), avec `Refs #<num>` vers l'issue.
+- Une branche et une PR par user story (`us/<N>-<X>-<slug>`) ; l'opérateur merge.
+
+## Dépendances et versions d'images
+
+1. Avant d'ajouter ou de monter une image, vérifie la dernière version stable (Docker Hub, releases GitHub).
+2. Épingle cette version.
+3. Si elle introduit une rupture (chemin de mise à jour GitLab, changement de schéma SonarQube…),
+   **ne rétrograde pas en silence** : signale-le à l'opérateur, qui décide.
+
+## Outillage
+
+- **Ne pas utiliser le CLI `gh`.** Passer par l'API REST via `.claude/scripts/gh-api.sh`
+  (token dans `~/.config/github/token`, jamais affiché ni versionné).
+- Pousser avec `.claude/scripts/git-push.sh` (token injecté par en-tête HTTP).
+- Vérifications statiques : `.claude/scripts/verify.sh` (linters dans des conteneurs, seul Docker requis).
+
+## Suivi
+
+**GitHub est la source de vérité** (https://github.com/Maskime/devops-platform/issues).
+
+- Épopées : issues avec le label `epic`, titrées `[Épopée N] …`, avec un milestone par épopée.
+- User stories : sub-issues de l'épopée, label `user-story`, titrées `[US N-X] …`.
+- Dette relevée en cours d'implémentation : issues avec le label `backlog`.
+
+**Notation :** `us: N-X` désigne la user story X de l'épopée N.
+
+## Slash commands
+
+| Commande | Rôle |
+|---|---|
+| `/implement-us <N>-<X>` | Implémente une US (cycle défini dans `.claude/workflows/us-implementation.md`) et ouvre la PR |

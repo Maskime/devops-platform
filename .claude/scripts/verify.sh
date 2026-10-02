@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Vérifications statiques du repo (étape 5 du workflow d'implémentation).
+# Les linters tournent dans des conteneurs : rien à installer sur l'hôte hormis Docker.
+# Code de sortie non nul si au moins une vérification échoue.
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || exit 1
+failed=0
+
+section() { echo; echo "==> $*"; }
+ko() { echo "    ✖ $*"; failed=1; }
+ok() { echo "    ✔ $*"; }
+
+# 1. shellcheck sur tous les scripts versionnés ou nouveaux
+section "shellcheck"
+mapfile -t sh_files < <(git ls-files --cached --others --exclude-standard '*.sh')
+if ((${#sh_files[@]})); then
+  if docker run --rm -v "$ROOT:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -x "${sh_files[@]}"; then
+    ok "${#sh_files[@]} script(s)"
+  else
+    ko "shellcheck"
+  fi
+else
+  ok "aucun script"
+fi
+
+# 2. yamllint (config relaxed : on vise les erreurs de syntaxe, pas le style)
+section "yamllint"
+mapfile -t yml_files < <(git ls-files --cached --others --exclude-standard '*.yml' '*.yaml')
+if ((${#yml_files[@]})); then
+  if docker run --rm -v "$ROOT:/data:ro" -w /data cytopia/yamllint:1 \
+      -d "{extends: relaxed, rules: {line-length: disable}}" "${yml_files[@]}"; then
+    ok "${#yml_files[@]} fichier(s)"
+  else
+    ko "yamllint"
+  fi
+else
+  ok "aucun fichier YAML"
+fi
+
+# 3. docker compose config pour chaque environnement (dont l'exemple)
+section "docker compose config"
+if [[ -f compose.yml ]]; then
+  shopt -s nullglob dotglob
+  env_files=(envs/*.env envs/.env.example)
+  shopt -u dotglob
+  ((${#env_files[@]})) || ko "aucun fichier dans envs/"
+  for f in "${env_files[@]}"; do
+    if docker compose --env-file "$f" -f compose.yml config -q; then ok "$f"; else ko "$f"; fi
+  done
+else
+  ok "pas encore de compose.yml"
+fi
+
+# 4. Secrets : aucun fichier sensible versionné, aucun token reconnaissable dans les fichiers suivis
+section "secrets"
+if git ls-files --cached --others --exclude-standard | grep -E '^(envs/[^/]+\.env|outputs/|config/certs/[^.])' | grep -v '^envs/\.env\.example$'; then
+  ko "fichier sensible suivi par git (voir ci-dessus)"
+fi
+if git grep -nIE '(glpat-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sq[apu]_[a-f0-9]{30,}|sk-ant-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' -- . ':!.claude/scripts/verify.sh'; then
+  ko "token ou clé privée détecté (voir ci-dessus)"
+fi
+((failed)) || ok "rien à signaler"
+
+echo
+if ((failed)); then echo "Vérification : ÉCHEC"; exit 1; fi
+echo "Vérification : OK"
