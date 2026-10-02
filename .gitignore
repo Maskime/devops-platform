@@ -1,0 +1,16 @@
+# Fichiers d'environnement (secrets) — seul l'exemple est versionné
+envs/*.env
+!envs/.env.example
+
+# Informations de connexion générées par le bootstrap
+outputs/
+
+# Certificats fournis (TLS_MODE=custom)
+config/certs/*
+!config/certs/.gitkeep
+
+# Divers
+*.log
+.DS_Store
+.idea/
+.vscode/
