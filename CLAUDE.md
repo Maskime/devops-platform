@@ -59,3 +59,4 @@ Hors périmètre : Temporal, serveurs MCP, workers et tout ce qui est propre à 
 | Commande | Rôle |
 |---|---|
 | `/implement-us <N>-<X>` | Implémente une US (cycle défini dans `.claude/workflows/us-implementation.md`) et ouvre la PR |
+| `/plan-epic <N>` | Analyse les US d'une épopée et établit des vagues de livraison parallélisables |

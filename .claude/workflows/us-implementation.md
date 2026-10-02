@@ -17,7 +17,9 @@ Six étapes, à appliquer dans l'ordre. `<N>-<X>` désigne le code de la US, `#<
 ### Étape 0 — Préparation
 
 1. Vérifie que l'arbre de travail est propre (`git status --porcelain` vide). Sinon, arrête-toi et demande à l'opérateur.
-2. Mets `main` à jour : `git switch main && git pull --ff-only` (repo public, pas d'authentification nécessaire).
+2. Récupère l'état du remote : `git fetch origin` (repo public, pas d'authentification nécessaire).
+   Ne bascule pas sur `main` : la commande peut tourner dans un worktree (cf. `/plan-epic`), où `main`
+   est déjà extraite ailleurs.
 3. Vérifie le **statut** de la US (`find-us.sh <N>-<X>`) :
    - **nouvelle** : continue ;
    - **en cours** ou **en revue** (branche, PR ou label déjà présents) : ne crée pas de seconde branche.
@@ -28,7 +30,8 @@ Six étapes, à appliquer dans l'ordre. `<N>-<X>` désigne le code de la US, `#<
 4. Vérifie les **dépendances** listées dans l'issue : chaque issue référencée doit être fermée
    (`.claude/scripts/find-us.sh <code>` affiche l'état). Si une dépendance est encore ouverte,
    signale-le à l'opérateur et demande s'il faut continuer.
-5. Crée la branche `us/<N>-<X>-<slug>` (slug court, kebab-case, sans accents) depuis `main`.
+5. Crée la branche `us/<N>-<X>-<slug>` (slug court, kebab-case, sans accents) depuis `origin/main` :
+   `git switch -c us/<N>-<X>-<slug> origin/main`.
 6. Passe la US **en cours** : `.claude/scripts/us-status.sh <num> en-cours`.
 7. Lance `.claude/scripts/check-epics.sh` : s'il liste des épopées dont toutes les US sont terminées,
    signale-les à l'opérateur (c'est lui qui les clôture).
