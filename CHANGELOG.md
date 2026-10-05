@@ -9,6 +9,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- `TLS_MODE=none` (HTTP simple, usage local) : services servis en HTTP par Traefik sur le port 80.
+  `make check-env` (donc `deploy`) valide `TLS_MODE` (vide ou absent : `none`), exige des
+  `*_EXTERNAL_URL` en `http://` en mode `none` et avertit, sans bloquer, si un hostname n'est pas local
+  (`localhost`, `*.localhost`) ; `make init` affiche le même avertissement (`scripts/lib/tls.sh`).
+  **Changement de comportement** : un `TLS_MODE` invalide, ou une URL `https://` en mode `none`, fait
+  désormais échouer `make deploy`.
 - Reverse proxy Traefik (`compose/proxy.yml`, `traefik:v3.7.13`, variable `TRAEFIK_VERSION`) : seul
   point d'entrée web, sur le port 80, routant GitLab, SonarQube, Grafana, Portainer et PlantUML selon
   leur `*_HOSTNAME`. Provider Docker limité aux conteneurs du projet, API et dashboard désactivés,

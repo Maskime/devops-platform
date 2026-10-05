@@ -82,9 +82,15 @@ Portainer (`PORTAINER_EDGE_PORT`). `make verify` contrôle cette liste.
 - **URLs publiques.** L'hôte de `GITLAB_EXTERNAL_URL`, `SONARQUBE_EXTERNAL_URL` et
   `GRAFANA_EXTERNAL_URL` doit être le hostname du service, sans port : `make deploy` (cible
   `check-env`) refuse une URL incohérente et indique la ligne à corriger.
-- **HTTP clair.** Tant que le TLS n'est pas livré (US 3-2 à 3-4), `TLS_MODE` est sans effet : tout le
-  trafic, identifiants compris, circule en HTTP sur le port 80 (Portainer n'est plus servi en HTTPS
-  auto-signé sur 9443). Ne pas exposer l'instance hors d'un réseau maîtrisé d'ici là.
+- **Mode TLS (`TLS_MODE`).**
+  - `none` (défaut, usage local) : HTTP simple sur le port 80, sans certificat (Portainer n'est plus
+    servi en HTTPS auto-signé sur 9443). `make deploy` (cible `check-env`) exige des `*_EXTERNAL_URL`
+    en `http://` et **avertit**, sans bloquer, si un hostname n'est pas local (`localhost`,
+    `*.localhost`) : le trafic, identifiants compris, circule en clair. Un TLS terminé en amont
+    (load balancer) n'est pas géré.
+  - `letsencrypt`, `custom` : HTTPS à venir (US 3-2 et 3-3) ; d'ici là, sans effet (HTTP clair sur le
+    port 80, signalé par `make deploy`) : ne pas exposer l'instance hors d'un réseau maîtrisé.
+  - Toute autre valeur est refusée par `make deploy`.
 
 > ⚠️ `make bootstrap-legacy` est **temporaire** : il reprend les scripts `setup-*.sh` de Software
 > Factory (`scripts/legacy/`), qui créent des **données de test** (projet `factory-test`, pipeline,
@@ -109,7 +115,8 @@ inventer ni à copier :
   problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
 - **Fichier** en permissions `600`, écrit de façon atomique.
 - **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames : `http://<hostname>`, servies par
-  Traefik sur le port 80. `TLS_MODE` n'a pas encore d'effet (TLS : US 3-2 à 3-4).
+  Traefik sur le port 80. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
+  avertissement que `make deploy` ; `letsencrypt` et `custom` n'ont pas encore d'effet (US 3-2 et 3-3).
 - **Sans terminal** (`make init ENV=<env> < /dev/null`, ou réponses passées sur l'entrée standard),
   une réponse vide prend la valeur par défaut et une réponse invalide arrête la commande.
 

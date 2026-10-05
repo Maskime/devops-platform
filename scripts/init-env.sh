@@ -14,6 +14,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODELE="$ROOT/envs/.env.example"
 PROFILS_DIR="$ROOT/config/profiles"
 
+# shellcheck source=scripts/lib/tls.sh
+source "$ROOT/scripts/lib/tls.sh"
+
 # Clés des mots de passe générés (minuscules : pas de faux positif de check-secrets)
 cles_mdp=(GITLAB_ROOT_PASSWORD SONARQUBE_DB_PASSWORD SONARQUBE_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD)
 services=(gitlab sonarqube grafana portainer plantuml)
@@ -105,8 +108,6 @@ valider_profil() {
   return 1
 }
 
-est_local() { [[ "$1" == localhost || "$1" == *.localhost ]]; }
-
 # Réponses, renseignées par demander
 domaine="" tls_mode="" profil=""
 
@@ -134,7 +135,7 @@ done
 
 tls_defaut="$(valeur_existante TLS_MODE)"
 if ! [[ "$tls_defaut" =~ ^(letsencrypt|custom|none)$ ]]; then
-  if est_local "$domaine"; then tls_defaut=none; else tls_defaut=letsencrypt; fi
+  if est_hostname_local "$domaine"; then tls_defaut=none; else tls_defaut=letsencrypt; fi
 fi
 demander tls_mode "TLS_MODE (letsencrypt, custom, none)" "$tls_defaut" valider_tls_mode
 
@@ -182,7 +183,7 @@ for s in "${services[@]}"; do
 done
 
 # URLs publiques : hostname du service, servi par Traefik sur le port 80 (contrôlé par
-# scripts/check-env-urls.sh). http:// quel que soit TLS_MODE tant que le TLS n'est pas livré (US 3-2 à 3-4).
+# scripts/check-env-urls.sh). http:// quel que soit TLS_MODE tant que le TLS n'est pas livré (US 3-2 et 3-3).
 valeurs[GITLAB_EXTERNAL_URL]="http://${hostnames[gitlab]}"
 valeurs[SONARQUBE_EXTERNAL_URL]="http://${hostnames[sonarqube]}"
 valeurs[GRAFANA_EXTERNAL_URL]="http://${hostnames[grafana]}"
@@ -265,7 +266,17 @@ if ((existant)) && [[ "$NOUVEAUX_MDP" == 1 ]]; then
   echo "SonarQube est déjà inscrit dans son volume et le mot de passe root GitLab n'est appliqué qu'au"
   echo "premier démarrage : les volumes doivent être recréés (ou les mots de passe changés dans les services)."
 fi
-if [[ "$tls_mode" != none ]]; then
+if [[ "$tls_mode" == none ]]; then
+  # Même avertissement que make deploy (scripts/check-env-urls.sh)
+  non_locaux=()
+  for s in "${services[@]}"; do
+    est_hostname_local "${hostnames[$s]}" || non_locaux+=("${hostnames[$s]}")
+  done
+  if ((${#non_locaux[@]})); then
+    echo
+    avertir_tls_none_non_local "${non_locaux[@]}"
+  fi
+else
   echo
   echo "Note : TLS_MODE=$tls_mode n'a pas encore d'effet (TLS : US 3-2 et 3-3) : les services sont"
   echo "servis en HTTP clair sur le port 80, identifiants compris. Ne pas exposer l'instance hors"
@@ -274,7 +285,7 @@ fi
 # *.localhost : résolu par les navigateurs et curl, pas toujours par le système (git, wget…)
 non_resolus=()
 for s in "${services[@]}"; do
-  if est_local "${hostnames[$s]}" && ! getent hosts "${hostnames[$s]}" > /dev/null 2>&1; then
+  if est_hostname_local "${hostnames[$s]}" && ! getent hosts "${hostnames[$s]}" > /dev/null 2>&1; then
     non_resolus+=("${hostnames[$s]}")
   fi
 done
