@@ -33,6 +33,7 @@ make smoke       ENV=staging   # vérifie l'instance de bout en bout
 | `Makefile` | Point d'entrée opérateur ; `make help` liste les cibles disponibles |
 | `compose/` | Fichiers Docker Compose de la plateforme |
 | `config/` | Configuration des services (Traefik, Loki, Promtail, Grafana…) |
+| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md)) |
 | `config/certs/` | Certificats fournis pour `TLS_MODE=custom` (non versionnés) |
 | `envs/` | Un fichier `<env>.env` par instance (non versionné) ; seul `.env.example` est versionné |
 | `.github/workflows/` | CI GitHub Actions (garde-fou secrets) |
@@ -53,6 +54,9 @@ make bootstrap-legacy ENV=local       # optionnel : bootstrap repris de Software
 
 Toute la configuration de l'instance (ports, URLs, réseau, versions, secrets) tient dans
 `envs/<env>.env` : chaque variable est documentée dans [`envs/.env.example`](envs/.env.example).
+Chaque image est épinglée sur une version précise (variables `*_VERSION`, jamais `latest`) ; pour en
+changer, suivre la [procédure de montée de version](docs/montee-de-version.md) (chemin de mise à jour
+GitLab, migration SonarQube).
 Les URLs locales par défaut :
 
 | Service | URL locale | Variable de port |
