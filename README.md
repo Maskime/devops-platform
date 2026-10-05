@@ -35,6 +35,8 @@ make smoke       ENV=staging   # vérifie l'instance de bout en bout
 | `config/` | Configuration des services (Traefik, Loki, Promtail, Grafana…) |
 | `config/certs/` | Certificats fournis pour `TLS_MODE=custom` (non versionnés) |
 | `envs/` | Un fichier `<env>.env` par instance (non versionné) ; seul `.env.example` est versionné |
+| `.github/workflows/` | CI GitHub Actions (garde-fou secrets) |
+| `.githooks/` | Hooks Git optionnels (`make install-hooks`) |
 | `scripts/` | Scripts d'exploitation (initialisation, déploiement, bootstrap, smoke test) |
 | `outputs/` | Informations de connexion générées par le bootstrap (non versionné) |
 | `CHANGELOG.md` | Journal des modifications ([Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)) |
@@ -66,6 +68,36 @@ Les URLs locales par défaut :
 > analyse SonarQube). Il est réservé à `ENV=local` (`FORCER=1` pour passer outre) et sera remplacé
 > par `make bootstrap` (épopée 5), qui laissera l'instance vierge.
 > Il requiert `curl` et `python3` sur l'hôte, et `vm.max_map_count` ≥ 524288 pour SonarQube.
+
+## Garde-fou contre les fuites de secrets
+
+Le repo étant public, `scripts/check-secrets.sh` vérifie qu'aucun secret n'y est publié :
+fichiers sensibles versionnés (`envs/<env>.env`, `outputs/`, `config/certs/`, clés et keystores),
+couverture du `.gitignore`, jetons reconnaissables (GitLab, GitHub, SonarQube, Anthropic, AWS, Slack),
+clés privées et valeurs littérales affectées à des variables `*PASSWORD*`, `*TOKEN*`, `*SECRET*` ou
+`*API_KEY*` (les références `${VAR}` et les valeurs d'exemple `change_me_*` sont admises).
+Seuls le fichier, la ligne et le type de secret sont affichés, jamais la valeur.
+
+| Contexte | Commande |
+|---|---|
+| CI GitHub Actions (chaque push et PR) | `.github/workflows/check-secrets.yml`, automatique |
+| Manuel | `make check-secrets` (inclus dans `make verify`) |
+| Historique de la branche courante | `scripts/check-secrets.sh --history` (jetons et clés uniquement) |
+
+**Hook pre-commit (optionnel).** Pour bloquer un commit dont le contenu indexé contient un secret :
+
+```bash
+make install-hooks                    # git config core.hooksPath .githooks
+git commit --no-verify …              # contournement ponctuel, à réserver aux faux positifs avérés
+git config --unset core.hooksPath     # désactivation
+```
+
+`core.hooksPath` remplace `.git/hooks` : les hooks personnels qui s'y trouvent ne sont plus exécutés.
+
+**Faux positif.** Ajouter le marqueur `check-secrets: ignore` dans un commentaire sur la ligne concernée.
+
+**Fuite avérée.** Révoquer immédiatement le secret auprès du service concerné : une fois poussé sur un
+repo public, il doit être considéré comme compromis. Purger ensuite l'historique (`git filter-repo`).
 
 ## Origine
 

@@ -22,6 +22,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - GitLab : port SSH affiché dans les URLs de clone (`gitlab_shell_ssh_port`).
 - SonarQube : URL publique (`sonar.core.serverBaseURL`) issue de `SONARQUBE_EXTERNAL_URL` ;
   Grafana : `root_url` issue de `GRAFANA_EXTERNAL_URL`.
+- Garde-fou contre les fuites de secrets `scripts/check-secrets.sh` (repris de Software Factory dans
+  sa partie générique), exécuté par `make check-secrets`, `make verify` et la CI GitHub Actions
+  sur chaque push et pull request ; mode `--history` pour l'historique de la branche.
+- Hook pre-commit optionnel (`.githooks/pre-commit`), activé par `make install-hooks`.
 
 ### Modifié
 

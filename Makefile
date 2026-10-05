@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-env deploy bootstrap-legacy
+.PHONY: help verify check-secrets install-hooks check-env deploy bootstrap-legacy
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -22,6 +22,14 @@ help: ## Affiche cette aide
 
 verify: ## Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis)
 	@.claude/scripts/verify.sh
+
+check-secrets: ## Recherche de secrets dans le dépôt (fichiers suivis et non suivis non ignorés)
+	@scripts/check-secrets.sh
+
+install-hooks: ## Active le hook pre-commit optionnel de recherche de secrets (.githooks/)
+	@git config core.hooksPath .githooks
+	@echo "Hooks actifs : .githooks/ (les hooks de .git/hooks ne sont plus exécutés)."
+	@echo "Désactivation : git config --unset core.hooksPath"
 
 # Garde-fous communs aux cibles qui agissent sur une instance (ENV exigé sur la ligne de commande)
 check-env:
