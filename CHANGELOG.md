@@ -9,6 +9,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- `make init ENV=<env>` (`scripts/init-env.sh`) génère `envs/<env>.env` depuis le modèle : questions
+  (domaine, hostnames, `TLS_MODE`, profil) avec valeurs par défaut, mots de passe aléatoires conformes
+  aux règles SonarQube, fichier en permissions 600 ; refuse d'écraser un fichier existant sans
+  `FORCE=1` (sauvegarde horodatée, secrets repris sauf `NOUVEAUX_MDP=1`).
+- `envs/.env.example` : `TLS_MODE` et hostnames des services (`*_HOSTNAME`), consommés à partir de
+  l'épopée 3.
+- `check-secrets.sh` et `.gitignore` couvrent les sauvegardes `envs/<env>.env.*`.
 - Configuration d'une instance entièrement portée par `envs/<env>.env` : ports publiés
   (`GITLAB_HTTP_PORT`, `GITLAB_SSH_PORT`, `SONARQUBE_PORT`, `PORTAINER_PORT`, `PORTAINER_EDGE_PORT`,
   `GRAFANA_PORT`, `PLANTUML_PORT`), URLs publiques (`SONARQUBE_EXTERNAL_URL`, `GRAFANA_EXTERNAL_URL`),
