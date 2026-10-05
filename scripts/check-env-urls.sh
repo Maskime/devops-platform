@@ -3,12 +3,14 @@
 #   - TLS_MODE ∈ {letsencrypt, custom, none} (vide ou absent : none) ;
 #   - chaque URL publique (*_EXTERNAL_URL) désigne le hostname routé par Traefik pour ce service
 #     (*_HOSTNAME), sans port, en http:// en mode none (Traefik n'y sert que le port 80) et
-#     obligatoirement en https:// en mode custom : sinon liens, redirections et appels des scripts
-#     aboutissent à un 404 du proxy, à un port non publié ou à une redirection ;
-#     en https:// en mode custom (HTTP redirigé vers HTTPS) ;
+#     obligatoirement en https:// en modes custom et letsencrypt (HTTP redirigé vers HTTPS) : sinon
+#     liens, redirections et appels des scripts aboutissent à un 404 du proxy, à un port non publié ou
+#     à une redirection ;
 #   - TLS_MODE=none avec un hostname non local : avertissement (HTTP clair), non bloquant ;
 #   - TLS_MODE=custom : certificats fournis dans config/certs/ présents, cohérents et couvrant chaque
-#     hostname (verifier_certificats_custom, scripts/lib/tls.sh).
+#     hostname (verifier_certificats_custom, scripts/lib/tls.sh) ;
+#   - TLS_MODE=letsencrypt : hostnames publics (ni local, ni IP), ACME_EMAIL valide, ACME_CHALLENGE
+#     connu (verifier_letsencrypt, scripts/lib/tls.sh).
 #
 # Usage : scripts/check-env-urls.sh <fichier env>
 # Valeur effective, comme Compose : variable du shell prioritaire, sinon dernière affectation du
@@ -63,14 +65,14 @@ for service in gitlab sonarqube grafana; do
   url="$(valeur_effective "$cle_url")"
   hote="$(valeur_effective "$cle_hote")"
   hote="${hote:-$service.localhost}"
-  # Mode none : HTTP seul (port 80) ; custom : HTTPS seul ; letsencrypt : schéma de l'URL conservé
+  # Mode none : HTTP seul (port 80) ; custom et letsencrypt : HTTPS seul (port 443)
   schema="http"
-  [[ "$tls_mode" == custom || ("$tls_mode" != none && "$url" == https://*) ]] && schema="https"
+  [[ "$tls_mode" != none ]] && schema="https"
   # URL absente : défaut compose dérivé du hostname (GITLAB_EXTERNAL_URL, obligatoire, est
-  # signalée par `docker compose config`). Ce défaut est en http:// : refusé en custom.
+  # signalée par `docker compose config`). Ce défaut est en http:// : refusé en HTTPS.
   if [[ -z "$url" ]]; then
-    if [[ "$tls_mode" == custom ]]; then
-      echo "$cle_url absente : son défaut (http://$hote) est incorrect en TLS_MODE=custom." >&2
+    if [[ "$schema" == https ]]; then
+      echo "$cle_url absente : son défaut (http://$hote) est incorrect en TLS_MODE=$tls_mode." >&2
       echo "  Ajouter dans $fichier : $cle_url=$schema://$hote" >&2
       erreurs=1
     fi
@@ -83,8 +85,7 @@ for service in gitlab sonarqube grafana; do
   fi
   case "$tls_mode" in
     none) echo "$cle_url=$url ne correspond pas à $cle_hote=$hote en TLS_MODE=none (Traefik route le port 80, en HTTP, par hostname)." >&2 ;;
-    custom) echo "$cle_url=$url ne correspond pas à $cle_hote=$hote en TLS_MODE=custom (Traefik sert HTTPS sur le port 443, par hostname)." >&2 ;;
-    *) echo "$cle_url=$url ne correspond pas à $cle_hote=$hote (Traefik route le port 80 par hostname)." >&2 ;;
+    *) echo "$cle_url=$url ne correspond pas à $cle_hote=$hote en TLS_MODE=$tls_mode (Traefik sert HTTPS sur le port 443, par hostname)." >&2 ;;
   esac
   echo "  Corriger dans $fichier : $cle_url=$attendu" >&2
   erreurs=1
@@ -102,7 +103,7 @@ for service in gitlab sonarqube grafana portainer plantuml; do
   hotes+=("${hote:-$service.localhost}")
 done
 
-# Une branche par mode : HTTPS letsencrypt livré par la US 3-2
+# Une branche par mode
 case "$tls_mode" in
   none)
     non_locaux=()
@@ -118,6 +119,9 @@ case "$tls_mode" in
     }
     ;;
   letsencrypt)
-    echo "Note : TLS_MODE=$tls_mode n'a pas encore d'effet (US 3-2) : HTTP clair sur le port 80." >&2
+    verifier_letsencrypt "$(valeur_effective ACME_EMAIL)" "$(valeur_effective ACME_CHALLENGE)" "${hotes[@]}" || {
+      echo "Configuration de TLS_MODE=letsencrypt invalide dans $fichier (voir ci-dessus)." >&2
+      exit 1
+    }
     ;;
 esac
