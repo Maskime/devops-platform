@@ -152,7 +152,7 @@ config_montee() {
 }
 
 # Empreinte (12 caractères) des chemins et contenus des fichiers montés : un changement de config
-# change le répertoire source, donc Compose recrée exactement les services concernés
+# change le répertoire source, donc Compose recrée les services qui montent la configuration (et eux seuls)
 empreinte_config() {
   local sha=(sha256sum) chemins
   command -v sha256sum >/dev/null || sha=(shasum -a 256)

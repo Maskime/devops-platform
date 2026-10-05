@@ -88,7 +88,8 @@ chemins et le contenu de ces fichiers. Les montages pointent vers ce répertoire
 **Idempotence** : si un répertoire de même empreinte existe déjà, rien n'est envoyé.
 
 **Prise en compte d'une modification** : un fichier modifié produit une nouvelle empreinte, donc un
-nouveau répertoire. `make deploy` recrée alors exactement les services qui montent ces fichiers.
+nouveau répertoire. `make deploy` recrée alors les services qui montent la configuration (Loki,
+Promtail, Grafana, et Traefik en `TLS_MODE=custom`), et eux seuls.
 
 **Méthode de copie** : le transfert passe par le contexte Docker. Un conteneur `busybox` (sans réseau)
 extrait une archive tar envoyée depuis le poste. Il ne faut ni `rsync`, ni `scp`, ni `sudo`.
