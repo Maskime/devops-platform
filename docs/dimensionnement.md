@@ -13,7 +13,8 @@ outils), hors jobs CI du runner — prévoir de la marge s'ils tournent sur le m
 | `medium` | 16 Go | 8 | 100 Go | Équipe de taille moyenne (≈ 50 utilisateurs) |
 | `large` | 32 Go | 16 | 250 Go | Plusieurs équipes, gros dépôts et analyses lourdes |
 
-Quel que soit le profil, SonarQube exige `vm.max_map_count` ≥ 524288 sur l'hôte.
+Quel que soit le profil, SonarQube exige `vm.max_map_count` ≥ 524288 sur l'hôte (réglé par
+`scripts/host-prereqs.sh`, voir [Préparation d'un serveur](serveur.md)).
 
 **Réglages :**
 
