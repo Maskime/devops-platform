@@ -17,6 +17,9 @@ services:
       - no-new-privileges:true
     command:
       - --entrypoints.web.address=:80
+      # Supprime les en-têtes alias (X_Forwarded_For…) : nginx (GitLab) les lirait comme les en-têtes
+      # posés par Traefik, ce qui permettrait à un client de les usurper
+      - --entrypoints.web.http.aliasheadersstrategy=delete
       # Seuls les conteneurs marqués traefik.enable=true sont exposés
       - --providers.docker.exposedbydefault=false
       # Réseau par lequel joindre les services (requis dès qu'un conteneur en a plusieurs)
