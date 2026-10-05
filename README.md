@@ -64,8 +64,7 @@ GitLab, migration SonarQube).
 
 Traefik (`compose/proxy.yml`) est le seul point d'entrée web : il publie le port 80 et route chaque
 requête vers le service dont le hostname correspond (`*_HOSTNAME`). Aucun autre service web ne publie de
-port ; seuls restent publiés le SSH de GitLab (`GITLAB_SSH_PORT`) et le tunnel des agents Edge de
-Portainer (`PORTAINER_EDGE_PORT`). `make verify` contrôle cette liste.
+port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
 
 | Service | URL locale par défaut | Variable |
 |---|---|---|
@@ -86,6 +85,26 @@ Portainer (`PORTAINER_EDGE_PORT`). `make verify` contrôle cette liste.
   trafic, identifiants compris, circule en HTTP sur le port 80 (Portainer n'est plus servi en HTTPS
   auto-signé sur 9443). Ne pas exposer l'instance hors d'un réseau maîtrisé d'ici là.
 
+### Surface d'exposition
+
+Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, avec le TLS : US 3-2 à 3-4) et le
+**SSH de GitLab** (`GITLAB_SSH_PORT`, défaut 2222). `make verify` contrôle, pour chaque
+`envs/*.env`, chaque couple port publié → port du conteneur contre cette liste blanche, et refuse tout
+`network_mode` `host`, `service:…` ou `container:…` (qui la contournerait).
+
+- **Bases de données et services internes.** `sonarqube-db` (PostgreSQL) et Loki ne publient aucun
+  port : ils ne sont joignables que depuis le réseau Docker de la plateforme. Le PostgreSQL et le Redis
+  embarqués de GitLab écoutent sur des sockets Unix internes au conteneur. Limite connue : le réseau
+  de la plateforme est partagé avec les jobs CI, qui peuvent donc les atteindre (#71).
+- **Portainer.** Le compte `admin` est créé dès le premier démarrage avec `PORTAINER_ADMIN_PASSWORD`
+  (secret Compose, absent de `docker compose config` et de `docker inspect`) : aucun visiteur ne peut
+  s'approprier l'instance avant l'opérateur. Ce mot de passe n'est appliqué qu'au premier démarrage
+  (le changer ensuite dans l'interface) ; `make check-env` exige 12 caractères au moins. Le tunnel des
+  agents Edge (port 8000) n'est pas proposé. ⚠️ Portainer monte le socket Docker : un administrateur
+  Portainer est de fait `root` sur l'hôte.
+- **Grafana.** Authentification obligatoire : accès anonyme, inscription et création d'organisation
+  désactivés, ainsi que les dashboards partagés publiquement et les snapshots (consultables sans compte).
+
 > ⚠️ `make bootstrap-legacy` est **temporaire** : il reprend les scripts `setup-*.sh` de Software
 > Factory (`scripts/legacy/`), qui créent des **données de test** (projet `factory-test`, pipeline,
 > analyse SonarQube). Il est réservé à `ENV=local` (`FORCER=1` pour passer outre) et sera remplacé
@@ -104,7 +123,7 @@ inventer ni à copier :
 | `TLS_MODE` (`letsencrypt`, `custom`, `none`) | `none` pour un domaine local (`localhost`, `*.localhost`), sinon `letsencrypt` |
 | Profil de dimensionnement | `medium` |
 
-- **Mots de passe** (root GitLab, base et admin SonarQube, admin Grafana) : 24 caractères aléatoires
+- **Mots de passe** (root GitLab, base et admin SonarQube, admin Grafana, admin Portainer) : 24 caractères aléatoires
   avec majuscule, minuscule, chiffre et caractère spécial (règles SonarQube), sans caractère
   problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
 - **Fichier** en permissions `600`, écrit de façon atomique.
@@ -118,8 +137,9 @@ sauvegardé dans `envs/<env>.env.bak.<date>` (600, non versionné, jamais écras
 proposées par défaut et **ses secrets sont repris**. Les autres réglages (ports SSH, versions, réseau…)
 repartent du modèle : les reprendre depuis la sauvegarde si besoin.
 `FORCE=1 NOUVEAUX_MDP=1` régénère aussi les secrets : à réserver à une instance jamais déployée ou à
-réinstaller, car le mot de passe PostgreSQL de SonarQube est inscrit dans son volume et le mot de
-passe root GitLab n'est appliqué qu'au premier démarrage. `FORCE` et `NOUVEAUX_MDP` ne sont acceptés
+réinstaller, car le mot de passe PostgreSQL de SonarQube est inscrit dans son volume et les mots de
+passe root GitLab et admin Portainer ne sont appliqués qu'au premier démarrage. Un secret absent de
+l'ancien fichier (variable ajoutée depuis) est généré et signalé. `FORCE` et `NOUVEAUX_MDP` ne sont acceptés
 que sur la ligne de commande, jamais hérités du shell.
 
 ## Profils de dimensionnement
