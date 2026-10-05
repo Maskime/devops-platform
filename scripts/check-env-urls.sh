@@ -4,7 +4,9 @@
 #   - chaque URL publique (*_EXTERNAL_URL) désigne le hostname routé par Traefik pour ce service
 #     (*_HOSTNAME), sans port, en http:// en mode none (Traefik n'y sert que le port 80) : sinon liens,
 #     redirections et appels des scripts aboutissent à un 404 du proxy ou à un port non publié ;
-#   - TLS_MODE=none avec un hostname non local : avertissement (HTTP clair), non bloquant.
+#   - TLS_MODE=letsencrypt ou custom avec GITLAB_EXTERNAL_URL en http:// : avertissement, non bloquant ;
+#   - TLS_MODE=none avec un hostname non local : avertissement (HTTP clair), non bloquant ;
+#   - GITLAB_SSH_PORT : entier de 1 à 65535, hors 80 et 443 (ports de Traefik) ; 22 signalé.
 #
 # Usage : scripts/check-env-urls.sh <fichier env>
 # Valeur effective, comme Compose : variable du shell prioritaire, sinon dernière affectation du
@@ -58,6 +60,11 @@ for service in gitlab sonarqube grafana; do
   url="$(valeur_effective "$cle_url")"
   # URL absente : défaut compose dérivé du hostname (et du TLS_MODE pour GitLab, compose/gitlab.yml)
   [[ -n "$url" ]] || continue
+  # GitLab seul dérive son URL en https:// (SonarQube et Grafana : #78)
+  if [[ "$service" == gitlab && "$tls_mode" != none && "$url" == http://* ]]; then
+    echo "Attention : $cle_url=$url reste en http:// en TLS_MODE=$tls_mode (liens, clone et runner en HTTP)." >&2
+    echo "  Commenter la ligne dans $fichier pour l'URL dérivée en https://, sauf HTTPS non encore servi." >&2
+  fi
   hote="$(valeur_effective "$cle_hote")"
   hote="${hote:-$service.localhost}"
   # Mode none : HTTP seul (port 80) ; autres modes : schéma de l'URL conservé
@@ -77,8 +84,20 @@ for service in gitlab sonarqube grafana; do
   erreurs=1
 done
 
+# Port SSH de GitLab : publié par Compose et lu en base 10 par GitLab (URLs de clone) ; un zéro en tête
+# ou une valeur non numérique les ferait diverger, 80 et 443 sont pris par Traefik
+port_ssh="$(valeur_effective GITLAB_SSH_PORT)"
+port_ssh="${port_ssh:-2222}"
+if [[ ! "$port_ssh" =~ ^[1-9][0-9]{0,4}$ ]] || ((port_ssh > 65535)) || ((port_ssh == 80 || port_ssh == 443)); then
+  echo "GITLAB_SSH_PORT invalide : $port_ssh (entier de 1 à 65535, sans zéro en tête, hors 80 et 443)." >&2
+  echo "  Corriger dans $fichier : GITLAB_SSH_PORT=2222" >&2
+  erreurs=1
+elif ((port_ssh == 22)); then
+  echo "Attention : GITLAB_SSH_PORT=22 entre en conflit avec le sshd de l'hôte s'il écoute sur ce port." >&2
+fi
+
 if ((erreurs)); then
-  echo "URL(s) publique(s) incohérente(s) avec les hostnames de $fichier (voir ci-dessus)." >&2
+  echo "Exposition incohérente dans $fichier (voir ci-dessus)." >&2
   exit 1
 fi
 
