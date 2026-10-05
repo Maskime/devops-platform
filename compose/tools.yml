@@ -56,5 +56,9 @@ networks:
     name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
 
+# Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
+# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml et le filtre de
+# config/promtail/promtail-config.yaml.
 volumes:
   portainer_data:
+    name: devops-platform_portainer_data
