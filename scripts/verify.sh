@@ -133,6 +133,12 @@ fi
 section "ports publiés"
 # traefik:443:443 : HTTPS (TLS_MODE custom ou letsencrypt, overlay compose/tls/<mode>.yml)
 PORTS_AUTORISES=(traefik:80:80 traefik:443:443 'gitlab:*:22')
+# Configuration résolue d'une cible <fichier env>[|<TLS_MODE imposé>] (sections 3 quater et quinquies)
+config_cible() {
+  local env_file="${1%%|*}" variables=()
+  [[ "$1" == *"|"* ]] && variables=(TLS_MODE="${1#*|}" "${VARS_MODE_TLS[@]}")
+  env "${variables[@]}" docker compose --env-file "$env_file" -f compose.yml config 2>/dev/null
+}
 port_autorise() { # <service:publié:cible>
   local a
   for a in "${PORTS_AUTORISES[@]}"; do
@@ -150,8 +156,7 @@ if [[ -f compose.yml ]]; then
     [[ "$cible" == *"|"* ]] && mode="${cible#*|}" f="$f, TLS_MODE=$mode"
     # Sortie normalisée : service à 2 espaces, `ports:` / `network_mode:` à 4, éléments `- ` à 6,
     # champs `target:` / `published:` à 8
-    if ! config="$(if [[ -n "$mode" ]]; then export TLS_MODE="$mode" "${VARS_MODE_TLS[@]}"; fi
-                   docker compose --env-file "${cible%%|*}" -f compose.yml config 2>/dev/null)"; then
+    if ! config="$(config_cible "$cible")"; then
       ko "$f : configuration illisible"; continue
     fi
     mapfile -t publies < <(awk '
@@ -184,6 +189,81 @@ if [[ -f compose.yml ]]; then
       ko "$f : exposition hors liste autorisée (${PORTS_AUTORISES[*]}) : ${interdits[*]}"
     else
       ok "$f : ${publies[*]}"
+    fi
+  done
+else
+  ok "pas encore de compose.yml"
+fi
+
+# 3 quinquies. Accès au socket Docker : seuls le proxy filtrant (socket-proxy) et les services hors
+#              périmètre (gitlab-runner, portainer) montent un socket Docker (cible ou source
+#              contenant docker.sock, ou /run, /var/run, /run/user/<uid> entiers). Le réseau dédié
+#              socket-proxy est interne, réservé au proxy et à ses clients (traefik, promtail), et
+#              le proxy n'est sur aucun autre réseau. Mêmes cibles que la section précédente.
+section "accès au socket Docker"
+SOCKET_AUTORISES=(gitlab-runner portainer socket-proxy)
+CLIENTS_PROXY=(socket-proxy traefik promtail)
+dans_liste() { # <valeur> <éléments…>
+  local v="$1" e; shift
+  for e in "$@"; do [[ "$e" == "$v" ]] && return 0; done
+  return 1
+}
+if [[ -f compose.yml ]]; then
+  for cible in "${cibles[@]}"; do
+    f="${cible%%|*}" mode=""
+    [[ "$cible" == *"|"* ]] && mode="${cible#*|}" f="$f, TLS_MODE=$mode"
+    if ! config="$(config_cible "$cible")"; then
+      ko "$f : configuration illisible"; continue
+    fi
+    # Montages (service:source:cible) et réseaux (service:clé) des services ; réseau socket-proxy
+    # déclaré interne. Sortie normalisée : clés de service à 4 espaces, éléments à 6, champs à 8.
+    mapfile -t montages < <(awk '
+      function sortir() { if (src != "" || dst != "") print service ":" src ":" dst; src = dst = "" }
+      /^[^ ]/ { sortir(); dans_services = ($0 == "services:"); dans_vol = 0; next }
+      !dans_services { next }
+      /^  [^ ]/ { sortir(); service = $1; sub(/:$/, "", service); dans_vol = 0; next }
+      /^    [^ ]/ { sortir(); dans_vol = ($1 == "volumes:"); next }
+      dans_vol && /^      - / { sortir() }
+      dans_vol && /^ +(- )?source:/ { src = $NF }
+      dans_vol && /^ +(- )?target:/ { dst = $NF }
+      END { sortir() }
+    ' <<< "$config")
+    mapfile -t reseaux < <(awk '
+      /^[^ ]/ { dans_services = ($0 == "services:"); dans_net = 0; next }
+      !dans_services { next }
+      /^  [^ ]/ { service = $1; sub(/:$/, "", service); dans_net = 0; next }
+      /^    [^ ]/ { dans_net = ($1 == "networks:"); next }
+      dans_net && /^      [^ -]/ { r = $1; sub(/:$/, "", r); print service ":" r }
+    ' <<< "$config")
+    interne="$(awk '
+      /^[^ ]/ { dans = ($0 == "networks:"); next }
+      dans && /^  [^ ]/ { reseau = $1; next }
+      dans && reseau == "socket-proxy:" && /^    internal: true$/ { print "oui" }
+    ' <<< "$config")"
+    if ((${#montages[@]} == 0 || ${#reseaux[@]} == 0)); then
+      ko "$f : aucun montage ou réseau lu (format de docker compose config inattendu ?)"; continue
+    fi
+    interdits=()
+    for m in "${montages[@]}"; do
+      s="${m%%:*}" reste="${m#*:}" src="${reste%%:*}" dst="${reste#*:}"
+      if [[ "$src" == *docker.sock* || "$dst" == *docker.sock* || "$src" =~ ^/(var/)?run/?$ \
+            || "$src" =~ ^/run/user/[0-9]+/?$ ]]; then
+        dans_liste "$s" "${SOCKET_AUTORISES[@]}" || interdits+=("socket monté par $s ($src)")
+      fi
+    done
+    for r in "${reseaux[@]}"; do
+      s="${r%%:*}" n="${r#*:}"
+      if [[ "$n" == socket-proxy ]]; then
+        dans_liste "$s" "${CLIENTS_PROXY[@]}" || interdits+=("$s sur le réseau socket-proxy")
+      elif [[ "$s" == socket-proxy ]]; then
+        interdits+=("socket-proxy sur le réseau $n")
+      fi
+    done
+    [[ "$interne" == oui ]] || interdits+=("réseau socket-proxy absent ou non interne")
+    if ((${#interdits[@]})); then
+      ko "$f : $(printf '%s ; ' "${interdits[@]}" | sed 's/ ; $//')"
+    else
+      ok "$f : socket monté par ${SOCKET_AUTORISES[*]} au plus ; réseau socket-proxy interne (${CLIENTS_PROXY[*]})"
     fi
   done
 else
