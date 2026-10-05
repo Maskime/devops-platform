@@ -42,6 +42,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - Profils de dimensionnement `PLATFORM_PROFILE` (`small`, `medium`, `large` ; défaut `medium`) :
   `config/profiles/<profil>.env` règle Puma, Sidekiq et le PostgreSQL embarqué de GitLab, ainsi que
   les heaps JVM de SonarQube. `make check-env` valide le profil, `make verify` contrôle les profils.
+- Rétention des logs Loki : le compacteur purge les logs au-delà de `LOKI_RETENTION_PERIOD`
+  (défaut 744h, soit 31 jours ; `0s` = illimitée), purge effective de l'ordre de 4h après l'échéance.
+  `scripts/check-loki-config.sh`, appelé par `make check-env` et `make verify`, refuse une durée mal
+  formée ou inférieure à 24h et valide la configuration résolue avec `loki -verify-config`
+  (`make verify` télécharge désormais l'image Loki).
 
 ### Modifié
 
@@ -69,6 +74,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - Volumes nommés explicitement (`devops-platform_<volume>`), sous le nom que leur donnait déjà
   Compose : données conservées, aucune migration. Conséquence : ne jamais lancer `up` sur un module
   seul ni sous un autre nom de projet (`-p`), les conteneurs créés partageraient les volumes de l'instance.
+- Loki lancé avec `-config.expand-env=true` ; API de suppression `/loki/api/v1/delete` désactivée.
+  Au prochain `make deploy`, une instance existante purge ses logs de plus de 31 jours (défaut) :
+  fixer `LOKI_RETENTION_PERIOD` avant pour les conserver. La première compaction d'un gros volume
+  `loki_data` peut générer un pic d'entrées/sorties disque.
 - `GITLAB_EXTERNAL_URL`, `GITLAB_ROOT_PASSWORD`, `SONARQUBE_DB_PASSWORD` et `GRAFANA_ADMIN_PASSWORD`
   sont obligatoires : `docker compose` refuse de démarrer sans elles.
 
