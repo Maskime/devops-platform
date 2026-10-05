@@ -63,7 +63,7 @@ services:
   # ---------------------------------------------------------------------------
   # Grafana — UI de visualisation des logs
   # Image grafana/grafana : grafana/grafana-oss n'est plus publiée depuis la 13.0.2
-  # URL : ${GRAFANA_EXTERNAL_URL} (défaut : http://localhost:${GRAFANA_PORT})
+  # URL : ${GRAFANA_EXTERNAL_URL} (défaut : http://${GRAFANA_HOSTNAME}), servie par Traefik
   # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION:-13.2.3}
@@ -73,10 +73,13 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD obligatoire (voir envs/.env.example)}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SERVER_HTTP_PORT: "3000"
-      GF_SERVER_ROOT_URL: ${GRAFANA_EXTERNAL_URL:-http://localhost:${GRAFANA_PORT:-3100}}
+      GF_SERVER_ROOT_URL: ${GRAFANA_EXTERNAL_URL:-http://${GRAFANA_HOSTNAME:-grafana.localhost}}
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
-    ports:
-      - "${GRAFANA_PORT:-3100}:3000"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.grafana.rule: Host(`${GRAFANA_HOSTNAME:-grafana.localhost}`)
+      traefik.http.routers.grafana.entrypoints: web
+      traefik.http.services.grafana.loadbalancer.server.port: "3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ../config/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -99,8 +102,8 @@ networks:
     driver: bridge
 
 # Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
-# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml et le filtre de
-# config/promtail/promtail-config.yaml.
+# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml, le filtre de
+# config/promtail/promtail-config.yaml et la contrainte du provider Docker de compose/proxy.yml.
 volumes:
   loki_data:
     name: devops-platform_loki_data

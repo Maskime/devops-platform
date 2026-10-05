@@ -18,7 +18,7 @@ charger_env
 
 TEST_SRC_DIR="$ROOT/scripts/legacy/sonarqube-test"
 SCANNER_IMAGE="sonarsource/sonar-scanner-cli:12.2.0.4256_8.1.0"
-SONARQUBE_URL="${SONARQUBE_EXTERNAL_URL:-http://localhost:${SONARQUBE_PORT:-9000}}"
+SONARQUBE_URL="${SONARQUBE_EXTERNAL_URL:-http://${SONARQUBE_HOSTNAME:-sonarqube.localhost}}"
 ADMIN_PASSWORD="${SONARQUBE_ADMIN_PASSWORD:-}"
 PROJECT_KEY="${SONARQUBE_TEST_PROJECT_KEY:-factory-test}"
 

@@ -6,6 +6,7 @@
 #   compose/sonarqube.yml      sonarqube, sonarqube-db
 #   compose/observability.yml  loki, promtail, grafana
 #   compose/tools.yml          portainer, plantuml
+#   compose/proxy.yml          traefik (reverse proxy : seul point d'entrée HTTP, routage par hostname)
 #
 # Toujours piloter la plateforme depuis ce fichier, avec le fichier d'environnement de l'instance :
 #   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
@@ -26,3 +27,4 @@ include:
   - compose/sonarqube.yml
   - compose/observability.yml
   - compose/tools.yml
+  - compose/proxy.yml

@@ -20,7 +20,7 @@ services:
         gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD:?GITLAB_ROOT_PASSWORD obligatoire (voir envs/.env.example)}'
         # Port SSH publié sur l'hôte, affiché dans les URLs de clone
         gitlab_rails['gitlab_shell_ssh_port'] = ${GITLAB_SSH_PORT:-2222}
-        # Écoute interne fixe sur 80, quel que soit le port porté par external_url (publié via GITLAB_HTTP_PORT)
+        # Écoute interne fixe sur 80 (HTTP), servie par Traefik sur GITLAB_HOSTNAME
         nginx['listen_port'] = 80
 
         # Dimensionnement : valeurs du profil (config/profiles/<profil>.env, injecté par env_file)
@@ -34,9 +34,14 @@ services:
         # Désactive les services de monitoring intégrés
         prometheus_monitoring['enable'] = false
         alertmanager['enable'] = false
+    # Seul le SSH est publié : l'interface web passe par Traefik (compose/proxy.yml)
     ports:
-      - "${GITLAB_HTTP_PORT:-80}:80"
       - "${GITLAB_SSH_PORT:-2222}:22"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.gitlab.rule: Host(`${GITLAB_HOSTNAME:-gitlab.localhost}`)
+      traefik.http.routers.gitlab.entrypoints: web
+      traefik.http.services.gitlab.loadbalancer.server.port: "80"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost/-/health"]
       interval: 30s
@@ -81,8 +86,8 @@ networks:
     driver: bridge
 
 # Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
-# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml et le filtre de
-# config/promtail/promtail-config.yaml.
+# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml, le filtre de
+# config/promtail/promtail-config.yaml et la contrainte du provider Docker de compose/proxy.yml.
 volumes:
   gitlab_config:
     name: devops-platform_gitlab_config

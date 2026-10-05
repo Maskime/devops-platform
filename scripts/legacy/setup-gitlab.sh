@@ -19,7 +19,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 charger_env
 
-GITLAB_URL="${GITLAB_EXTERNAL_URL:-http://localhost}"
+GITLAB_URL="${GITLAB_EXTERNAL_URL:-http://${GITLAB_HOSTNAME:-gitlab.localhost}}"
 GITLAB_INTERNAL_URL="http://gitlab"   # URL inter-conteneurs (nom de service Docker)
 TEST_PROJECT_NAME="${GITLAB_TEST_PROJECT_NAME:-factory-test}"
 RUNNER_IMAGE="alpine:3.24.2"
