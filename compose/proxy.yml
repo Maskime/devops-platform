@@ -1,0 +1,60 @@
+# =============================================================================
+# Brique proxy : point d'entrée HTTP unique de la plateforme
+# Inclus par compose.yml ; lancé seul, il est refusé par le garde-fou ci-dessous (voir l'en-tête
+# de compose.yml).
+# =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-proxy: "${PLATFORM_GARDE_FOU:?compose/proxy.yml est un module de compose.yml et ne se lance pas seul (conteneurs en double sur les volumes de l'instance) : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Traefik — reverse proxy, routage par hostname (*_HOSTNAME de l'instance)
+  # Seul service web à publier un port sur l'hôte. Les services exposés le déclarent par leurs
+  # labels traefik.* (traefik.enable=true, règle Host(`<hostname>`), port interne).
+  # HTTP seul sur 80 ; HTTPS (443) et TLS_MODE : US 3-2, 3-3 et 3-4.
+  # ---------------------------------------------------------------------------
+  traefik:
+    image: traefik:${TRAEFIK_VERSION:-v3.7.13}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --entrypoints.web.address=:80
+      # Supprime les en-têtes alias (X_Forwarded_For…) : nginx (GitLab) les lirait comme les en-têtes
+      # posés par Traefik, ce qui permettrait à un client de les usurper
+      - --entrypoints.web.http.aliasheadersstrategy=delete
+      # Seuls les conteneurs marqués traefik.enable=true sont exposés
+      - --providers.docker.exposedbydefault=false
+      # Réseau par lequel joindre les services (requis dès qu'un conteneur en a plusieurs)
+      - --providers.docker.network=${PLATFORM_NETWORK:-devops-platform}
+      # Ignore les conteneurs hors projet (jobs CI lancés sur le même réseau). Nom de projet en dur :
+      # le changer impose de modifier aussi `name:` dans compose.yml et compose/projet-autorise/.
+      - '--providers.docker.constraints=Label(`com.docker.compose.project`,`devops-platform`)'
+      # Sonde de santé sur l'entrypoint interne par défaut `traefik` (:8080, non publié) : ne pas
+      # redéfinir cet entrypoint, `traefik healthcheck` suppose sa valeur par défaut.
+      # Aucune option --api.* : l'API et le dashboard restent désactivés.
+      - --ping=true
+      # Logs d'accès sur la sortie standard, collectés par promtail
+      - --accesslog=true
+      - --log.level=INFO
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+    ports:
+      - "80:80"
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - platform
+
+# Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
+networks:
+  platform:
+    name: ${PLATFORM_NETWORK:-devops-platform}
+    driver: bridge

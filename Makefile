@@ -75,6 +75,7 @@ check-env: check-env-name
 	if [[ -n "$${PLATFORM_PROFILE+x}" ]]; then \
 	  echo "Attention : PLATFORM_PROFILE=$$profil vient du shell et remplace la valeur de $(ENV_FILE)." >&2; \
 	fi
+	@scripts/check-env-urls.sh "$(ENV_FILE)"
 	@$(COMPOSE) config -q || { echo "Configuration invalide pour $(ENV_FILE) (voir ci-dessus)." >&2; exit 1; }
 	@scripts/check-loki-config.sh "$(ENV_FILE)" >/dev/null
 

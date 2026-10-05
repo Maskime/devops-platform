@@ -181,12 +181,11 @@ for s in "${services[@]}"; do
   valeurs[${s^^}_HOSTNAME]="${hostnames[$s]}"
 done
 
-# URLs publiques consommées aujourd'hui : http:// et ports par défaut quel que soit TLS_MODE, tant
-# que le reverse proxy n'existe pas (épopée 3). En local, localhost (même hôte, ports distincts).
-url_hote() { if est_local "$domaine"; then echo localhost; else echo "${hostnames[$1]}"; fi; }
-valeurs[GITLAB_EXTERNAL_URL]="http://$(url_hote gitlab)"
-valeurs[SONARQUBE_EXTERNAL_URL]="http://$(url_hote sonarqube):9000"
-valeurs[GRAFANA_EXTERNAL_URL]="http://$(url_hote grafana):3100"
+# URLs publiques : hostname du service, servi par Traefik sur le port 80 (contrôlé par
+# scripts/check-env-urls.sh). http:// quel que soit TLS_MODE tant que le TLS n'est pas livré (US 3-2 à 3-4).
+valeurs[GITLAB_EXTERNAL_URL]="http://${hostnames[gitlab]}"
+valeurs[SONARQUBE_EXTERNAL_URL]="http://${hostnames[sonarqube]}"
+valeurs[GRAFANA_EXTERNAL_URL]="http://${hostnames[grafana]}"
 
 # --- Écriture ----------------------------------------------------------------
 
@@ -268,8 +267,22 @@ if ((existant)) && [[ "$NOUVEAUX_MDP" == 1 ]]; then
 fi
 if [[ "$tls_mode" != none ]]; then
   echo
-  echo "Note : TLS_MODE=$tls_mode n'a pas encore d'effet (reverse proxy et TLS : épopée 3) ;"
-  echo "les URLs publiques restent en http:// sur les ports par défaut."
+  echo "Note : TLS_MODE=$tls_mode n'a pas encore d'effet (TLS : US 3-2 et 3-3) : les services sont"
+  echo "servis en HTTP clair sur le port 80, identifiants compris. Ne pas exposer l'instance hors"
+  echo "d'un réseau maîtrisé d'ici là."
+fi
+# *.localhost : résolu par les navigateurs et curl, pas toujours par le système (git, wget…)
+non_resolus=()
+for s in "${services[@]}"; do
+  if est_local "${hostnames[$s]}" && ! getent hosts "${hostnames[$s]}" > /dev/null 2>&1; then
+    non_resolus+=("${hostnames[$s]}")
+  fi
+done
+if ((${#non_resolus[@]})); then
+  echo
+  echo "Note : ces hostnames ne sont pas résolus par le système (seuls les navigateurs et curl les"
+  echo "résolvent d'eux-mêmes). Pour git et les autres outils, ajouter à /etc/hosts :"
+  echo "  127.0.0.1 ${non_resolus[*]}"
 fi
 echo
 echo "Étape suivante : make deploy ENV=$env_nom"

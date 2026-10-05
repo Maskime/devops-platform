@@ -10,7 +10,8 @@ services:
 
   # ---------------------------------------------------------------------------
   # Portainer CE — gestion des conteneurs (UI web)
-  # UI HTTPS : https://localhost:${PORTAINER_PORT}  |  Edge agent tunnel : ${PORTAINER_EDGE_PORT}
+  # UI : http://${PORTAINER_HOSTNAME}, servie par Traefik (HTTP interne 9000 ; 9443 non utilisé)
+  # Tunnel des agents Edge : port ${PORTAINER_EDGE_PORT} publié (non web)
   # Variante -alpine (même version) : l'image standard ne contient aucun shell ni client HTTP,
   # ce qui interdit tout healthcheck.
   # ---------------------------------------------------------------------------
@@ -21,7 +22,11 @@ services:
       - no-new-privileges:true
     ports:
       - "${PORTAINER_EDGE_PORT:-8000}:8000"
-      - "${PORTAINER_PORT:-9443}:9443"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.portainer.rule: Host(`${PORTAINER_HOSTNAME:-portainer.localhost}`)
+      traefik.http.routers.portainer.entrypoints: web
+      traefik.http.services.portainer.loadbalancer.server.port: "9000"
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - portainer_data:/data
@@ -36,15 +41,18 @@ services:
 
   # ---------------------------------------------------------------------------
   # PlantUML Server — génération de diagrammes PNG/SVG via HTTP
-  # URL : http://localhost:${PLANTUML_PORT}
+  # URL : http://${PLANTUML_HOSTNAME}, servie par Traefik
   # API : GET /png/<encoded> ou GET /svg/<encoded>
   # Interne : http://plantuml:8080
   # ---------------------------------------------------------------------------
   plantuml:
     image: plantuml/plantuml-server:${PLANTUML_VERSION:-jetty-v1.2026.8}
     restart: unless-stopped
-    ports:
-      - "${PLANTUML_PORT:-8081}:8080"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.plantuml.rule: Host(`${PLANTUML_HOSTNAME:-plantuml.localhost}`)
+      traefik.http.routers.plantuml.entrypoints: web
+      traefik.http.services.plantuml.loadbalancer.server.port: "8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
       interval: 10s
@@ -62,7 +70,8 @@ networks:
 
 # Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
 # le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml, le filtre de
-# config/promtail/promtail-config.yaml et le nom du fichier compose/projet-autorise/<projet>.env.
+# config/promtail/promtail-config.yaml, le nom du fichier compose/projet-autorise/<projet>.env et
+# la contrainte du provider Docker de compose/proxy.yml.
 volumes:
   portainer_data:
     name: devops-platform_portainer_data

@@ -9,6 +9,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Reverse proxy Traefik (`compose/proxy.yml`, `traefik:v3.7.13`, variable `TRAEFIK_VERSION`) : seul
+  point d'entrée web, sur le port 80, routant GitLab, SonarQube, Grafana, Portainer et PlantUML selon
+  leur `*_HOSTNAME`. Provider Docker limité aux conteneurs du projet, API et dashboard désactivés,
+  logs d'accès collectés par promtail. HTTP seul : TLS à venir (US 3-2 à 3-4).
+- `make check-env` (donc `deploy` et `bootstrap-legacy`) refuse une `*_EXTERNAL_URL` dont l'hôte
+  diffère du `*_HOSTNAME` du service ou qui porte un port (`scripts/check-env-urls.sh`).
+- `make verify` contrôle les ports publiés : seuls Traefik (80), le SSH GitLab et le tunnel Edge
+  Portainer sont autorisés.
+- `make init` signale les hostnames `*.localhost` non résolus par le système et la ligne
+  `/etc/hosts` à ajouter.
 - Garde-fou contre les lancements en double : un module `compose/<module>.yml` lancé seul ou la
   plateforme lancée sous un autre nom de projet (`-p`) est refusé par Compose dès le chargement, avant
   tout conteneur (`PLATFORM_GARDE_FOU`, `compose/projet-autorise/`). `make deploy` refuse en outre de
@@ -55,6 +65,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Modifié
 
+- **Services web derrière Traefik** : GitLab, SonarQube, Grafana, Portainer et PlantUML ne publient
+  plus de port sur l'hôte ; ils sont servis sur `http://<hostname>` (défaut `<service>.localhost`).
+  Portainer est servi en HTTP (port interne 9000) au lieu de HTTPS auto-signé sur 9443.
+  URLs publiques par défaut (modèle, `make init`, scripts legacy) : `http://<hostname>`.
+  **Migration d'une instance existante** : corriger dans `envs/<env>.env` les URLs générées avant
+  le proxy (`GITLAB_EXTERNAL_URL=http://localhost`, `SONARQUBE_EXTERNAL_URL=http://localhost:9000`,
+  `GRAFANA_EXTERNAL_URL=http://localhost:3100`) en `http://<hostname du service>` — `make deploy`
+  l'exige et indique les lignes —, ajouter si besoin les hostnames `*.localhost` à `/etc/hosts`,
+  puis `make deploy` (services web recréés, volumes conservés).
 - Outillage Claude Code migré en skills (`.claude/skills/`) : `implement-us`, `plan-epic`,
   `launch-wave` et `github`, qui embarque les scripts d'accès à GitHub et de suivi des US.
   `.claude/commands/`, `.claude/scripts/` et `.claude/workflows/` disparaissent.
@@ -85,6 +104,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   `loki_data` peut générer un pic d'entrées/sorties disque.
 - `GITLAB_EXTERNAL_URL`, `GITLAB_ROOT_PASSWORD`, `SONARQUBE_DB_PASSWORD` et `GRAFANA_ADMIN_PASSWORD`
   sont obligatoires : `docker compose` refuse de démarrer sans elles.
+
+### Supprimé
+
+- Variables de port web `GITLAB_HTTP_PORT`, `SONARQUBE_PORT`, `GRAFANA_PORT`, `PORTAINER_PORT` et
+  `PLANTUML_PORT` (ignorées si encore présentes dans un `envs/<env>.env`).
 
 ### Corrigé
 

@@ -98,6 +98,40 @@ else
   ok "pas encore de compose.yml"
 fi
 
+# 3 quater. Ports publiés : le web passe par Traefik (routage par hostname), aucun autre service web
+#           ne publie de port. Liste blanche service:port cible, contrôlée pour chaque environnement.
+section "ports publiés"
+PORTS_AUTORISES=(traefik:80 gitlab:22 portainer:8000)
+if [[ -f compose.yml ]]; then
+  for f in "${env_files[@]}"; do
+    # Sortie normalisée : blocs `ports:` (4 espaces) d'un service (2 espaces), `target:` à 8 espaces
+    if ! config="$(docker compose --env-file "$f" -f compose.yml config 2>/dev/null)"; then
+      ko "$f : configuration illisible"; continue
+    fi
+    mapfile -t publies < <(awk '
+      /^[^ ]/ { dans_services = ($0 == "services:"); next }
+      !dans_services { next }
+      /^  [^ ]/ { service = $1; sub(/:$/, "", service); dans_ports = 0; next }
+      /^    [^ ]/ { dans_ports = ($1 == "ports:"); next }
+      dans_ports && /^        target:/ { print service ":" $2 }
+    ' <<< "$config")
+    if ((${#publies[@]} == 0)); then
+      ko "$f : aucun port publié lu (format de docker compose config inattendu ?)"; continue
+    fi
+    interdits=()
+    for p in "${publies[@]}"; do
+      [[ " ${PORTS_AUTORISES[*]} " == *" $p "* ]] || interdits+=("$p")
+    done
+    if ((${#interdits[@]})); then
+      ko "$f : port(s) publié(s) hors liste autorisée (${PORTS_AUTORISES[*]}) : ${interdits[*]}"
+    else
+      ok "$f : ${publies[*]}"
+    fi
+  done
+else
+  ok "pas encore de compose.yml"
+fi
+
 # 4. Chaque variable interpolée par compose est documentée dans envs/.env.example
 #    ($${…} = échappement compose, ignoré ; minuscules = variables shell des healthchecks)
 section "variables documentées"

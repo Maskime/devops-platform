@@ -35,6 +35,7 @@ perte de données.
 | `grafana/promtail` | `PROMTAIL_VERSION` | déprécié, 3.6.x = dernière (#35) | [loki](https://github.com/grafana/loki/releases) |
 | `portainer/portainer-ce` | `PORTAINER_VERSION` | variante `-alpine` (healthcheck) | [portainer](https://github.com/portainer/portainer/releases) |
 | `plantuml/plantuml-server` | `PLANTUML_VERSION` | variante `jetty-` | [plantuml-server](https://github.com/plantuml/plantuml-server/releases) |
+| `traefik` | `TRAEFIK_VERSION` | ≥ 3.6.1 pour Docker Engine 29 ; préfixe `v` | [traefik](https://github.com/traefik/traefik/releases) |
 
 Images d'outillage, épinglées en dur dans les scripts (variables `*_IMAGE`, contrôlées par `make verify`) :
 
@@ -52,7 +53,7 @@ Les exemples se lancent depuis la racine du repo, avec :
 ```bash
 ENV=<env>
 dc() { docker compose --env-file "envs/$ENV.env" "$@"; }
-SONARQUBE_URL=http://localhost:9000   # SONARQUBE_EXTERNAL_URL de l'instance
+SONARQUBE_URL=http://sonarqube.localhost   # SONARQUBE_EXTERNAL_URL de l'instance
 ```
 
 1. **Choisir la version.** Dernière version stable de l'éditeur (Docker Hub, releases GitHub), en lisant

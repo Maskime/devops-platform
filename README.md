@@ -54,20 +54,37 @@ make deploy ENV=local                 # démarre tous les services et attend qu'
 make bootstrap-legacy ENV=local       # optionnel : bootstrap repris de Software Factory
 ```
 
-Toute la configuration de l'instance (ports, URLs, réseau, versions, secrets) tient dans
+Toute la configuration de l'instance (hostnames, URLs, réseau, versions, secrets) tient dans
 `envs/<env>.env` : chaque variable est documentée dans [`envs/.env.example`](envs/.env.example).
 Chaque image est épinglée sur une version précise (variables `*_VERSION`, jamais `latest`) ; pour en
 changer, suivre la [procédure de montée de version](docs/montee-de-version.md) (chemin de mise à jour
 GitLab, migration SonarQube).
-Les URLs locales par défaut :
 
-| Service | URL locale | Variable de port |
+## Exposition (reverse proxy Traefik)
+
+Traefik (`compose/proxy.yml`) est le seul point d'entrée web : il publie le port 80 et route chaque
+requête vers le service dont le hostname correspond (`*_HOSTNAME`). Aucun autre service web ne publie de
+port ; seuls restent publiés le SSH de GitLab (`GITLAB_SSH_PORT`) et le tunnel des agents Edge de
+Portainer (`PORTAINER_EDGE_PORT`). `make verify` contrôle cette liste.
+
+| Service | URL locale par défaut | Variable |
 |---|---|---|
-| GitLab | http://localhost (SSH : port 2222) | `GITLAB_HTTP_PORT`, `GITLAB_SSH_PORT` |
-| SonarQube | http://localhost:9000 | `SONARQUBE_PORT` |
-| Grafana | http://localhost:3100 | `GRAFANA_PORT` |
-| Portainer | https://localhost:9443 | `PORTAINER_PORT` |
-| PlantUML | http://localhost:8081 | `PLANTUML_PORT` |
+| GitLab | http://gitlab.localhost (SSH : port 2222) | `GITLAB_HOSTNAME`, `GITLAB_SSH_PORT` |
+| SonarQube | http://sonarqube.localhost | `SONARQUBE_HOSTNAME` |
+| Grafana | http://grafana.localhost | `GRAFANA_HOSTNAME` |
+| Portainer | http://portainer.localhost | `PORTAINER_HOSTNAME` |
+| PlantUML | http://plantuml.localhost | `PLANTUML_HOSTNAME` |
+
+- **Résolution des noms.** Sur un serveur, chaque hostname doit pointer vers lui (DNS). En local,
+  `*.localhost` est résolu vers `127.0.0.1` par les navigateurs et curl, mais pas toujours par le
+  système (git, wget…) : `make init` le détecte et indique la ligne à ajouter à `/etc/hosts`
+  (`127.0.0.1 gitlab.localhost sonarqube.localhost grafana.localhost portainer.localhost plantuml.localhost`).
+- **URLs publiques.** L'hôte de `GITLAB_EXTERNAL_URL`, `SONARQUBE_EXTERNAL_URL` et
+  `GRAFANA_EXTERNAL_URL` doit être le hostname du service, sans port : `make deploy` (cible
+  `check-env`) refuse une URL incohérente et indique la ligne à corriger.
+- **HTTP clair.** Tant que le TLS n'est pas livré (US 3-2 à 3-4), `TLS_MODE` est sans effet : tout le
+  trafic, identifiants compris, circule en HTTP sur le port 80 (Portainer n'est plus servi en HTTPS
+  auto-signé sur 9443). Ne pas exposer l'instance hors d'un réseau maîtrisé d'ici là.
 
 > ⚠️ `make bootstrap-legacy` est **temporaire** : il reprend les scripts `setup-*.sh` de Software
 > Factory (`scripts/legacy/`), qui créent des **données de test** (projet `factory-test`, pipeline,
@@ -91,15 +108,14 @@ inventer ni à copier :
   avec majuscule, minuscule, chiffre et caractère spécial (règles SonarQube), sans caractère
   problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
 - **Fichier** en permissions `600`, écrit de façon atomique.
-- **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames, en `http://` sur les ports par défaut
-  (`localhost` pour un domaine local). `TLS_MODE` et les hostnames n'ont pas encore d'effet : ils
-  seront consommés par le reverse proxy (épopée 3).
+- **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames : `http://<hostname>`, servies par
+  Traefik sur le port 80. `TLS_MODE` n'a pas encore d'effet (TLS : US 3-2 à 3-4).
 - **Sans terminal** (`make init ENV=<env> < /dev/null`, ou réponses passées sur l'entrée standard),
   une réponse vide prend la valeur par défaut et une réponse invalide arrête la commande.
 
 **Fichier existant.** `make init` refuse de l'écraser. `FORCE=1` le régénère : l'ancien fichier est
 sauvegardé dans `envs/<env>.env.bak.<date>` (600, non versionné, jamais écrasé), ses réponses sont
-proposées par défaut et **ses secrets sont repris**. Les autres réglages (ports, versions, réseau…)
+proposées par défaut et **ses secrets sont repris**. Les autres réglages (ports SSH, versions, réseau…)
 repartent du modèle : les reprendre depuis la sauvegarde si besoin.
 `FORCE=1 NOUVEAUX_MDP=1` régénère aussi les secrets : à réserver à une instance jamais déployée ou à
 réinstaller, car le mot de passe PostgreSQL de SonarQube est inscrit dans son volume et le mot de
