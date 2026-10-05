@@ -7,9 +7,11 @@ services:
   # ---------------------------------------------------------------------------
   # Portainer CE — gestion des conteneurs (UI web)
   # UI HTTPS : https://localhost:9443  |  Edge agent tunnel : 8000
+  # Variante -alpine (même version) : l'image standard ne contient aucun shell ni client HTTP,
+  # ce qui interdit tout healthcheck.
   # ---------------------------------------------------------------------------
   portainer:
-    image: portainer/portainer-ce:2.45.1
+    image: portainer/portainer-ce:2.45.1-alpine
     container_name: portainer
     restart: unless-stopped
     security_opt:
@@ -20,6 +22,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portainer_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/api/system/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - factory-network
 

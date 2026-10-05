@@ -53,9 +53,18 @@ services:
     image: gitlab/gitlab-runner:v19.4.1
     container_name: gitlab-runner
     restart: always
+    environment:
+      # Serveur de métriques interne (sans publication de port) : sert de sonde de santé
+      LISTEN_ADDRESS: ":9252"
     volumes:
       - gitlab_runner_config:/etc/gitlab-runner
       - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "-o", "/dev/null", "http://localhost:9252/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - factory-network
     depends_on:
