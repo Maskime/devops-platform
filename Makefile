@@ -21,7 +21,7 @@ help: ## Affiche cette aide
 	@awk 'BEGIN { FS = ":.*## " } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-18s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 verify: ## Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis)
-	@.claude/scripts/verify.sh
+	@scripts/verify.sh
 
 check-secrets: ## Recherche de secrets dans le dépôt (fichiers suivis et non suivis non ignorés)
 	@scripts/check-secrets.sh

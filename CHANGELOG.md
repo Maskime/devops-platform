@@ -29,6 +29,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Modifié
 
+- Outillage Claude Code migré en skills (`.claude/skills/`) : `implement-us`, `plan-epic`,
+  `launch-wave` et `github`, qui embarque les scripts d'accès à GitHub et de suivi des US.
+  `.claude/commands/`, `.claude/scripts/` et `.claude/workflows/` disparaissent.
+- `verify.sh` déplacé dans `scripts/` (toujours lancé par `make verify`).
+- `/launch-wave` ouvre les sessions des US dans [herdr](https://herdr.dev) au lieu de tmux
+  (`us-worktree.sh` supprimé) ; herdr devient un prérequis pour lancer une vague.
 - Réseau Docker renommé `factory-network` → `devops-platform` (paramétrable via `PLATFORM_NETWORK`).
   Au prochain `make deploy`, les conteneurs d'une instance existante sont recréés sur le nouveau
   réseau (quelques minutes d'indisponibilité de GitLab, volumes conservés) : `make deploy` détecte

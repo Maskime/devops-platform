@@ -1,6 +1,8 @@
 ---
+name: plan-epic
 description: Analyse les US d'une épopée et établit des vagues de livraison parallélisables
 argument-hint: <épopée>  (ex : 2)
+disable-model-invocation: true
 ---
 
 Établis les vagues de livraison de l'épopée $ARGUMENTS.
@@ -20,7 +22,7 @@ modification GitHub avant la validation de l'opérateur.
 ## Étape 1 — Collecte
 
 ```bash
-.claude/scripts/find-us.sh <N>
+.claude/skills/github/scripts/find-us.sh <N>
 ```
 
 Le script affiche l'épopée puis, pour chacune de ses US : statut (nouvelle, en cours, en revue,
@@ -67,14 +69,9 @@ Présente :
 2. Les **dépendances implicites** proposées, chacune avec sa justification.
 3. Les **blocages hors épopée** : US d'autres épopées à terminer d'abord.
 4. Le **chemin critique** (plus longue chaîne de dépendances) et le nombre de vagues.
-5. Pour chaque vague, les commandes à lancer, une session par US, chacune dans son propre worktree
-   (`/implement-us` crée sa branche dans le répertoire courant : deux sessions dans le même répertoire
-   se marcheraient dessus) :
-   ```bash
-   git fetch origin
-   git worktree add --detach ../devops-platform-us-<N>-<X> origin/main
-   # puis, dans ce répertoire : /implement-us <N>-<X>
-   ```
+5. Le lancement : `/launch-wave <N>` (`<N>` = numéro de l'épopée) lance la vague courante, déduite
+   des dépendances déclarées sur GitHub, avec une session `/implement-us` par US dans son propre
+   worktree. La même commande lance la vague suivante une fois les PR mergées.
 
 Les US **terminées** sont listées à part ; les US **en cours** ou **en revue** restent dans leur vague
 avec leur statut.

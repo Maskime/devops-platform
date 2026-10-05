@@ -11,14 +11,14 @@ Six étapes, à appliquer dans l'ordre. `<N>-<X>` désigne le code de la US, `#<
 | **en revue** | label `en-revue`, PR ouverte | étape 6 |
 | **terminée** | issue fermée | merge de la PR par l'opérateur (`Closes #<num>`) |
 
-`.claude/scripts/find-us.sh <N>-<X>` affiche le statut calculé à partir de ces signaux ;
-`.claude/scripts/us-status.sh <num> <en-cours|en-revue|aucun>` positionne les labels (idempotent).
+`.claude/skills/github/scripts/find-us.sh <N>-<X>` affiche le statut calculé à partir de ces signaux ;
+`.claude/skills/github/scripts/us-status.sh <num> <en-cours|en-revue|aucun>` positionne les labels (idempotent).
 
 ### Étape 0 — Préparation
 
 1. Vérifie que l'arbre de travail est propre (`git status --porcelain` vide). Sinon, arrête-toi et demande à l'opérateur.
 2. Récupère l'état du remote : `git fetch origin` (repo public, pas d'authentification nécessaire).
-   Ne bascule pas sur `main` : la commande peut tourner dans un worktree (cf. `/plan-epic`), où `main`
+   Ne bascule pas sur `main` : la session peut tourner dans un worktree (cf. `/launch-wave`), où `main`
    est déjà extraite ailleurs.
 3. Vérifie le **statut** de la US (`find-us.sh <N>-<X>`) :
    - **nouvelle** : continue ;
@@ -28,12 +28,12 @@ Six étapes, à appliquer dans l'ordre. `<N>-<X>` désigne le code de la US, `#<
      **abandonner** ;
    - **terminée** : déjà traité à l'initialisation de la commande.
 4. Vérifie les **dépendances** listées dans l'issue : chaque issue référencée doit être fermée
-   (`.claude/scripts/find-us.sh <code>` affiche l'état). Si une dépendance est encore ouverte,
+   (`.claude/skills/github/scripts/find-us.sh <code>` affiche l'état). Si une dépendance est encore ouverte,
    signale-le à l'opérateur et demande s'il faut continuer.
 5. Crée la branche `us/<N>-<X>-<slug>` (slug court, kebab-case, sans accents) depuis `origin/main` :
    `git switch -c us/<N>-<X>-<slug> origin/main`.
-6. Passe la US **en cours** : `.claude/scripts/us-status.sh <num> en-cours`.
-7. Lance `.claude/scripts/check-epics.sh` : s'il liste des épopées dont toutes les US sont terminées,
+6. Passe la US **en cours** : `.claude/skills/github/scripts/us-status.sh <num> en-cours`.
+7. Lance `.claude/skills/github/scripts/check-epics.sh` : s'il liste des épopées dont toutes les US sont terminées,
    signale-les à l'opérateur (c'est lui qui les clôture).
 
 ### Étape 1 — Planification
@@ -77,7 +77,7 @@ Attends le retour complet du sous-agent avant de passer à l'étape 3.
    puis sors du mode plan (outil `ExitPlanMode`) — c'est le point de validation par l'opérateur.
 3. Une fois sorti du mode plan, crée une issue GitHub par point **Modéré** :
    ```bash
-   .claude/scripts/gh-api.sh POST /issues '{"title":"[Backlog] <résumé>","labels":["backlog"],"body":"Relevé lors de la critique de #<num> ([US <N>-<X>]).\n\n<description du point>"}'
+   .claude/skills/github/scripts/gh-api.sh POST /issues '{"title":"[Backlog] <résumé>","labels":["backlog"],"body":"Relevé lors de la critique de #<num> ([US <N>-<X>]).\n\n<description du point>"}'
    ```
    Les points **Esthétique** ne sont pas tracés.
 
@@ -94,7 +94,7 @@ Refs #<num>
 
 ### Étape 5 — Vérification
 
-1. Lance `.claude/scripts/verify.sh` (shellcheck, yamllint, `docker compose config` par environnement,
+1. Lance `scripts/verify.sh` (shellcheck, yamllint, `docker compose config` par environnement,
    détection de secrets) et corrige toute erreur avant de continuer.
 2. Si un critère porte sur un comportement d'exécution (service `healthy`, URL accessible, script qui
    passe), vérifie-le réellement sur l'environnement `local`. Préviens l'opérateur avant de démarrer GitLab
@@ -106,14 +106,14 @@ Refs #<num>
 
 ### Étape 6 — Livraison
 
-1. Pousse la branche : `.claude/scripts/git-push.sh`.
+1. Pousse la branche : `.claude/skills/github/scripts/git-push.sh`.
 2. Ouvre la PR vers `main` :
    ```bash
-   .claude/scripts/gh-api.sh POST /pulls '{"title":"[US <N>-<X>] <titre>","head":"<branche>","base":"main","body":"…"}'
+   .claude/skills/github/scripts/gh-api.sh POST /pulls '{"title":"[US <N>-<X>] <titre>","head":"<branche>","base":"main","body":"…"}'
    ```
    Corps de la PR : résumé des changements, tableau des critères avec leur statut, points Modéré créés
    (liens vers les issues), `Closes #<num>`, puis la ligne d'attribution Claude Code.
-3. Passe la US **en revue** : `.claude/scripts/us-status.sh <num> en-revue`.
+3. Passe la US **en revue** : `.claude/skills/github/scripts/us-status.sh <num> en-revue`.
 4. Coche dans le corps de l'issue `#<num>` les critères **satisfaits** (et uniquement eux) :
    lis le corps avec `gh-api.sh GET /issues/<num>`, remplace `- [ ]` par `- [x]` sur les lignes concernées,
    puis `gh-api.sh PATCH /issues/<num> '{"body":"…"}'` (construis le JSON avec `python3 -c 'import json…'`
