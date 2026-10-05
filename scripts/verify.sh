@@ -109,10 +109,10 @@ while IFS=: read -r fichier num ligne; do
   nb_images=$((nb_images + 1))
   valeur="${ligne#*=}" valeur="${valeur//[\"\']/}"
   image_versionnee "$valeur" || { ko "$fichier:$num : image non versionnée ($valeur)"; images_ko=1; }
-done < <(git ls-files --cached --others --exclude-standard '*.sh' \
+done < <(git ls-files --cached --others --exclude-standard '*.sh' | sort -u \
   | xargs -r grep -nE '^[[:space:]]*(readonly[[:space:]]+)?[A-Z][A-Z0-9_]*_IMAGE=' /dev/null)
 # Aucun tag latest explicite (motif sans le littéral, pour ne pas détecter ce script)
-if git ls-files --cached --others --exclude-standard compose.yml compose scripts Makefile \
+if git ls-files --cached --others --exclude-standard compose.yml compose scripts Makefile | sort -u \
     | xargs -r grep -nE '[:]latest([^A-Za-z0-9_.-]|$)' /dev/null; then
   ko "tag latest explicite (voir ci-dessus)"; images_ko=1
 fi
