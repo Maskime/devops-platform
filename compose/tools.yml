@@ -29,7 +29,6 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.portainer.rule: Host(`${PORTAINER_HOSTNAME:-portainer.localhost}`)
-      traefik.http.routers.portainer.entrypoints: web
       traefik.http.services.portainer.loadbalancer.server.port: "9000"
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
@@ -55,7 +54,6 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.plantuml.rule: Host(`${PLANTUML_HOSTNAME:-plantuml.localhost}`)
-      traefik.http.routers.plantuml.entrypoints: web
       traefik.http.services.plantuml.loadbalancer.server.port: "8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
