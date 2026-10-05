@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-env deploy
+.PHONY: help verify check-env deploy bootstrap-legacy
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -33,3 +33,11 @@ check-env:
 deploy: check-env ## Démarre l'instance ENV en local et attend que tous les services soient healthy
 	$(COMPOSE) up -d --wait --wait-timeout 900
 	@$(COMPOSE) ps --format 'table {{.Service}}\t{{.Status}}'
+
+# Temporaire : scripts repris de Software Factory, qui créent des données de test (projet
+# factory-test, analyse SonarQube). Remplacé par `make bootstrap` (épopée 5).
+bootstrap-legacy: check-env ## [Temporaire] Bootstrap repris de la factory (crée des données de test) ; FORCER=1 hors local
+	@if [[ "$(ENV)" != "local" && "$(FORCER)" != "1" ]]; then \
+	  echo "bootstrap-legacy crée des données de test : réservé à ENV=local (FORCER=1 pour passer outre)." >&2; exit 1; \
+	fi
+	ENV=$(ENV) scripts/legacy/setup-all.sh
