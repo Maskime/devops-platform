@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+### Ajouté
+
+- Garde-fou contre les fuites de secrets `scripts/check-secrets.sh` (repris de Software Factory dans
+  sa partie générique), exécuté par `make check-secrets`, `make verify` et la CI GitHub Actions
+  sur chaque push et pull request ; mode `--history` pour l'historique de la branche.
+- Hook pre-commit optionnel (`.githooks/pre-commit`), activé par `make install-hooks`.
+
 ## [0.1.0] - 2026-10-05
 
 Base de référence : extraction à l'identique de l'infrastructure de Software Factory (épopée 1).
