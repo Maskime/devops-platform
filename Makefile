@@ -43,7 +43,18 @@ check-env:
 	@$(COMPOSE) config -q || { echo "Configuration invalide pour $(ENV_FILE) (voir ci-dessus)." >&2; exit 1; }
 
 deploy: check-env ## [ENV] Démarre l'instance ENV en local et attend que tous les services soient healthy
-	$(COMPOSE) up -d --wait --wait-timeout 900
+	@# Compose reconnecte les conteneurs existants à un réseau renommé (PLATFORM_NETWORK) sans les
+	@# recréer : leur NetworkMode vise encore l'ancien réseau, supprimé, et ils ne redémarrent plus.
+	@# Dans ce cas, recréation forcée (volumes conservés).
+	@reseau="$$($(COMPOSE) config | sed -n '/^networks:/,/^[^ ]/ s/^    name: //p' | head -n1)"; \
+	options=(); \
+	for id in $$($(COMPOSE) ps -aq); do \
+	  mode="$$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$$id")"; \
+	  if [[ "$$mode" != "$$reseau" ]]; then \
+	    echo "Réseau modifié ($$mode → $$reseau) : recréation des conteneurs."; options=(--force-recreate); break; \
+	  fi; \
+	done; \
+	set -x; $(COMPOSE) up -d --wait --wait-timeout 900 "$${options[@]}"
 	@$(COMPOSE) ps --format 'table {{.Service}}\t{{.Status}}'
 
 # Temporaire : scripts repris de Software Factory, qui créent des données de test (projet

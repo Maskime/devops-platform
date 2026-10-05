@@ -20,12 +20,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   manquantes.
 - `verify.sh` vérifie que chaque variable des fichiers compose est documentée dans `envs/.env.example`.
 - GitLab : port SSH affiché dans les URLs de clone (`gitlab_shell_ssh_port`).
+- SonarQube : URL publique (`sonar.core.serverBaseURL`) issue de `SONARQUBE_EXTERNAL_URL` ;
+  Grafana : `root_url` issue de `GRAFANA_EXTERNAL_URL`.
 
 ### Modifié
 
 - Réseau Docker renommé `factory-network` → `devops-platform` (paramétrable via `PLATFORM_NETWORK`).
   Au prochain `make deploy`, les conteneurs d'une instance existante sont recréés sur le nouveau
-  réseau (quelques minutes d'indisponibilité de GitLab, volumes conservés). Le réseau des jobs CI du
+  réseau (quelques minutes d'indisponibilité de GitLab, volumes conservés) : `make deploy` détecte
+  le changement de réseau et force la recréation, faute de quoi Compose se contente de reconnecter
+  les conteneurs, qui ne redémarrent plus (`network factory-network not found`). Le réseau des jobs CI du
   runner déjà enregistré est réaligné par `make bootstrap-legacy`, ou à la main (`network_mode` dans
   `/etc/gitlab-runner/config.toml`). L'ancien réseau peut ensuite être supprimé :
   `docker network rm factory-network`.
