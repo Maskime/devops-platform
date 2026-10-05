@@ -2,7 +2,7 @@
 
 `scripts/host-prereqs.sh` installe et règle sur un serveur neuf tout ce dont la plateforme a besoin :
 Docker Engine et le plugin Compose, `vm.max_map_count` pour SonarQube, un `/etc/docker/daemon.json`
-borné et l'ouverture des ports dans le pare-feu. Il est **idempotent** : chaque étape contrôle l'état
+borné, l'ouverture des ports dans le pare-feu et un nettoyage Docker quotidien. Il est **idempotent** : chaque étape contrôle l'état
 avant d'agir, une nouvelle exécution n'affiche que des `✔` et termine par « 0 modification(s) ».
 
 ## Exécution
@@ -93,6 +93,51 @@ Sans pare-feu actif, rien n'est fait : en activer un pourrait couper l'accès SS
 > Docker). La garantie « uniquement 80, 443 et SSH GitLab » vient des `ports:` des fichiers compose,
 > contrôlés par `make verify` (voir [Exposition](exposition.md)). Un pare-feu en amont (fournisseur
 > cloud, routeur) reste la protection de référence.
+
+### Nettoyage Docker planifié
+
+Le script installe `/usr/local/sbin/devops-platform-prune` et le lance chaque nuit vers 03:30 (délai
+aléatoire de 30 min au plus) par le timer systemd `devops-platform-prune.timer`. Une exécution manquée
+(serveur éteint) est rattrapée au démarrage. Les unités sont posées dans
+`/usr/local/lib/systemd/system/`.
+
+Il ne supprime que ce qu'**aucun conteneur n'utilise**, démarré ou arrêté. Il est donc sûr plateforme
+démarrée :
+
+| Étape | Supprimé | Report ou saut |
+|---|---|---|
+| Conteneurs des jobs CI | Conteneurs du runner arrêtés depuis plus de 24 h | — |
+| Volumes de cache du runner | Volumes `com.gitlab.gitlab-runner.type=cache` qu'aucun conteneur n'utilise | Reporté s'il reste un conteneur du runner (job en cours) |
+| Images | Images non référencées par un conteneur, créées il y a plus de 7 jours | Sauté s'il n'existe aucun conteneur Compose |
+| Cache de build | Cache inutilisé depuis plus de 7 jours | — |
+
+**Jamais supprimés :**
+- les volumes de la plateforme (données GitLab, SonarQube, PostgreSQL, Grafana, Loki…) ;
+- les réseaux ;
+- les conteneurs arrêtés de la plateforme.
+
+**Comportements à connaître :**
+- **Ancienneté des images.** Le délai porte sur la date de **création** de l'image (en amont), pas sur
+  son téléchargement. Une image inutilisée est donc presque toujours supprimée, y compris une image
+  tirée la veille pour préparer une montée de version (`docker compose pull`), à re-télécharger.
+- **Jobs CI.** Les images des jobs et du helper du runner sont re-téléchargées après chaque
+  nettoyage. Les caches CI (`/cache`, `/builds` en stratégie `fetch`) repartent de zéro.
+- **Plateforme arrêtée par `docker compose down`.** Ses conteneurs n'existent plus, ses images ne sont
+  plus protégées : l'étape « images » est sautée pour les conserver. `stop` les conserve dans tous les
+  cas.
+
+**Exploitation :**
+- **Lancement manuel** : `systemctl start devops-platform-prune.service`, ou
+  `devops-platform-prune [--delai <n>h]` (`--delai` change le délai de 7 jours, `168h`).
+- **Journal** : `journalctl -u devops-platform-prune`. Il n'est pas collecté par Promtail, donc
+  absent de Grafana.
+- **Docker arrêté** : le service ne démarre pas, et ne relance jamais Docker.
+- **Code de retour** : non nul si une étape échoue, l'unité apparaît alors dans
+  `systemctl --failed`.
+- **Désactivation durable** : `systemctl mask --now devops-platform-prune.timer`. `host-prereqs.sh`
+  respecte le masque ; `systemctl unmask` puis une relance du script le réactivent.
+- **Modification** : le script et les unités sont réécrits par `host-prereqs.sh`. Toute modification
+  se fait dans le repo, pas sur le serveur.
 
 ## Mise à jour de Docker
 
