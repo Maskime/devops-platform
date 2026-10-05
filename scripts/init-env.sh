@@ -186,11 +186,13 @@ for s in "${services[@]}"; do
   valeurs[${s^^}_HOSTNAME]="${hostnames[$s]}"
 done
 
-# URLs publiques : hostname du service, servi par Traefik sur le port 80 (contrôlé par
-# scripts/check-env-urls.sh). http:// quel que soit TLS_MODE tant que le TLS n'est pas livré (US 3-2 et 3-3).
-valeurs[GITLAB_EXTERNAL_URL]="http://${hostnames[gitlab]}"
-valeurs[SONARQUBE_EXTERNAL_URL]="http://${hostnames[sonarqube]}"
-valeurs[GRAFANA_EXTERNAL_URL]="http://${hostnames[grafana]}"
+# URLs publiques : hostname du service, servi par Traefik (contrôlé par scripts/check-env-urls.sh).
+# https:// en custom (HTTPS sur 443) ; http:// sinon, letsencrypt n'étant pas encore livré (US 3-2).
+schema=http
+[[ "$tls_mode" == custom ]] && schema=https
+valeurs[GITLAB_EXTERNAL_URL]="$schema://${hostnames[gitlab]}"
+valeurs[SONARQUBE_EXTERNAL_URL]="$schema://${hostnames[sonarqube]}"
+valeurs[GRAFANA_EXTERNAL_URL]="$schema://${hostnames[grafana]}"
 
 # --- Écriture ----------------------------------------------------------------
 
@@ -287,9 +289,14 @@ if [[ "$tls_mode" == none ]]; then
     echo
     avertir_tls_none_non_local "${non_locaux[@]}"
   fi
+elif [[ "$tls_mode" == custom ]]; then
+  echo
+  echo "Note : TLS_MODE=custom : déposer avant make deploy la chaîne complète dans config/certs/cert.pem"
+  echo "et la clé privée non chiffrée dans config/certs/key.pem (chmod 600), couvrant les hostnames"
+  echo "ci-dessus : voir docs/certificats.md."
 else
   echo
-  echo "Note : TLS_MODE=$tls_mode n'a pas encore d'effet (TLS : US 3-2 et 3-3) : les services sont"
+  echo "Note : TLS_MODE=$tls_mode n'a pas encore d'effet (TLS : US 3-2) : les services sont"
   echo "servis en HTTP clair sur le port 80, identifiants compris. Ne pas exposer l'instance hors"
   echo "d'un réseau maîtrisé d'ici là."
 fi

@@ -1,0 +1,12 @@
+# =============================================================================
+# Overlay du proxy pour TLS_MODE=letsencrypt (provisoire)
+# Fusionné avec compose/proxy.yml par l'include de compose.yml (compose/tls/${TLS_MODE}.yml) ; ne
+# se lance pas seul.
+# Bouche-trou identique à none.yml (HTTP clair sur le port 80, signalé par make deploy) : remplacé
+# par la US 3-2 (resolver ACME de Traefik).
+# =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-tls-letsencrypt: "${PLATFORM_GARDE_FOU:?compose/tls/letsencrypt.yml est un overlay du proxy de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
+services:
+  traefik: {}

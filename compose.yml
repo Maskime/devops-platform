@@ -7,6 +7,8 @@
 #   compose/observability.yml  loki, promtail, grafana
 #   compose/tools.yml          portainer, plantuml
 #   compose/proxy.yml          traefik (reverse proxy : seul point d'entrée HTTP, routage par hostname)
+#   compose/tls/<mode>.yml     overlay de traefik propre au TLS_MODE de l'instance (none, custom,
+#                              letsencrypt), fusionné avec compose/proxy.yml dans le même include
 #
 # Toujours piloter la plateforme depuis ce fichier, avec le fichier d'environnement de l'instance :
 #   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
@@ -41,5 +43,8 @@ include:
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
   - path: compose/tools.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
-  - path: compose/proxy.yml
+  # Proxy : overlay propre au mode TLS (compose/tls/<mode>.yml) fusionné avec compose/proxy.yml
+  - path:
+      - compose/proxy.yml
+      - compose/tls/${TLS_MODE:-none}.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env

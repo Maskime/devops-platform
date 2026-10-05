@@ -36,7 +36,7 @@ make smoke       ENV=staging   # vérifie l'instance de bout en bout
 | `config/` | Configuration des services (Traefik, Loki, Promtail, Grafana…) |
 | `config/profiles/` | Profils de dimensionnement (`PLATFORM_PROFILE`), versionnés |
 | `config/certs/` | Certificats fournis pour `TLS_MODE=custom` (non versionnés) |
-| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md)) |
+| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md), [certificats fournis](docs/certificats.md)) |
 | `envs/` | Un fichier `<env>.env` par instance (non versionné) ; seul `.env.example` est versionné |
 | `.github/workflows/` | CI GitHub Actions (garde-fou secrets) |
 | `.githooks/` | Hooks Git optionnels (`make install-hooks`) |
@@ -62,8 +62,10 @@ GitLab, migration SonarQube).
 
 ## Exposition (reverse proxy Traefik)
 
-Traefik (`compose/proxy.yml`) est le seul point d'entrée web : il publie le port 80 et route chaque
-requête vers le service dont le hostname correspond (`*_HOSTNAME`). Aucun autre service web ne publie de
+Traefik (`compose/proxy.yml`) est le seul point d'entrée web : il publie le port 80 (et 443 en HTTPS)
+et route chaque requête vers le service dont le hostname correspond (`*_HOSTNAME`). Ce qui dépend du
+mode TLS vit dans un overlay, `compose/tls/<mode>.yml`, fusionné avec `compose/proxy.yml` par
+`compose.yml`. Aucun autre service web ne publie de
 port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
 
 | Service | URL locale par défaut | Variable |
@@ -87,15 +89,20 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
     en `http://` et **avertit**, sans bloquer, si un hostname n'est pas local (`localhost`,
     `*.localhost`) : le trafic, identifiants compris, circule en clair. Un TLS terminé en amont
     (load balancer) n'est pas géré.
-  - `letsencrypt`, `custom` : HTTPS à venir (US 3-2 et 3-3) ; d'ici là, sans effet (HTTP clair sur le
-    port 80, signalé par `make deploy`) : ne pas exposer l'instance hors d'un réseau maîtrisé.
+  - `custom` : HTTPS sur le port 443 avec les certificats fournis dans `config/certs/` (`cert.pem`,
+    chaîne complète, et `key.pem`, non versionnés) ; le port 80 redirige vers HTTPS. `make deploy`
+    exige des `*_EXTERNAL_URL` en `https://` et refuse un certificat absent, invalide, expiré, non
+    apparié à sa clé ou ne couvrant pas chaque hostname. Renouvellement : `make reload-certs ENV=<env>`.
+    Détails : [certificats fournis](docs/certificats.md).
+  - `letsencrypt` : HTTPS à venir (US 3-2) ; d'ici là, sans effet (HTTP clair sur le port 80, signalé
+    par `make deploy`) : ne pas exposer l'instance hors d'un réseau maîtrisé.
   - Toute autre valeur est refusée par `make deploy`.
 
 ### Surface d'exposition
 
-Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, avec le TLS : US 3-2 à 3-4) et le
+Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, en `TLS_MODE` `custom` ou `letsencrypt`) et le
 **SSH de GitLab** (`GITLAB_SSH_PORT`, défaut 2222). `make verify` contrôle, pour chaque
-`envs/*.env`, chaque couple port publié → port du conteneur contre cette liste blanche, et refuse tout
+`envs/*.env` et pour chaque mode TLS, chaque couple port publié → port du conteneur contre cette liste blanche, et refuse tout
 `network_mode` `host`, `service:…` ou `container:…` (qui la contournerait).
 
 - **Bases de données et services internes.** `sonarqube-db` (PostgreSQL) et Loki ne publient aucun
@@ -133,9 +140,10 @@ inventer ni à copier :
   avec majuscule, minuscule, chiffre et caractère spécial (règles SonarQube), sans caractère
   problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
 - **Fichier** en permissions `600`, écrit de façon atomique.
-- **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames : `http://<hostname>`, servies par
-  Traefik sur le port 80. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
-  avertissement que `make deploy` ; `letsencrypt` et `custom` n'ont pas encore d'effet (US 3-2 et 3-3).
+- **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames : `https://<hostname>` en `custom`,
+  `http://<hostname>` sinon. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
+  avertissement que `make deploy` ; en `custom`, il rappelle les certificats à déposer dans
+  `config/certs/` ; `letsencrypt` n'a pas encore d'effet (US 3-2).
 - **Sans terminal** (`make init ENV=<env> < /dev/null`, ou réponses passées sur l'entrée standard),
   une réponse vide prend la valeur par défaut et une réponse invalide arrête la commande.
 

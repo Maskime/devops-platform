@@ -9,12 +9,27 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Traefik est désormais configuré par variables `TRAEFIK_*` (`environment`) et non plus par `command`,
+  et ce qui dépend du mode TLS vit dans `compose/tls/<mode>.yml` (fusionné avec `compose/proxy.yml`).
+  Les labels `traefik.http.routers.<service>.entrypoints` ont disparu : les routeurs suivent les
+  entrypoints par défaut. Une surcharge locale de `command` ou de ces labels est à reporter.
 - Ajouter `PORTAINER_ADMIN_PASSWORD` (12 caractères minimum) à chaque `envs/<env>.env` existant, sinon
   `make deploy` et `make check-env` refusent de démarrer. Sur une instance déjà initialisée, Portainer
   ignore cette valeur : y reporter le mot de passe admin réel pour garder le fichier à jour.
 - Supprimer `PORTAINER_EDGE_PORT`, devenue sans effet.
 
 ### Ajouté
+
+- `TLS_MODE=custom` : HTTPS sur le port 443 avec les certificats fournis dans `config/certs/`
+  (`cert.pem`, chaîne complète ; `key.pem`, non chiffrée), port 80 redirigé vers HTTPS (302).
+  `make check-env` (donc `deploy`) refuse un certificat absent, illisible, chiffré, expiré, sans SAN,
+  non apparié à sa clé ou ne couvrant pas chaque `*_HOSTNAME` (`openssl` requis sur l'hôte), ainsi que
+  des `*_EXTERNAL_URL` absentes ou hors `https://` ; avertissement à 30 jours de l'expiration. Nouvelle
+  cible `make reload-certs ENV=<env>` après renouvellement ; procédure : `docs/certificats.md`.
+  `make init` génère des URLs en `https://` en mode `custom`.
+- GitLab : TLS interne d'Omnibus désactivé (`nginx['listen_https']`, `letsencrypt['enable']`), le TLS
+  étant terminé par Traefik. **Le conteneur `gitlab` est recréé au prochain `make deploy`**
+  (configuration Omnibus modifiée : quelques minutes d'indisponibilité, sans effet en `TLS_MODE=none`).
 
 - `TLS_MODE=none` (HTTP simple, usage local) : services servis en HTTP par Traefik sur le port 80.
   `make check-env` (donc `deploy`) valide `TLS_MODE` (vide ou absent : `none`), exige des
