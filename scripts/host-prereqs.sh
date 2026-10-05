@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Prépare un serveur pour la plateforme : Docker Engine + plugin Compose, vm.max_map_count (SonarQube),
-# /etc/docker/daemon.json borné (rotation des logs, cache de build), ports du pare-feu (ufw, firewalld).
+# /etc/docker/daemon.json borné (rotation des logs, cache de build), ports du pare-feu (ufw, firewalld),
+# nettoyage Docker quotidien (script devops-platform-prune et timer systemd).
 # Idempotent : chaque étape contrôle l'état avant d'agir ; une ré-exécution ne modifie rien.
 # Autonome (aucun autre fichier du repo requis), exécuté sur le serveur en root. Documentation :
 # docs/serveur.md.
@@ -25,6 +26,9 @@ readonly DOCKER_CLE_EMPREINTE=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 readonly DOCKER_SOURCE=/etc/apt/sources.list.d/docker.sources
 readonly PAQUETS_DOCKER=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
 readonly PAQUETS_PREREQUIS=(ca-certificates curl gnupg jq)
+readonly PRUNE_SCRIPT=/usr/local/sbin/devops-platform-prune
+# Hors de /etc/systemd/system : systemctl mask (désactivation par l'opérateur) y pose son lien
+readonly PRUNE_UNITE=/usr/local/lib/systemd/system/devops-platform-prune
 
 port_ssh_gitlab=2222
 https=1
@@ -44,7 +48,8 @@ aide() {
 Usage : sudo bash host-prereqs.sh [options]
 
 Prépare le serveur pour la plateforme (idempotent) : Docker Engine et plugin Compose,
-vm.max_map_count, /etc/docker/daemon.json, ports du pare-feu (ufw ou firewalld actif).
+vm.max_map_count, /etc/docker/daemon.json, ports du pare-feu (ufw ou firewalld actif),
+nettoyage Docker quotidien (devops-platform-prune.timer ; le masquer pour le désactiver).
 
 Options :
   --port-ssh-gitlab <port>  Port SSH de GitLab publié sur l'hôte (GITLAB_SSH_PORT, défaut : 2222)
@@ -425,6 +430,183 @@ pare_feu() {
   fi
 }
 
+# --- Étape 5 : nettoyage Docker planifié ------------------------------------------------------------
+
+# Script installé sur le serveur : copie générée, à modifier ici uniquement (linté par verify.sh, qui
+# extrait ce heredoc). Ne supprime que ce qu'aucun conteneur n'utilise : sûr plateforme démarrée.
+contenu_prune() {
+  cat <<'PRUNE'
+#!/usr/bin/env bash
+# Nettoyage Docker de la plateforme devops-platform (installé par host-prereqs.sh, ne pas modifier :
+# relancer host-prereqs.sh). Lancé chaque nuit par devops-platform-prune.timer ; journal :
+# journalctl -u devops-platform-prune. Documentation : docs/serveur.md du repo devops-platform.
+#
+# Usage : devops-platform-prune [--delai <durée>]
+set -euo pipefail
+export LC_ALL=C
+
+readonly VERROU=/run/devops-platform-prune.lock
+# Labels posés par l'exécuteur docker de GitLab Runner sur ses conteneurs et volumes
+readonly LABEL_RUNNER=com.gitlab.gitlab-runner.managed=true
+readonly LABEL_CACHE_RUNNER=com.gitlab.gitlab-runner.type=cache
+
+delai=168h
+echec=0
+
+aide() {
+  cat <<'EOF'
+Usage : devops-platform-prune [--delai <durée>]
+
+Supprime ce qu'aucun conteneur n'utilise : conteneurs arrêtés des jobs CI, volumes de cache du
+runner orphelins, images inutilisées, cache de build. Les volumes de la plateforme ne sont jamais
+touchés.
+
+Options :
+  --delai <durée>  Âge minimal des images (date de création) et du cache de build (dernière
+                   utilisation) supprimés : <n>s, <n>m ou <n>h (défaut : 168h)
+  -h, --aide       Affiche cette aide
+EOF
+}
+
+etape() { echo; echo "==> $*"; }
+erreur() { echo "Erreur : $*" >&2; exit 1; }
+
+while (($#)); do
+  case "$1" in
+    --delai) (($# >= 2)) || erreur "--delai attend une durée"; delai="$2"; shift ;;
+    --delai=*) delai="${1#*=}" ;;
+    -h | --aide | --help) aide; exit 0 ;;
+    *) aide >&2; erreur "option inconnue : $1" ;;
+  esac
+  shift
+done
+[[ "$delai" =~ ^[0-9]+[smh]$ ]] || erreur "--delai : durée <n>s, <n>m ou <n>h attendue ($delai)"
+
+# Une seule exécution à la fois (timer et lancement manuel)
+exec 9>"$VERROU"
+flock -n 9 || erreur "nettoyage déjà en cours ($VERROU)"
+
+racine="$(docker info -f '{{.DockerRootDir}}')"
+espace() { df -h --output=used,avail,pcent "$racine" | tail -n1; }
+echo "Espace de $racine (utilisé, libre, %) : $(espace)"
+
+# Conteneurs arrêtés depuis plus de 24 h laissés par les jobs CI (ils retiennent les volumes de cache)
+etape "Conteneurs arrêtés des jobs CI"
+docker container prune -f --filter "label=$LABEL_RUNNER" --filter until=24h || echec=1
+
+# Un job en cours détache ses volumes entre deux étapes : purge reportée tant qu'il reste un conteneur
+# du runner (démarré ou arrêté). -a : volumes nommés compris (Engine ≥ 23).
+etape "Volumes de cache du runner orphelins"
+if [[ -n "$(docker ps -aq --filter "label=$LABEL_RUNNER")" ]]; then
+  echo "Reporté : conteneur(s) du runner présent(s) (job en cours)."
+else
+  docker volume prune -a -f --filter "label=$LABEL_CACHE_RUNNER" || echec=1
+fi
+
+# Images non référencées par un conteneur (démarré ou arrêté). Sans aucun conteneur Compose
+# (plateforme arrêtée par `down`), sautée : les images de la plateforme seraient supprimées.
+etape "Images inutilisées (créées il y a plus de $delai)"
+if [[ -z "$(docker ps -aq --filter label=com.docker.compose.project)" ]]; then
+  echo "Sautée : aucun conteneur Compose (plateforme arrêtée ?)."
+else
+  docker image prune -a -f --filter "until=$delai" || echec=1
+fi
+
+etape "Cache de build (inutilisé depuis plus de $delai)"
+docker builder prune -a -f --filter "until=$delai" || echec=1
+
+echo
+echo "Espace de $racine (utilisé, libre, %) : $(espace)"
+exit "$echec"
+PRUNE
+}
+
+contenu_service() {
+  cat <<EOF
+# Géré par host-prereqs.sh (devops-platform)
+[Unit]
+Description=Nettoyage Docker de la plateforme devops-platform
+Documentation=https://github.com/Maskime/devops-platform/blob/main/docs/serveur.md
+# Requisite (et non Requires) : ne démarre jamais Docker s'il a été arrêté
+Requisite=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=$PRUNE_SCRIPT
+TimeoutStartSec=1h
+EOF
+}
+
+contenu_timer() {
+  cat <<'EOF'
+# Géré par host-prereqs.sh (devops-platform)
+[Unit]
+Description=Nettoyage Docker quotidien de la plateforme devops-platform
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# Étale les serveurs qui partagent un registre ou un stockage
+RandomizedDelaySec=30min
+# Rattrape une exécution manquée (serveur éteint)
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
+# Installe <contenu> dans <destination> avec <mode> ; retourne 0 si le fichier a changé
+installer_contenu() { # <contenu> <destination> <mode>
+  local tmp change=1
+  tmp="$(mktemp "$(dirname "$2")/.${2##*/}.XXXXXX")"
+  printf '%s\n' "$1" >"$tmp"
+  installer_fichier "$tmp" "$2" "$3" && change=0
+  # Contenu identique mais mode modifié à la main
+  if [[ "$(stat -c %a "$2")" != "${3#0}" ]]; then chmod "$3" "$2"; change=0; fi
+  return "$change"
+}
+
+nettoyage_planifie() {
+  local unites=0
+  install -d -m 0755 "${PRUNE_SCRIPT%/*}" "${PRUNE_UNITE%/*}"
+  if installer_contenu "$(contenu_prune)" "$PRUNE_SCRIPT" 0755; then
+    modifie "script de nettoyage : $PRUNE_SCRIPT"
+  else
+    conforme "script de nettoyage : $PRUNE_SCRIPT"
+  fi
+  if installer_contenu "$(contenu_service)" "$PRUNE_UNITE.service" 0644; then
+    unites=1; modifie "unité : $PRUNE_UNITE.service"
+  else
+    conforme "unité : $PRUNE_UNITE.service"
+  fi
+  if installer_contenu "$(contenu_timer)" "$PRUNE_UNITE.timer" 0644; then
+    unites=1; modifie "unité : $PRUNE_UNITE.timer"
+  else
+    conforme "unité : $PRUNE_UNITE.timer"
+  fi
+  ((unites)) && systemctl daemon-reload
+
+  local timer="${PRUNE_UNITE##*/}.timer" etat
+  etat="$(systemctl is-enabled "$timer" 2>/dev/null || true)"
+  if [[ "$etat" == masked ]]; then
+    conforme "$timer masqué : nettoyage désactivé par l'opérateur (systemctl unmask $timer pour le réactiver)"
+    return
+  fi
+  if [[ "$etat" == enabled ]]; then
+    conforme "$timer activé au démarrage"
+  else
+    systemctl enable --quiet "$timer"
+    modifie "$timer activé au démarrage"
+  fi
+  if systemctl is-active --quiet "$timer"; then
+    conforme "$timer démarré (chaque nuit vers 03:30)"
+  else
+    systemctl start "$timer"
+    modifie "$timer démarré (chaque nuit vers 03:30)"
+  fi
+}
+
 main() {
   lire_options "$@"
   controles "$@"
@@ -458,6 +640,9 @@ main() {
 
   titre "Pare-feu"
   pare_feu
+
+  titre "Nettoyage Docker planifié"
+  nettoyage_planifie
 
   echo
   echo "Prérequis : $modifications modification(s)."

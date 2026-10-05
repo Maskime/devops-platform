@@ -29,6 +29,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Nettoyage Docker planifié : `scripts/host-prereqs.sh` installe `/usr/local/sbin/devops-platform-prune`
+  et le timer systemd `devops-platform-prune.timer` (chaque nuit vers 03:30). Supprime les conteneurs
+  de jobs CI arrêtés, les volumes de cache du runner orphelins (reporté pendant un job), les images
+  inutilisées (sauté si la plateforme est arrêtée par `down`) et le cache de build inutilisé ; volumes
+  et conteneurs de la plateforme jamais touchés. Désactivable par `systemctl mask`, respecté par
+  `host-prereqs.sh`. Le script, embarqué dans `host-prereqs.sh`, est contrôlé par shellcheck dans
+  `make verify`. Détails : `docs/serveur.md`.
 - Accès restreint à l'API Docker : Traefik (provider Docker) et Promtail (`docker_sd_configs`) ne
   montent plus le socket Docker et passent par un proxy filtrant (`compose/socket-proxy.yml`,
   `wollomatic/socket-proxy:1.13.1`, variable `SOCKET_PROXY_VERSION`) : lecture seule sur une liste
