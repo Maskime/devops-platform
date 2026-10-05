@@ -1,7 +1,11 @@
 # =============================================================================
 # Brique proxy : point d'entrée HTTP unique de la plateforme
-# Inclus par compose.yml ; ne se lance pas seul (voir l'en-tête de compose.yml).
+# Inclus par compose.yml ; lancé seul, il est refusé par le garde-fou ci-dessous (voir l'en-tête
+# de compose.yml).
 # =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-proxy: "${PLATFORM_GARDE_FOU:?compose/proxy.yml est un module de compose.yml et ne se lance pas seul (conteneurs en double sur les volumes de l'instance) : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
 services:
 
   # ---------------------------------------------------------------------------
@@ -25,7 +29,7 @@ services:
       # Réseau par lequel joindre les services (requis dès qu'un conteneur en a plusieurs)
       - --providers.docker.network=${PLATFORM_NETWORK:-devops-platform}
       # Ignore les conteneurs hors projet (jobs CI lancés sur le même réseau). Nom de projet en dur :
-      # le changer impose de modifier aussi `name:` dans compose.yml.
+      # le changer impose de modifier aussi `name:` dans compose.yml et compose/projet-autorise/.
       - '--providers.docker.constraints=Label(`com.docker.compose.project`,`devops-platform`)'
       # Sonde de santé sur l'entrypoint interne par défaut `traefik` (:8080, non publié) : ne pas
       # redéfinir cet entrypoint, `traefik healthcheck` suppose sa valeur par défaut.

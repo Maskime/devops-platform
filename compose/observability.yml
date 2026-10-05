@@ -1,8 +1,12 @@
 # =============================================================================
 # Brique observabilité : centralisation et consultation des logs
-# Inclus par compose.yml ; ne se lance pas seul (voir l'en-tête de compose.yml).
+# Inclus par compose.yml ; lancé seul, il est refusé par le garde-fou ci-dessous (voir l'en-tête
+# de compose.yml).
 # Les chemins relatifs sont résolus depuis ce dossier (compose/).
 # =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-observability: "${PLATFORM_GARDE_FOU:?compose/observability.yml est un module de compose.yml et ne se lance pas seul (conteneurs en double sur les volumes de l'instance) : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
 services:
 
   # ---------------------------------------------------------------------------
@@ -12,7 +16,11 @@ services:
   loki:
     image: grafana/loki:${LOKI_VERSION:-3.7.8}
     restart: unless-stopped
-    command: -config.file=/etc/loki/loki-config.yaml
+    # expand-env : loki-config.yaml lit LOKI_RETENTION_PERIOD (défaut 744h défini dans ce fichier,
+    # appliqué aussi quand la variable est vide)
+    command: -config.file=/etc/loki/loki-config.yaml -config.expand-env=true
+    environment:
+      LOKI_RETENTION_PERIOD: ${LOKI_RETENTION_PERIOD:-}
     volumes:
       - ../config/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - loki_data:/loki
@@ -103,7 +111,8 @@ networks:
 
 # Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
 # le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml, le filtre de
-# config/promtail/promtail-config.yaml et la contrainte du provider Docker de compose/proxy.yml.
+# config/promtail/promtail-config.yaml, le nom du fichier compose/projet-autorise/<projet>.env et
+# la contrainte du provider Docker de compose/proxy.yml.
 volumes:
   loki_data:
     name: devops-platform_loki_data

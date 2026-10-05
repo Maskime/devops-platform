@@ -11,20 +11,35 @@
 # Toujours piloter la plateforme depuis ce fichier, avec le fichier d'environnement de l'instance :
 #   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
 #   docker compose --env-file envs/<env>.env up -d gitlab gitlab-runner # une seule brique
-# Pour désactiver durablement une brique, commenter sa ligne d'`include` ci-dessous.
+# Pour désactiver durablement une brique, commenter son entrée d'`include` ci-dessous
+# (lignes `path` et `env_file`).
 #
 # Nommage : Compose nomme les conteneurs (devops-platform-<service>-1) ; les scripts les ciblent par
 # service (`docker compose exec <service>`). Les volumes portent un nom explicite et fixe
 # (devops-platform_<volume>, déclaré dans chaque module).
-# Ne jamais lancer `up` sur un module seul (`-f compose/<module>.yml`) ni sous un autre nom de projet
-# (`-p`) : les conteneurs ainsi créés partageraient les volumes et le réseau de l'instance (deux
-# sonarqube-db sur les mêmes données = corruption). Un module seul ne sert qu'à `config`.
+#
+# Garde-fou contre les lancements en double : un module lancé seul (`-f compose/<module>.yml`) ou la
+# plateforme lancée sous un autre nom de projet (`-p <autre>`) créerait des conteneurs en double sur les
+# volumes et le réseau de l'instance (deux sonarqube-db sur les mêmes données = corruption). Ces
+# lancements sont refusés dès le chargement, avant tout conteneur :
+#   - chaque module exige PLATFORM_GARDE_FOU (x-garde-fou-<module>), défini uniquement par l'env_file
+#     des includes ci-dessous → module seul refusé avec un message explicite ;
+#   - cet env_file est compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env, qui n'existe que pour
+#     devops-platform → autre nom de projet refusé (« …/projet-autorise/<autre>.env: no such file »).
+# Commande correcte : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la
+# racine du repo, sans -p ni -f. Valider un module : docker compose --env-file envs/<env>.env config <service>.
+# Mécanisme et limites : README, section « Garde-fou contre les lancements en double ».
 # =============================================================================
 name: devops-platform
 
 include:
-  - compose/gitlab.yml
-  - compose/sonarqube.yml
-  - compose/observability.yml
-  - compose/tools.yml
-  - compose/proxy.yml
+  - path: compose/gitlab.yml
+    env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
+  - path: compose/sonarqube.yml
+    env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
+  - path: compose/observability.yml
+    env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
+  - path: compose/tools.yml
+    env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
+  - path: compose/proxy.yml
+    env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
