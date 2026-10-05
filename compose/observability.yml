@@ -37,6 +37,25 @@ services:
       - ../config/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - promtail_positions:/var/promtail
+    # Sonde /ready de promtail ET de loki : l'image loki est distroless (ni shell ni client HTTP),
+    # promtail sert donc de témoin de santé de loki. Image sans curl ni wget : requête via /dev/tcp.
+    # promtail /ready ne répond 200 qu'une fois une cible découverte (lui-même au minimum).
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          for cible in 127.0.0.1:9080 loki:3100; do
+          exec 3<>"/dev/tcp/$${cible%:*}/$${cible#*:}" &&
+          printf 'GET /ready HTTP/1.0\r\nHost: %s\r\n\r\n' "$$cible" >&3 &&
+          head -n1 <&3 | grep -q ' 200' || exit 1;
+          exec 3>&-;
+          done
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     depends_on:
       loki:
         condition: service_started
