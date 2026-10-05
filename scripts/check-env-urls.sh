@@ -21,29 +21,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/tls.sh
 source "$ROOT/scripts/lib/tls.sh"
+# shellcheck source=scripts/lib/env.sh
+source "$ROOT/scripts/lib/env.sh"
 
 (($# == 1)) || { echo "Erreur : usage : $0 <fichier env>" >&2; exit 1; }
 fichier="$1"
 [[ -f "$fichier" ]] || { echo "Erreur : fichier introuvable : $fichier" >&2; exit 1; }
 
-# Dernière affectation de <clé> dans le fichier, guillemets englobants retirés (vide si absente)
-valeur_fichier() {
-  local ligne valeur=""
-  while IFS= read -r ligne || [[ -n "$ligne" ]]; do
-    ligne="${ligne%$'\r'}"
-    if [[ "$ligne" =~ ^[[:space:]]*(export[[:space:]]+)?$1=(.*)$ ]]; then
-      valeur="${BASH_REMATCH[2]}"
-      if [[ "$valeur" =~ ^\"(.*)\"$ || "$valeur" =~ ^\'(.*)\'$ ]]; then
-        valeur="${BASH_REMATCH[1]}"
-      fi
-    fi
-  done < "$fichier"
-  printf '%s' "$valeur"
-}
-
-valeur_effective() {
-  if [[ -n "${!1+x}" ]]; then printf '%s' "${!1}"; else valeur_fichier "$1"; fi
-}
+valeur_effective() { env_valeur "$fichier" "$1"; }
 
 tls_mode="$(valeur_effective TLS_MODE)"
 tls_mode="${tls_mode:-none}"
