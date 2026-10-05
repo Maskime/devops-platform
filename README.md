@@ -48,7 +48,7 @@ make smoke       ENV=staging   # vérifie l'instance de bout en bout
 En attendant les épopées 2 à 5, la plateforme se lance en local à l'identique de Software Factory :
 
 ```bash
-cp envs/.env.example envs/local.env   # puis remplacer chaque valeur change_me_*
+make init ENV=local                   # génère envs/local.env (Entrée pour garder chaque défaut)
 make deploy ENV=local                 # démarre tous les services et attend qu'ils soient healthy
 make bootstrap-legacy ENV=local       # optionnel : bootstrap repris de Software Factory
 ```
@@ -73,6 +73,37 @@ Les URLs locales par défaut :
 > analyse SonarQube). Il est réservé à `ENV=local` (`FORCER=1` pour passer outre) et sera remplacé
 > par `make bootstrap` (épopée 5), qui laissera l'instance vierge.
 > Il requiert `curl` et `python3` sur l'hôte, et `vm.max_map_count` ≥ 524288 pour SonarQube.
+
+## Initialisation d'une instance (`make init`)
+
+`make init ENV=<env>` génère `envs/<env>.env` à partir du modèle `envs/.env.example`, sans secret à
+inventer ni à copier :
+
+| Question | Défaut |
+|---|---|
+| Domaine de base | `localhost` |
+| Hostname de chaque service (GitLab, SonarQube, Grafana, Portainer, PlantUML) | `<service>.<domaine>` |
+| `TLS_MODE` (`letsencrypt`, `custom`, `none`) | `none` pour un domaine local (`localhost`, `*.localhost`), sinon `letsencrypt` |
+| Profil de dimensionnement | `medium` |
+
+- **Mots de passe** (root GitLab, base et admin SonarQube, admin Grafana) : 24 caractères aléatoires
+  avec majuscule, minuscule, chiffre et caractère spécial (règles SonarQube), sans caractère
+  problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
+- **Fichier** en permissions `600`, écrit de façon atomique.
+- **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames, en `http://` sur les ports par défaut
+  (`localhost` pour un domaine local). `TLS_MODE` et les hostnames n'ont pas encore d'effet : ils
+  seront consommés par le reverse proxy (épopée 3).
+- **Sans terminal** (`make init ENV=<env> < /dev/null`, ou réponses passées sur l'entrée standard),
+  une réponse vide prend la valeur par défaut et une réponse invalide arrête la commande.
+
+**Fichier existant.** `make init` refuse de l'écraser. `FORCE=1` le régénère : l'ancien fichier est
+sauvegardé dans `envs/<env>.env.bak.<date>` (600, non versionné, jamais écrasé), ses réponses sont
+proposées par défaut et **ses secrets sont repris**. Les autres réglages (ports, versions, réseau…)
+repartent du modèle : les reprendre depuis la sauvegarde si besoin.
+`FORCE=1 NOUVEAUX_MDP=1` régénère aussi les secrets : à réserver à une instance jamais déployée ou à
+réinstaller, car le mot de passe PostgreSQL de SonarQube est inscrit dans son volume et le mot de
+passe root GitLab n'est appliqué qu'au premier démarrage. `FORCE` et `NOUVEAUX_MDP` ne sont acceptés
+que sur la ligne de commande, jamais hérités du shell.
 
 ## Profils de dimensionnement
 

@@ -49,7 +49,7 @@ ASSIGN_PATTERN='[A-Z0-9_]*(PASSWORD|PASSWD|TOKEN|SECRET|API_KEY)[A-Z0-9_]*[[:spa
 PLACEHOLDER_PATTERN='(PASSWORD|PASSWD|TOKEN|SECRET|API_KEY)[A-Z0-9_]*[[:space:]]*(=|:[[:space:]])[[:space:]]*["'\'']?(change_me|changeme|<)'
 
 # Fichiers qui ne doivent jamais être versionnés
-SENSITIVE_FILES='^(envs/[^/]+\.env|(.*/)?\.env|outputs/.+|config/certs/.+|.*\.(pem|key|p12|pfx|jks|keystore)|(.*/)?id_(rsa|ecdsa|ed25519))$'
+SENSITIVE_FILES='^(envs/[^/]+\.env(\.[^/]+)?|(.*/)?\.env|outputs/.+|config/certs/.+|.*\.(pem|key|p12|pfx|jks|keystore)|(.*/)?id_(rsa|ecdsa|ed25519))$'
 SENSITIVE_ALLOWED='^(envs/\.env\.example|config/certs/\.gitkeep)$'
 
 findings=0
@@ -77,7 +77,7 @@ scan_files() {
 scan_gitignore() {
   echo "[2/4] Couverture du .gitignore"
   local path
-  for path in envs/instance.env outputs/fichier config/certs/cert.pem; do
+  for path in envs/instance.env envs/instance.env.bak.20260101-000000 outputs/fichier config/certs/cert.pem; do
     git check-ignore -q --no-index "$path" || report "$path n'est pas ignoré par .gitignore"
   done
   if git check-ignore -q --no-index envs/.env.example; then

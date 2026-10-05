@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-secrets install-hooks check-env deploy bootstrap-legacy
+.PHONY: help verify check-secrets install-hooks init check-env-name check-env deploy bootstrap-legacy
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -31,8 +31,8 @@ install-hooks: ## Active le hook pre-commit optionnel de recherche de secrets (.
 	@echo "Hooks actifs : .githooks/ (les hooks de .git/hooks ne sont plus exécutés)."
 	@echo "Désactivation : git config --unset core.hooksPath"
 
-# Garde-fous communs aux cibles qui agissent sur une instance (ENV exigé sur la ligne de commande)
-check-env:
+# Nom d'instance : exigé sur la ligne de commande (jamais hérité du shell) et au bon format
+check-env-name:
 	@if [[ "$(origin ENV)" != "command line" ]]; then \
 	  if [[ "$(origin ENV)" == "environment" ]]; then \
 	    echo "ENV hérité du shell ($${ENV}) ignoré : passer l'instance explicitement, make $(MAKECMDGOALS) ENV=<env>" >&2; \
@@ -41,7 +41,19 @@ check-env:
 	  fi; exit 1; \
 	fi
 	@[[ "$${ENV}" =~ ^[a-z0-9][a-z0-9_-]*$$ ]] || { echo "ENV invalide : $${ENV} (attendu : minuscules, chiffres, - et _)" >&2; exit 1; }
-	@[[ -f "$(ENV_FILE)" ]] || { echo "Fichier introuvable : $(ENV_FILE) (copier envs/.env.example)" >&2; exit 1; }
+
+init: check-env-name ## [ENV] Génère envs/ENV.env (questions, secrets aléatoires) ; FORCE=1 pour régénérer
+	@# FORCE et NOUVEAUX_MDP écrasent des secrets : acceptés seulement sur la ligne de commande
+	@for v in "FORCE:$(origin FORCE)" "NOUVEAUX_MDP:$(origin NOUVEAUX_MDP)"; do \
+	  if [[ "$${v#*:}" == "environment" ]]; then \
+	    echo "$${v%%:*} hérité du shell refusé : le passer explicitement, make init ENV=$(ENV) $${v%%:*}=1" >&2; exit 1; \
+	  fi; \
+	done
+	@FORCE="$(FORCE)" NOUVEAUX_MDP="$(NOUVEAUX_MDP)" scripts/init-env.sh "$(ENV)"
+
+# Garde-fous communs aux cibles qui agissent sur une instance (ENV exigé sur la ligne de commande)
+check-env: check-env-name
+	@[[ -f "$(ENV_FILE)" ]] || { echo "Fichier introuvable : $(ENV_FILE) (le générer : make init ENV=$(ENV))" >&2; exit 1; }
 	@if grep -nE '^[A-Z0-9_]+=change_me' "$(ENV_FILE)" >&2; then \
 	  echo "Valeurs d'exemple encore présentes dans $(ENV_FILE) (voir ci-dessus) : à remplacer." >&2; exit 1; \
 	fi
