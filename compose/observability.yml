@@ -11,7 +11,6 @@ services:
   # ---------------------------------------------------------------------------
   loki:
     image: grafana/loki:${LOKI_VERSION:-3.7.8}
-    container_name: loki
     restart: unless-stopped
     command: -config.file=/etc/loki/loki-config.yaml
     volumes:
@@ -30,7 +29,6 @@ services:
   # ---------------------------------------------------------------------------
   promtail:
     image: grafana/promtail:${PROMTAIL_VERSION:-3.6.11}
-    container_name: promtail
     restart: unless-stopped
     command: -config.file=/etc/promtail/promtail-config.yaml
     volumes:
@@ -69,7 +67,6 @@ services:
   # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION:-13.2.3}
-    container_name: grafana
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}

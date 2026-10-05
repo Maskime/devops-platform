@@ -9,7 +9,6 @@ services:
   # ---------------------------------------------------------------------------
   gitlab:
     image: gitlab/gitlab-ce:${GITLAB_VERSION:-19.4.1-ce.0}
-    container_name: gitlab
     restart: always
     hostname: gitlab
     environment:
@@ -55,7 +54,6 @@ services:
   # ---------------------------------------------------------------------------
   gitlab-runner:
     image: gitlab/gitlab-runner:${GITLAB_RUNNER_VERSION:-v19.4.1}
-    container_name: gitlab-runner
     restart: always
     environment:
       # Serveur de métriques interne (sans publication de port) : sert de sonde de santé
