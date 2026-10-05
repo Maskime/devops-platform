@@ -84,6 +84,20 @@ else
   ok "aucun profil"
 fi
 
+# 3 ter. Configuration Loki de chaque environnement (rétention, -verify-config avec l'image résolue).
+#        Télécharge l'image Loki à la première exécution (accès au registre requis).
+section "configuration Loki"
+if [[ -f compose.yml ]]; then
+  shopt -s nullglob dotglob
+  env_files=(envs/*.env envs/.env.example)
+  shopt -u nullglob dotglob
+  for f in "${env_files[@]}"; do
+    if msg="$(scripts/check-loki-config.sh "$f" 2>&1)"; then ok "${msg##*$'\n'}"; else echo "$msg"; ko "$f : Loki"; fi
+  done
+else
+  ok "pas encore de compose.yml"
+fi
+
 # 4. Chaque variable interpolée par compose est documentée dans envs/.env.example
 #    ($${…} = échappement compose, ignoré ; minuscules = variables shell des healthchecks)
 section "variables documentées"

@@ -76,6 +76,7 @@ check-env: check-env-name
 	  echo "Attention : PLATFORM_PROFILE=$$profil vient du shell et remplace la valeur de $(ENV_FILE)." >&2; \
 	fi
 	@$(COMPOSE) config -q || { echo "Configuration invalide pour $(ENV_FILE) (voir ci-dessus)." >&2; exit 1; }
+	@scripts/check-loki-config.sh "$(ENV_FILE)" >/dev/null
 
 deploy: check-env ## [ENV] Démarre l'instance ENV en local et attend que tous les services soient healthy
 	@# Compose reconnecte les conteneurs existants à un réseau renommé (PLATFORM_NETWORK) sans les
