@@ -1,5 +1,6 @@
-# Fichiers d'environnement (secrets) — seul l'exemple est versionné
+# Fichiers d'environnement (secrets) et leurs sauvegardes (make init FORCE=1) — seul l'exemple est versionné
 envs/*.env
+envs/*.env.*
 !envs/.env.example
 
 # Informations de connexion générées par le bootstrap
