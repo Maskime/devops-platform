@@ -7,6 +7,7 @@
 #   compose/observability.yml  loki, promtail, grafana
 #   compose/tools.yml          portainer, plantuml
 #   compose/proxy.yml          traefik (reverse proxy : seul point d'entrée HTTP, routage par hostname)
+#   compose/socket-proxy.yml   socket-proxy (API Docker filtrée, en lecture, pour traefik et promtail)
 #   compose/tls/<mode>.yml     overlay de traefik propre au TLS_MODE de l'instance (none, custom,
 #                              letsencrypt), fusionné avec compose/proxy.yml dans le même include
 #
@@ -14,7 +15,7 @@
 #   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
 #   docker compose --env-file envs/<env>.env up -d gitlab gitlab-runner # une seule brique
 # Pour désactiver durablement une brique, commenter son entrée d'`include` ci-dessous
-# (lignes `path` et `env_file`).
+# (lignes `path` et `env_file`). Exception : socket-proxy, requise par proxy et observability.
 #
 # Nommage : Compose nomme les conteneurs (devops-platform-<service>-1) ; les scripts les ciblent par
 # service (`docker compose exec <service>`). Les volumes portent un nom explicite et fixe
@@ -42,6 +43,8 @@ include:
   - path: compose/observability.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
   - path: compose/tools.yml
+    env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
+  - path: compose/socket-proxy.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
   # Proxy : overlay propre au mode TLS (compose/tls/<mode>.yml) fusionné avec compose/proxy.yml
   - path:
