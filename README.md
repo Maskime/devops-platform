@@ -39,6 +39,30 @@ make smoke       ENV=staging   # vérifie l'instance de bout en bout
 | `outputs/` | Informations de connexion générées par le bootstrap (non versionné) |
 | `CHANGELOG.md` | Journal des modifications ([Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)) |
 
+## Démarrage local (état actuel)
+
+En attendant les épopées 2 à 5, la plateforme se lance en local à l'identique de Software Factory :
+
+```bash
+cp envs/.env.example envs/local.env   # puis remplacer chaque valeur change_me_*
+make deploy ENV=local                 # démarre tous les services et attend qu'ils soient healthy
+make bootstrap-legacy ENV=local       # optionnel : bootstrap repris de Software Factory
+```
+
+| Service | URL locale |
+|---|---|
+| GitLab | http://localhost (SSH : port 2222) |
+| SonarQube | http://localhost:9000 |
+| Grafana | http://localhost:3100 (`GRAFANA_PORT`) |
+| Portainer | https://localhost:9443 |
+| PlantUML | http://localhost:8081 (`PLANTUML_PORT`) |
+
+> ⚠️ `make bootstrap-legacy` est **temporaire** : il reprend les scripts `setup-*.sh` de Software
+> Factory (`scripts/legacy/`), qui créent des **données de test** (projet `factory-test`, pipeline,
+> analyse SonarQube). Il est réservé à `ENV=local` (`FORCER=1` pour passer outre) et sera remplacé
+> par `make bootstrap` (épopée 5), qui laissera l'instance vierge.
+> Il requiert `curl` et `python3` sur l'hôte, et `vm.max_map_count` ≥ 524288 pour SonarQube.
+
 ## Origine
 
 Cette plateforme est extraite de l'infrastructure du projet *Software Factory*, afin d'être réutilisée
