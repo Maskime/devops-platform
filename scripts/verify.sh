@@ -98,32 +98,56 @@ else
   ok "pas encore de compose.yml"
 fi
 
-# 3 quater. Ports publiés : le web passe par Traefik (routage par hostname), aucun autre service web
-#           ne publie de port. Liste blanche service:port cible, contrôlée pour chaque environnement.
+# 3 quater. Ports publiés : seuls 80 (et 443, TLS) via Traefik et le SSH GitLab (US 3-6). Le web passe
+#           par Traefik (routage par hostname). Liste blanche service:publié:cible, contrôlée pour chaque
+#           environnement ; `*` = port publié libre (GITLAB_SSH_PORT). `expose` ne publie rien (non contrôlé).
+#           Un network_mode host, service:… ou container:… contournerait la liste : refusé.
 section "ports publiés"
-PORTS_AUTORISES=(traefik:80 gitlab:22 portainer:8000)
+# traefik:443:443 anticipé pour le TLS (US 3-2 à 3-4)
+PORTS_AUTORISES=(traefik:80:80 traefik:443:443 'gitlab:*:22')
+port_autorise() { # <service:publié:cible>
+  local a
+  for a in "${PORTS_AUTORISES[@]}"; do
+    # shellcheck disable=SC2053 # motif voulu : `*` de la liste blanche
+    [[ "$1" == $a ]] && return 0
+  done
+  return 1
+}
 if [[ -f compose.yml ]]; then
   for f in "${env_files[@]}"; do
-    # Sortie normalisée : blocs `ports:` (4 espaces) d'un service (2 espaces), `target:` à 8 espaces
+    # Sortie normalisée : service à 2 espaces, `ports:` / `network_mode:` à 4, éléments `- ` à 6,
+    # champs `target:` / `published:` à 8
     if ! config="$(docker compose --env-file "$f" -f compose.yml config 2>/dev/null)"; then
       ko "$f : configuration illisible"; continue
     fi
     mapfile -t publies < <(awk '
-      /^[^ ]/ { dans_services = ($0 == "services:"); next }
+      function sortir() { if (cible != "") print service ":" (publie == "" ? "?" : publie) ":" cible; cible = publie = "" }
+      /^[^ ]/ { sortir(); dans_services = ($0 == "services:"); dans_ports = 0; next }
       !dans_services { next }
-      /^  [^ ]/ { service = $1; sub(/:$/, "", service); dans_ports = 0; next }
-      /^    [^ ]/ { dans_ports = ($1 == "ports:"); next }
-      dans_ports && /^        target:/ { print service ":" $2 }
+      /^  [^ ]/ { sortir(); service = $1; sub(/:$/, "", service); dans_ports = 0; next }
+      /^    [^ ]/ { sortir(); dans_ports = ($1 == "ports:"); next }
+      dans_ports && /^      - / { sortir() }
+      dans_ports && /^ +(- )?target:/ { cible = $NF }
+      dans_ports && /^ +(- )?published:/ { publie = $NF; gsub(/"/, "", publie) }
+      END { sortir() }
+    ' <<< "$config")
+    mapfile -t modes < <(awk '
+      /^[^ ]/ { dans_services = ($0 == "services:"); next }
+      dans_services && /^  [^ ]/ { service = $1; sub(/:$/, "", service); next }
+      dans_services && /^    network_mode:/ { print service ":" $2 }
     ' <<< "$config")
     if ((${#publies[@]} == 0)); then
       ko "$f : aucun port publié lu (format de docker compose config inattendu ?)"; continue
     fi
     interdits=()
     for p in "${publies[@]}"; do
-      [[ " ${PORTS_AUTORISES[*]} " == *" $p "* ]] || interdits+=("$p")
+      port_autorise "$p" || interdits+=("$p")
+    done
+    for m in "${modes[@]}"; do
+      [[ "${m#*:}" =~ ^(host|service:|container:) ]] && interdits+=("network_mode ${m}")
     done
     if ((${#interdits[@]})); then
-      ko "$f : port(s) publié(s) hors liste autorisée (${PORTS_AUTORISES[*]}) : ${interdits[*]}"
+      ko "$f : exposition hors liste autorisée (${PORTS_AUTORISES[*]}) : ${interdits[*]}"
     else
       ok "$f : ${publies[*]}"
     fi
@@ -136,8 +160,11 @@ fi
 #    ($${…} = échappement compose, ignoré ; minuscules = variables shell des healthchecks)
 section "variables documentées"
 if [[ -f compose.yml && -f envs/.env.example ]]; then
-  mapfile -t compose_vars < <(grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml \
-    | sed -E 's/.*\$\{//' | sort -u)
+  # Variables interpolées, et sources `environment: <VAR>` des secrets (lues sans interpolation)
+  mapfile -t compose_vars < <({
+    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml | sed -E 's/.*\$\{//'
+    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml
+  } | sort -u)
   missing=0
   for v in "${compose_vars[@]}"; do
     # Variables internes : fournie par Compose / définie par le garde-fou de lancement (section 6 bis)
