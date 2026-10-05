@@ -12,15 +12,25 @@
 #     d'instance : le script en réenregistrait un à chaque passage) ;
 #   - jeton d'accès vérifié (préfixe glpat-) et erreurs de gitlab-rails affichées ;
 #   - images épinglées (alpine), réseau issu de lib.sh ; messages en français ;
-#   - runner déjà en ligne : réseau des jobs réaligné sur PLATFORM_NETWORK s'il a changé.
+#   - runner déjà en ligne : réseau des jobs réaligné sur PLATFORM_NETWORK s'il a changé ;
+#   - runner enregistré et clonant via l'URL publique (Traefik), sauf clone en *.localhost (US 3-5).
 set -euo pipefail
 
 # shellcheck source=scripts/legacy/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 charger_env
 
-GITLAB_URL="${GITLAB_EXTERNAL_URL:-http://${GITLAB_HOSTNAME:-gitlab.localhost}}"
-GITLAB_INTERNAL_URL="http://gitlab"   # URL inter-conteneurs (nom de service Docker)
+# URL publique : même règle que l'external_url de GitLab (compose/gitlab.yml, url_derivee)
+GITLAB_URL="${GITLAB_EXTERNAL_URL:-$(url_derivee "${GITLAB_HOSTNAME:-gitlab.localhost}" "${TLS_MODE:-}")}"
+# Le runner et ses jobs joignent l'URL publique via Traefik (alias réseau, compose/proxy.yml).
+# Exception *.localhost : libcurl (donc git, dans le helper des jobs) résout tout *.localhost vers
+# 127.0.0.1 sans consulter DNS ni /etc/hosts ; le clone passe alors par le nom de service Docker.
+URL_CLONE_LOCALHOST="http://gitlab"
+if est_hostname_local "${GITLAB_HOSTNAME:-gitlab.localhost}"; then
+  RUNNER_CLONE_URL="$URL_CLONE_LOCALHOST"
+else
+  RUNNER_CLONE_URL="$GITLAB_URL"
+fi
 TEST_PROJECT_NAME="${GITLAB_TEST_PROJECT_NAME:-factory-test}"
 RUNNER_IMAGE="alpine:3.24.2"
 
@@ -129,12 +139,38 @@ if [[ -n "$EXISTING_RUNNER_ID" && "$EXISTING_RUNNER_STATUS" == "online" ]]; then
   echo "    Runner déjà enregistré et en ligne (id=$EXISTING_RUNNER_ID)."
   # Le réseau des jobs est écrit dans config.toml à l'enregistrement : après un changement de
   # PLATFORM_NETWORK, il pointe encore vers l'ancien réseau. Le runner recharge config.toml à chaud.
+  CONFIG_MODIFIEE=0
   RESEAU_JOBS=$(dc exec -T gitlab-runner \
     sed -n 's/^ *network_mode = "\(.*\)"$/\1/p' /etc/gitlab-runner/config.toml | head -n1)
   if [[ -n "$RESEAU_JOBS" && "$RESEAU_JOBS" != "$RESEAU" ]]; then
     dc exec -T gitlab-runner \
       sed -i "s/^\( *network_mode = \)\".*\"\$/\1\"$RESEAU\"/" /etc/gitlab-runner/config.toml
     echo "    Réseau des jobs réaligné : $RESEAU_JOBS → $RESEAU."
+    CONFIG_MODIFIEE=1
+  fi
+  # URLs d'enregistrement et de clone : réalignées après un changement de hostname, de TLS_MODE ou
+  # d'un enregistrement antérieur (URL interne). clone_url ajoutée si absente.
+  for cle in url clone_url; do
+    if [[ "$cle" == url ]]; then attendu="$GITLAB_URL"; else attendu="$RUNNER_CLONE_URL"; fi
+    actuel=$(dc exec -T gitlab-runner \
+      sed -n "s/^ *$cle = \"\(.*\)\"\$/\1/p" /etc/gitlab-runner/config.toml | head -n1)
+    [[ "$actuel" == "$attendu" ]] && continue
+    # Valeur échappée pour le remplacement sed (délimiteur |)
+    echappe=$(printf '%s' "$attendu" | sed 's/[|&\\]/\\&/g')
+    if [[ -n "$actuel" ]]; then
+      dc exec -T gitlab-runner \
+        sed -i "s|^\( *$cle = \)\".*\"\$|\1\"$echappe\"|" /etc/gitlab-runner/config.toml
+    else
+      dc exec -T gitlab-runner \
+        sed -i "s|^\( *\)url = \".*\"\$|&\n\1clone_url = \"$echappe\"|" /etc/gitlab-runner/config.toml
+    fi
+    echo "    $cle du runner réalignée : ${actuel:-(absente)} → $attendu."
+    CONFIG_MODIFIEE=1
+  done
+  # Rechargement immédiat (SIGHUP) : sans lui, le pipeline déclenché ci-dessous peut partir avec
+  # l'ancienne configuration (rechargement à chaud différé de quelques secondes)
+  if ((CONFIG_MODIFIEE)); then
+    dc kill -s SIGHUP gitlab-runner > /dev/null
   fi
 else
   if [[ -n "$EXISTING_RUNNER_ID" ]]; then
@@ -155,15 +191,15 @@ else
 
   dc exec -T gitlab-runner gitlab-runner register \
     --non-interactive \
-    --url "$GITLAB_INTERNAL_URL" \
-    --clone-url "$GITLAB_INTERNAL_URL" \
+    --url "$GITLAB_URL" \
+    --clone-url "$RUNNER_CLONE_URL" \
     --token "$RUNNER_TOKEN" \
     --executor docker \
     --docker-image "$RUNNER_IMAGE" \
     --docker-network-mode "$RESEAU" \
     --docker-extra-hosts "host.docker.internal:host-gateway" \
     --description "factory-runner"
-  echo "    Runner enregistré."
+  echo "    Runner enregistré (URL : $GITLAB_URL ; clone : $RUNNER_CLONE_URL)."
 fi
 
 # ---------------------------------------------------------------------------

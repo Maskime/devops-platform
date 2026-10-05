@@ -6,8 +6,13 @@
 #   dc          — docker compose de l'instance, quel que soit le répertoire courant
 #   ROOT        — racine du repo
 #   RESEAU      — réseau Docker de la plateforme (positionné par charger_env)
+#   les fonctions de scripts/lib/tls.sh (url_derivee, est_hostname_local…)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# Règles TLS partagées (schema_tls, url_derivee, est_hostname_local)
+# shellcheck source=scripts/lib/tls.sh
+source "$ROOT/scripts/lib/tls.sh"
 
 # Lit le fichier d'environnement ligne à ligne (format env-file de Compose), sans `source` ni eval :
 # les valeurs peuvent contenir des caractères spéciaux du shell ($ & ; ' "…) sans être interprétées.
