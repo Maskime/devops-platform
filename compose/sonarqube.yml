@@ -55,7 +55,6 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.sonarqube.rule: Host(`${SONARQUBE_HOSTNAME:-sonarqube.localhost}`)
-      traefik.http.routers.sonarqube.entrypoints: web
       traefik.http.services.sonarqube.loadbalancer.server.port: "9000"
     ulimits:
       nofile:

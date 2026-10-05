@@ -13,7 +13,7 @@
 #   - jeton d'accès vérifié (préfixe glpat-) et erreurs de gitlab-rails affichées ;
 #   - images épinglées (alpine), réseau issu de lib.sh ; messages en français ;
 #   - runner déjà en ligne : réseau des jobs réaligné sur PLATFORM_NETWORK s'il a changé ;
-#   - runner enregistré et clonant via l'URL publique (Traefik), sauf clone en *.localhost (US 3-5).
+#   - runner enregistré et clonant via l'URL publique (Traefik), sauf clone en *.localhost.
 set -euo pipefail
 
 # shellcheck source=scripts/legacy/lib.sh

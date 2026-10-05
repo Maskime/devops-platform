@@ -29,6 +29,11 @@ Hors périmètre : Temporal, serveurs MCP, workers et tout ce qui est propre à 
 - Documentation, issues, PR et messages de commit en français. Commits au format Conventional Commits
   (`feat(gitlab): …`, `fix(sonarqube): …`, `docs: …`), avec `Refs #<num>` vers l'issue.
 - Une branche et une PR par user story (`us/<N>-<X>-<slug>`) ; l'opérateur merge.
+- **Le README reste court** : présentation, démarrage rapide, configuration en quelques phrases,
+  commandes, liens vers `docs/`. Toute documentation d'exploitation (mécanisme, limites, procédure,
+  tableau de réglages) va dans une page `docs/<sujet>.md`, existante ou nouvelle, référencée par une
+  ligne dans la section « Documentation » du README. Pas de numéro d'US dans la documentation : le
+  suivi vit sur GitHub et dans le `CHANGELOG.md`.
 
 ## Dépendances et versions d'images
 

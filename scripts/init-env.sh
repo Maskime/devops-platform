@@ -140,6 +140,12 @@ if ! [[ "$tls_defaut" =~ ^(letsencrypt|custom|none)$ ]]; then
 fi
 demander tls_mode "TLS_MODE (letsencrypt, custom, none)" "$tls_defaut" valider_tls_mode
 
+# Email du compte Let's Encrypt : sans défaut inventé (réponse exigée, sauf valeur existante)
+acme_email=""
+if [[ "$tls_mode" == letsencrypt ]]; then
+  demander acme_email "Email du compte Let's Encrypt (ACME_EMAIL)" "$(valeur_existante ACME_EMAIL)" valider_email_acme
+fi
+
 profil_defaut="$(valeur_existante PLATFORM_PROFILE)"
 valider_profil "${profil_defaut:-medium}" 2>/dev/null || profil_defaut=medium
 demander profil "Profil de dimensionnement ($profils)" "${profil_defaut:-medium}" valider_profil
@@ -187,11 +193,14 @@ for s in "${services[@]}"; do
 done
 
 # URLs publiques : hostname du service, servi par Traefik (contrôlé par scripts/check-env-urls.sh).
-# GitLab : non renseignée, dérivée du hostname et du TLS_MODE (compose/gitlab.yml). SonarQube et
-# Grafana : http:// quel que soit TLS_MODE tant que le TLS n'est pas livré (US 3-2 et 3-3).
+# GitLab : non renseignée, dérivée du hostname et du TLS_MODE (compose/gitlab.yml, url_derivee).
+# SonarQube et Grafana : https:// en custom et letsencrypt (HTTPS sur 443, HTTP redirigé) ; http://
+# en none.
+schema="$(schema_tls "$tls_mode")"
+[[ -n "$acme_email" ]] && valeurs[ACME_EMAIL]="$acme_email"
 url_gitlab="$(url_derivee "${hostnames[gitlab]}" "$tls_mode")"
-valeurs[SONARQUBE_EXTERNAL_URL]="http://${hostnames[sonarqube]}"
-valeurs[GRAFANA_EXTERNAL_URL]="http://${hostnames[grafana]}"
+valeurs[SONARQUBE_EXTERNAL_URL]="$schema://${hostnames[sonarqube]}"
+valeurs[GRAFANA_EXTERNAL_URL]="$schema://${hostnames[grafana]}"
 
 # --- Écriture ----------------------------------------------------------------
 
@@ -260,6 +269,7 @@ printf '  %-23s %s\n' TLS_MODE "$tls_mode" PLATFORM_PROFILE "$profil" \
   "GITLAB_EXTERNAL_URL" "$url_gitlab (dérivée)" \
   SONARQUBE_EXTERNAL_URL "${valeurs[SONARQUBE_EXTERNAL_URL]}" \
   GRAFANA_EXTERNAL_URL "${valeurs[GRAFANA_EXTERNAL_URL]}"
+[[ -z "$acme_email" ]] || printf '  %-23s %s\n' ACME_EMAIL "$acme_email"
 if ((nb_repris)); then
   echo "  Mots de passe : $nb_repris repris du fichier existant, $((${#cles_mdp[@]} - nb_repris)) générés."
 else
@@ -288,11 +298,27 @@ if [[ "$tls_mode" == none ]]; then
     echo
     avertir_tls_none_non_local "${non_locaux[@]}"
   fi
+elif [[ "$tls_mode" == custom ]]; then
+  echo
+  echo "Note : TLS_MODE=custom : déposer avant make deploy la chaîne complète dans config/certs/cert.pem"
+  echo "et la clé privée non chiffrée dans config/certs/key.pem (chmod 600), couvrant les hostnames"
+  echo "ci-dessus : voir docs/certificats.md."
 else
   echo
-  echo "Note : TLS_MODE=$tls_mode n'a pas encore d'effet (TLS : US 3-2 et 3-3) : les services sont"
-  echo "servis en HTTP clair sur le port 80, identifiants compris. Ne pas exposer l'instance hors"
-  echo "d'un réseau maîtrisé d'ici là."
+  echo "Note : TLS_MODE=letsencrypt : avant make deploy, chaque hostname ci-dessus doit résoudre"
+  echo "publiquement vers ce serveur, port 80 joignable depuis Internet (challenge HTTP-01) : voir"
+  echo "docs/letsencrypt.md."
+  # Même contrôle que make deploy (scripts/check-env-urls.sh), qui refusera ces hostnames
+  refuses=()
+  for s in "${services[@]}"; do
+    if est_hostname_local "${hostnames[$s]}" || est_adresse_ip "${hostnames[$s]}"; then
+      refuses+=("${hostnames[$s]}")
+    fi
+  done
+  if ((${#refuses[@]})); then
+    echo "Attention : hostname(s) local(aux) ou IP, refusés par make deploy en TLS_MODE=letsencrypt :"
+    echo "  ${refuses[*]} (TLS_MODE=none en local)."
+  fi
 fi
 # *.localhost : résolu par les navigateurs et curl, pas toujours par le système (git, wget…)
 non_resolus=()

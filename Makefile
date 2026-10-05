@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-secrets install-hooks init check-env-name check-env deploy bootstrap-legacy
+.PHONY: help verify check-secrets install-hooks init check-env-name check-env deploy reload-certs bootstrap-legacy
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -105,6 +105,18 @@ deploy: check-env ## [ENV] Démarre l'instance ENV en local et attend que tous l
 	done; \
 	set -x; $(COMPOSE) up -d --wait --wait-timeout 900 "$${options[@]}"
 	@$(COMPOSE) ps --format 'table {{.Service}}\t{{.Status}}'
+
+reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_MODE=custom) : Traefik recréé
+	@# Mode effectif lu comme le profil (check-env) : variable du shell, sinon dernière affectation
+	@if [[ -n "$${TLS_MODE+x}" ]]; then mode="$${TLS_MODE}"; else \
+	  mode="$$(sed -nE "s/^[[:space:]]*TLS_MODE=[\"']?([^\"']*)[\"']?[[:space:]]*$$/\1/p" "$(ENV_FILE)" | tail -n1)"; \
+	fi; \
+	if [[ "$${mode:-none}" != custom ]]; then \
+	  echo "reload-certs : réservé à TLS_MODE=custom ($(ENV_FILE) : TLS_MODE=$${mode:-none})." >&2; exit 1; \
+	fi
+	@# Certificats déjà contrôlés par check-env. Traefik ne relit pas les fichiers de certificat :
+	@# recréation (montages relus, y compris après un remplacement par mv), coupure de quelques secondes.
+	$(COMPOSE) up -d --wait --force-recreate traefik
 
 # Temporaire : scripts repris de Software Factory, qui créent des données de test (projet
 # factory-test, analyse SonarQube). Remplacé par `make bootstrap` (épopée 5).

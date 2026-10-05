@@ -36,7 +36,7 @@ make smoke       ENV=staging   # vérifie l'instance de bout en bout
 | `config/` | Configuration des services (Traefik, Loki, Promtail, Grafana…) |
 | `config/profiles/` | Profils de dimensionnement (`PLATFORM_PROFILE`), versionnés |
 | `config/certs/` | Certificats fournis pour `TLS_MODE=custom` (non versionnés) |
-| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md)) |
+| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md), [certificats fournis](docs/certificats.md), [Let's Encrypt](docs/letsencrypt.md), [GitLab derrière le proxy](docs/gitlab-proxy.md)) |
 | `envs/` | Un fichier `<env>.env` par instance (non versionné) ; seul `.env.example` est versionné |
 | `.github/workflows/` | CI GitHub Actions (garde-fou secrets) |
 | `.githooks/` | Hooks Git optionnels (`make install-hooks`) |
@@ -62,8 +62,10 @@ GitLab, migration SonarQube).
 
 ## Exposition (reverse proxy Traefik)
 
-Traefik (`compose/proxy.yml`) est le seul point d'entrée web : il publie le port 80 et route chaque
-requête vers le service dont le hostname correspond (`*_HOSTNAME`). Aucun autre service web ne publie de
+Traefik (`compose/proxy.yml`) est le seul point d'entrée web : il publie le port 80 (et 443 en HTTPS)
+et route chaque requête vers le service dont le hostname correspond (`*_HOSTNAME`). Ce qui dépend du
+mode TLS vit dans un overlay, `compose/tls/<mode>.yml`, fusionné avec `compose/proxy.yml` par
+`compose.yml`. Aucun autre service web ne publie de
 port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
 
 | Service | URL locale par défaut | Variable |
@@ -78,8 +80,8 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
   `*.localhost` est résolu vers `127.0.0.1` par les navigateurs et curl, mais pas toujours par le
   système (git, wget…) : `make init` le détecte et indique la ligne à ajouter à `/etc/hosts`
   (`127.0.0.1 gitlab.localhost sonarqube.localhost grafana.localhost portainer.localhost plantuml.localhost`).
-- **URLs publiques.** L'hôte de `GITLAB_EXTERNAL_URL` (optionnelle, dérivée par défaut : voir
-  ci-dessous), `SONARQUBE_EXTERNAL_URL` et `GRAFANA_EXTERNAL_URL` doit être le hostname du service,
+- **URLs publiques.** L'hôte de `GITLAB_EXTERNAL_URL` (optionnelle, dérivée par défaut),
+  `SONARQUBE_EXTERNAL_URL` et `GRAFANA_EXTERNAL_URL` doit être le hostname du service,
   sans port : `make deploy` (cible `check-env`) refuse une URL incohérente et indique la ligne à
   corriger.
 - **Mode TLS (`TLS_MODE`).**
@@ -88,40 +90,31 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
     en `http://` et **avertit**, sans bloquer, si un hostname n'est pas local (`localhost`,
     `*.localhost`) : le trafic, identifiants compris, circule en clair. Un TLS terminé en amont
     (load balancer) n'est pas géré.
-  - `letsencrypt`, `custom` : HTTPS à venir (US 3-2 et 3-3) ; d'ici là, sans effet (HTTP clair sur le
-    port 80, signalé par `make deploy`) : ne pas exposer l'instance hors d'un réseau maîtrisé.
+  - `custom` : HTTPS sur le port 443 avec les certificats fournis dans `config/certs/` (`cert.pem`,
+    chaîne complète, et `key.pem`, non versionnés) ; le port 80 redirige vers HTTPS. `make deploy`
+    exige des `*_EXTERNAL_URL` en `https://` et refuse un certificat absent, invalide, expiré, non
+    apparié à sa clé ou ne couvrant pas chaque hostname. Renouvellement : `make reload-certs ENV=<env>`.
+    Détails : [certificats fournis](docs/certificats.md).
+  - `letsencrypt` : HTTPS sur le port 443 avec des certificats Let's Encrypt obtenus et renouvelés
+    automatiquement par Traefik, stockés sur le volume `devops-platform_traefik_acme` ; le port 80
+    redirige vers HTTPS. Prérequis : hostnames publics résolus vers le serveur, port 80 (challenge
+    `ACME_CHALLENGE=http`, défaut) ou 443 (`tls`) joignable depuis Internet. `make deploy` exige
+    `ACME_EMAIL`, des `*_EXTERNAL_URL` en `https://` et refuse les hostnames locaux ou IP.
+    Détails : [certificats Let's Encrypt](docs/letsencrypt.md).
   - Toute autre valeur est refusée par `make deploy`.
 
 ### GitLab derrière le proxy
 
-- **URL publique (`external_url`)** dérivée du hostname et du mode TLS : `https://<GITLAB_HOSTNAME>`
-  en `letsencrypt` et `custom`, `http://<GITLAB_HOSTNAME>` en `none`. Elle fait les liens, les URLs de
-  clone HTTP et l'enregistrement du runner. `GITLAB_EXTERNAL_URL` ne sert plus qu'à forcer une valeur
-  (même hôte, sans port) ; une valeur explicite en `http://` en `letsencrypt` ou `custom` est signalée
-  par `make deploy`.
-- **Nginx interne** : Traefik termine le TLS. Le nginx de GitLab écoute en HTTP sur 80 seulement, sans
-  HTTPS, redirection ni Let's Encrypt propres (pas de double TLS), et transmet à GitLab le schéma public
-  (`X-Forwarded-Proto`). L'IP réelle des clients est lue dans `X-Forwarded-For` ; limite : la confiance
-  porte sur les plages privées, jobs CI compris (#76).
-- **SSH** : `GITLAB_SSH_PORT` (défaut 2222) est le seul port publié par GitLab et celui des URLs de
-  clone SSH (`ssh://git@<GITLAB_HOSTNAME>:<port>/<groupe>/<projet>.git`). `make check-env` exige un
-  entier de 1 à 65535 sans zéro en tête, hors 80 et 443, et signale 22 (sshd de l'hôte).
-- **Runner et jobs CI** : Traefik porte les `*_HOSTNAME` en alias sur le réseau de la plateforme. Dans
-  ce réseau, l'URL publique mène donc à Traefik, par le même chemin et le même certificat que pour un
-  client externe, sans DNS ni hairpin NAT. Le runner s'enregistre et clone par cette URL ; il dépend
-  désormais de Traefik pour joindre GitLab.
-  - **Exception `*.localhost`** : libcurl, donc git, résout tout `*.localhost` vers `127.0.0.1` sans
-    consulter DNS ni `/etc/hosts`. Le clone des jobs passe alors par `http://gitlab` (nom de service).
-    Dans un job, `CI_SERVER_URL` et `CI_API_V4_URL` (`http://gitlab.localhost`) restent injoignables
-    par curl : utiliser un hostname hors `*.localhost` pour tester des appels API depuis la CI.
-  - **`TLS_MODE=custom` avec une CA privée** : le runner, les jobs et le bootstrap ne font pas encore
-    confiance à cette CA (#79).
+L'URL publique de GitLab est dérivée de `GITLAB_HOSTNAME` et du `TLS_MODE` (`GITLAB_EXTERNAL_URL`,
+optionnelle, ne sert qu'à la forcer). Son nginx interne n'écoute qu'en HTTP derrière Traefik, et le
+SSH passe par `GITLAB_SSH_PORT`. Le runner s'enregistre et clone par l'URL publique, via Traefik.
+Détails et limites : [GitLab derrière le proxy](docs/gitlab-proxy.md).
 
 ### Surface d'exposition
 
-Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, avec le TLS : US 3-2 à 3-4) et le
+Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, en `TLS_MODE` `custom` ou `letsencrypt`) et le
 **SSH de GitLab** (`GITLAB_SSH_PORT`, défaut 2222). `make verify` contrôle, pour chaque
-`envs/*.env`, chaque couple port publié → port du conteneur contre cette liste blanche, et refuse tout
+`envs/*.env` et pour chaque mode TLS, chaque couple port publié → port du conteneur contre cette liste blanche, et refuse tout
 `network_mode` `host`, `service:…` ou `container:…` (qui la contournerait).
 
 - **Bases de données et services internes.** `sonarqube-db` (PostgreSQL) et Loki ne publient aucun
@@ -159,10 +152,12 @@ inventer ni à copier :
   avec majuscule, minuscule, chiffre et caractère spécial (règles SonarQube), sans caractère
   problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
 - **Fichier** en permissions `600`, écrit de façon atomique.
-- **URLs publiques** : `GITLAB_EXTERNAL_URL` n'est pas écrite (dérivée par GitLab du hostname et
-  du `TLS_MODE`, voir « GitLab derrière le proxy ») ; `SONARQUBE_EXTERNAL_URL` et
-  `GRAFANA_EXTERNAL_URL` valent `http://<hostname>`, servies par Traefik sur le port 80. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
-  avertissement que `make deploy` ; `letsencrypt` et `custom` n'ont pas encore d'effet (US 3-2 et 3-3).
+- **URLs publiques** : `GITLAB_EXTERNAL_URL` n'est pas écrite (dérivée par GitLab du hostname et du
+  `TLS_MODE`) ; `SONARQUBE_EXTERNAL_URL` et `GRAFANA_EXTERNAL_URL` valent `https://<hostname>` en
+  `custom` et `letsencrypt`, `http://<hostname>` en `none`. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
+  avertissement que `make deploy` ; en `custom`, il rappelle les certificats à déposer dans
+  `config/certs/` ; en `letsencrypt`, il demande l'email du compte ACME (`ACME_EMAIL`) et rappelle les
+  prérequis (DNS public, port 80).
 - **Sans terminal** (`make init ENV=<env> < /dev/null`, ou réponses passées sur l'entrée standard),
   une réponse vide prend la valeur par défaut et une réponse invalide arrête la commande.
 

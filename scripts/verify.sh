@@ -44,8 +44,15 @@ else
   ok "aucun fichier YAML"
 fi
 
-# 3. docker compose config pour chaque environnement (dont l'exemple)
+# 3. docker compose config pour chaque environnement (dont l'exemple), et pour chaque mode TLS
 section "docker compose config"
+shopt -s nullglob
+tls_modes=(compose/tls/*.yml)
+shopt -u nullglob
+tls_modes=("${tls_modes[@]##*/}") tls_modes=("${tls_modes[@]%.yml}")
+# Variables obligatoires d'un mode, absentes de l'exemple (lignes commentées) : valeurs de test
+# fournies quand un mode est imposé (ACME_EMAIL : TLS_MODE=letsencrypt)
+VARS_MODE_TLS=(ACME_EMAIL=verify@devops-platform.test)
 if [[ -f compose.yml ]]; then
   shopt -s nullglob dotglob
   env_files=(envs/*.env envs/.env.example)
@@ -54,6 +61,26 @@ if [[ -f compose.yml ]]; then
   for f in "${env_files[@]}"; do
     if docker compose --env-file "$f" -f compose.yml config -q; then ok "$f"; else ko "$f"; fi
   done
+  # Chaque overlay de mode TLS (compose/tls/<mode>.yml), sur l'exemple
+  for mode in "${tls_modes[@]}"; do
+    if env "${VARS_MODE_TLS[@]}" TLS_MODE="$mode" docker compose --env-file envs/.env.example -f compose.yml config -q; then
+      ok "envs/.env.example, TLS_MODE=$mode"
+    else
+      ko "envs/.env.example, TLS_MODE=$mode"
+    fi
+  done
+  # Chaque challenge ACME de TLS_MODE=letsencrypt (config/traefik/acme-<challenge>.env), sur l'exemple
+  shopt -s nullglob
+  for c in config/traefik/acme-*.env; do
+    c="${c##*/acme-}" c="${c%.env}"
+    if env "${VARS_MODE_TLS[@]}" TLS_MODE=letsencrypt ACME_CHALLENGE="$c" \
+        docker compose --env-file envs/.env.example -f compose.yml config -q; then
+      ok "envs/.env.example, TLS_MODE=letsencrypt, ACME_CHALLENGE=$c"
+    else
+      ko "envs/.env.example, TLS_MODE=letsencrypt, ACME_CHALLENGE=$c"
+    fi
+  done
+  shopt -u nullglob
 else
   ok "pas encore de compose.yml"
 fi
@@ -100,10 +127,11 @@ fi
 
 # 3 quater. Ports publiés : seuls 80 (et 443, TLS) via Traefik et le SSH GitLab (US 3-6). Le web passe
 #           par Traefik (routage par hostname). Liste blanche service:publié:cible, contrôlée pour chaque
-#           environnement ; `*` = port publié libre (GITLAB_SSH_PORT). `expose` ne publie rien (non contrôlé).
+#           environnement et pour chaque mode TLS (sur l'exemple) ; `*` = port publié libre
+#           (GITLAB_SSH_PORT). `expose` ne publie rien (non contrôlé).
 #           Un network_mode host, service:… ou container:… contournerait la liste : refusé.
 section "ports publiés"
-# traefik:443:443 anticipé pour le TLS (US 3-2 à 3-4)
+# traefik:443:443 : HTTPS (TLS_MODE custom ou letsencrypt, overlay compose/tls/<mode>.yml)
 PORTS_AUTORISES=(traefik:80:80 traefik:443:443 'gitlab:*:22')
 port_autorise() { # <service:publié:cible>
   local a
@@ -114,10 +142,16 @@ port_autorise() { # <service:publié:cible>
   return 1
 }
 if [[ -f compose.yml ]]; then
-  for f in "${env_files[@]}"; do
+  # Cible : <fichier env>[|<TLS_MODE imposé>]
+  cibles=("${env_files[@]}")
+  for mode in "${tls_modes[@]}"; do cibles+=("envs/.env.example|$mode"); done
+  for cible in "${cibles[@]}"; do
+    f="${cible%%|*}" mode=""
+    [[ "$cible" == *"|"* ]] && mode="${cible#*|}" f="$f, TLS_MODE=$mode"
     # Sortie normalisée : service à 2 espaces, `ports:` / `network_mode:` à 4, éléments `- ` à 6,
     # champs `target:` / `published:` à 8
-    if ! config="$(docker compose --env-file "$f" -f compose.yml config 2>/dev/null)"; then
+    if ! config="$(if [[ -n "$mode" ]]; then export TLS_MODE="$mode" "${VARS_MODE_TLS[@]}"; fi
+                   docker compose --env-file "${cible%%|*}" -f compose.yml config 2>/dev/null)"; then
       ko "$f : configuration illisible"; continue
     fi
     mapfile -t publies < <(awk '
@@ -162,8 +196,8 @@ section "variables documentées"
 if [[ -f compose.yml && -f envs/.env.example ]]; then
   # Variables interpolées, et sources `environment: <VAR>` des secrets (lues sans interpolation)
   mapfile -t compose_vars < <({
-    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml | sed -E 's/.*\$\{//'
-    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml
+    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml compose/tls/*.yml | sed -E 's/.*\$\{//'
+    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml compose/tls/*.yml
   } | sort -u)
   missing=0
   for v in "${compose_vars[@]}"; do
@@ -205,7 +239,7 @@ if [[ -f compose.yml ]]; then
     if [[ "$doc" != "$defaut" ]]; then
       ko "$var : défaut compose ($defaut) ≠ envs/.env.example (${doc:-absent})"; images_ko=1
     fi
-  done < <(grep -nE '^[[:space:]]*image:' compose.yml compose/*.yml)
+  done < <(grep -nE '^[[:space:]]*image:' compose.yml compose/*.yml compose/tls/*.yml)
 fi
 # Images lancées par les scripts : variables *_IMAGE à tag versionné ou digest
 while IFS=: read -r fichier num ligne; do
@@ -232,7 +266,7 @@ shopt -u nullglob
 # 6. Noms de conteneurs : Compose les attribue, les scripts ciblent les services
 #    (`docker compose exec <service>`). Commentaires ignorés ; `docker run` et `docker inspect <id>` admis.
 section "noms de conteneurs"
-if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml; then
+if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml compose/tls/*.yml; then
   ko "nom de conteneur fixé dans un fichier compose (voir ci-dessus)"
 else
   ok "aucun nom fixé dans les fichiers compose"
@@ -263,14 +297,16 @@ if [[ -f compose.yml ]]; then
     fi
   }
   if sortie="$(compose_propre)"; then ok "compose.yml : accepté"; else ko "compose.yml : refusé : $sortie"; fi
-  for f in compose/*.yml; do
+  for f in compose/*.yml compose/tls/*.yml; do
     m="$(basename "$f" .yml)"
+    [[ "$f" == compose/tls/* ]] && m="tls-$m"
     grep -qE "^x-garde-fou-${m}: \"\\$\{PLATFORM_GARDE_FOU:\?" "$f" || ko "$f : extension x-garde-fou-${m} absente"
     refus_attendu "PLATFORM_GARDE_FOU" "$f seul" -f "$f"
   done
   refus_attendu "projet-autorise/devops-platform-garde-fou-test.env" "-p devops-platform-garde-fou-test" \
     -p devops-platform-garde-fou-test
-  nb_includes="$(grep -cE '^  - path: compose/' compose.yml)"
+  # Entrées d'include (chemin simple ou liste de chemins fusionnés)
+  nb_includes="$(grep -cE '^  - path:' compose.yml)"
   # shellcheck disable=SC2016 # ${COMPOSE_PROJECT_NAME} littéral, interpolé par Compose
   nb_gardes="$(grep -cxF '    env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env' compose.yml)"
   if ((nb_includes == nb_gardes)); then

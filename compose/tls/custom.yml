@@ -1,0 +1,49 @@
+# =============================================================================
+# Overlay du proxy pour TLS_MODE=custom : HTTPS avec les certificats fournis dans config/certs/
+# Fusionné avec compose/proxy.yml par l'include de compose.yml (compose/tls/${TLS_MODE}.yml) ; ne
+# se lance pas seul. Certificats attendus, contrôles et renouvellement : docs/certificats.md.
+# Chemins relatifs : résolus depuis le répertoire du premier fichier de l'include (compose/), d'où
+# `../config/…`.
+# =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-tls-custom: "${PLATFORM_GARDE_FOU:?compose/tls/custom.yml est un overlay du proxy de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
+services:
+  traefik:
+    environment:
+      # Entrypoint HTTPS, par défaut pour tous les routeurs (labels sans `entrypoints`), TLS activé
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: ":443"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ASDEFAULT: "true"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS: "true"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_ALIASHEADERSSTRATEGY: delete
+      # HTTP (:80) redirigé vers HTTPS. Redirection non permanente : une 308 mise en cache par les
+      # navigateurs gênerait un retour en TLS_MODE=none.
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_TO: websecure
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_SCHEME: https
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_PERMANENT: "false"
+      # Certificat par défaut (config/traefik/tls-custom.yml → /certs/cert.pem, /certs/key.pem)
+      TRAEFIK_PROVIDERS_FILE_FILENAME: /etc/traefik/dynamic/tls-custom.yml
+    ports:
+      - "443:443"
+    # Fichiers montés un à un, sans création du chemin sur l'hôte : un certificat absent fait échouer
+    # `up` (« bind source path does not exist ») au lieu que Docker crée un répertoire vide. Traefik
+    # lit les certificats au démarrage : après remplacement, make reload-certs ENV=<env>.
+    volumes:
+      - type: bind
+        source: ../config/traefik/tls-custom.yml
+        target: /etc/traefik/dynamic/tls-custom.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../config/certs/cert.pem
+        target: /certs/cert.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../config/certs/key.pem
+        target: /certs/key.pem
+        read_only: true
+        bind:
+          create_host_path: false

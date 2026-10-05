@@ -12,37 +12,41 @@ services:
   # Traefik — reverse proxy, routage par hostname (*_HOSTNAME de l'instance)
   # Seul service web à publier un port sur l'hôte. Les services exposés le déclarent par leurs
   # labels traefik.* (traefik.enable=true, règle Host(`<hostname>`), port interne).
+  # Configuration statique par variables TRAEFIK_* (et non par `command:`) : Traefik n'accepte qu'une
+  # source (fichier, arguments ou variables) et l'overlay du mode TLS (compose/tls/<mode>.yml, fusionné
+  # par l'include de compose.yml) complète `environment`, `ports` et `volumes` ; `command` serait
+  # remplacé en entier. Entrypoint web (:80, HTTP) commun à tous les modes.
+  # Routeurs : aucun label `entrypoints` sur les services ; ils suivent les entrypoints par défaut
+  # (tous sauf `traefik` ; en HTTPS, l'overlay marque `websecure` asDefault).
   # Alias réseau : les hostnames publics désignent Traefik dans le réseau de la plateforme (runner,
   # jobs CI) ; le runner et les jobs dépendent donc de Traefik pour joindre GitLab.
-  # Entrypoint web (:80, HTTP) : mode TLS_MODE=none (contrôles et avertissement : make check-env,
-  # scripts/check-env-urls.sh). HTTPS (443) pour letsencrypt et custom : US 3-2 et 3-3.
   # ---------------------------------------------------------------------------
   traefik:
     image: traefik:${TRAEFIK_VERSION:-v3.7.13}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
-    command:
-      - --entrypoints.web.address=:80
+    environment:
+      TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: ":80"
       # Supprime les en-têtes alias (X_Forwarded_For…) : nginx (GitLab) les lirait comme les en-têtes
       # posés par Traefik, ce qui permettrait à un client de les usurper
-      - --entrypoints.web.http.aliasheadersstrategy=delete
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_ALIASHEADERSSTRATEGY: delete
       # Seuls les conteneurs marqués traefik.enable=true sont exposés
-      - --providers.docker.exposedbydefault=false
+      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
       # Réseau par lequel joindre les services (requis dès qu'un conteneur en a plusieurs)
-      - --providers.docker.network=${PLATFORM_NETWORK:-devops-platform}
+      TRAEFIK_PROVIDERS_DOCKER_NETWORK: ${PLATFORM_NETWORK:-devops-platform}
       # Ignore les conteneurs hors projet (jobs CI lancés sur le même réseau). Nom de projet en dur :
       # le changer impose de modifier aussi `name:` dans compose.yml et compose/projet-autorise/.
-      - '--providers.docker.constraints=Label(`com.docker.compose.project`,`devops-platform`)'
+      TRAEFIK_PROVIDERS_DOCKER_CONSTRAINTS: Label(`com.docker.compose.project`,`devops-platform`)
       # Sonde de santé sur l'entrypoint interne par défaut `traefik` (:8080, non publié) : ne pas
       # redéfinir cet entrypoint, `traefik healthcheck` suppose sa valeur par défaut.
-      # Aucune option --api.* : l'API et le dashboard restent désactivés.
-      - --ping=true
+      # Aucune variable TRAEFIK_API* : l'API et le dashboard restent désactivés.
+      TRAEFIK_PING: "true"
       # Logs d'accès sur la sortie standard, collectés par promtail
-      - --accesslog=true
-      - --log.level=INFO
-      - --global.checknewversion=false
-      - --global.sendanonymoususage=false
+      TRAEFIK_ACCESSLOG: "true"
+      TRAEFIK_LOG_LEVEL: INFO
+      TRAEFIK_GLOBAL_CHECKNEWVERSION: "false"
+      TRAEFIK_GLOBAL_SENDANONYMOUSUSAGE: "false"
     ports:
       - "80:80"
     volumes:
