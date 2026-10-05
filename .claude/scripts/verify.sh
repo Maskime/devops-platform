@@ -53,7 +53,22 @@ else
   ok "pas encore de compose.yml"
 fi
 
-# 4. Secrets : délégué au garde-fou du repo (fichiers suivis et non suivis non ignorés)
+# 4. Chaque variable interpolée par compose est documentée dans envs/.env.example
+#    ($${…} = échappement compose, ignoré ; minuscules = variables shell des healthchecks)
+section "variables documentées"
+if [[ -f compose.yml && -f envs/.env.example ]]; then
+  mapfile -t compose_vars < <(grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml \
+    | sed -E 's/.*\$\{//' | sort -u)
+  missing=0
+  for v in "${compose_vars[@]}"; do
+    grep -qE "^#?${v}=" envs/.env.example || { ko "$v absente de envs/.env.example"; missing=1; }
+  done
+  ((missing)) || ok "${#compose_vars[@]} variable(s)"
+else
+  ok "pas encore de compose.yml"
+fi
+
+# 5. Secrets : délégué au garde-fou du repo (fichiers suivis et non suivis non ignorés)
 section "secrets"
 if scripts/check-secrets.sh; then ok "rien à signaler"; else ko "secrets (voir ci-dessus)"; fi
 

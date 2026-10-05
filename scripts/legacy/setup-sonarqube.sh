@@ -17,7 +17,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 charger_env
 
-SONARQUBE_URL="${SONARQUBE_EXTERNAL_URL:-http://localhost:9000}"
+SONARQUBE_URL="${SONARQUBE_EXTERNAL_URL:-http://localhost:${SONARQUBE_PORT:-9000}}"
 ADMIN_PASSWORD="${SONARQUBE_ADMIN_PASSWORD:-}"
 # shellcheck disable=SC2034  # lue indirectement par la boucle ci-dessous
 DB_PASSWORD="${SONARQUBE_DB_PASSWORD:-}"

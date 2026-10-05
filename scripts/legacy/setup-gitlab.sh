@@ -11,7 +11,8 @@
 #   - runner existant recherché via /runners/all (l'endpoint /runners ne renvoie pas les runners
 #     d'instance : le script en réenregistrait un à chaque passage) ;
 #   - jeton d'accès vérifié (préfixe glpat-) et erreurs de gitlab-rails affichées ;
-#   - images épinglées (alpine), réseau issu de lib.sh ; messages en français.
+#   - images épinglées (alpine), réseau issu de lib.sh ; messages en français ;
+#   - runner déjà en ligne : réseau des jobs réaligné sur PLATFORM_NETWORK s'il a changé.
 set -euo pipefail
 
 # shellcheck source=scripts/legacy/lib.sh
@@ -125,7 +126,16 @@ EXISTING_RUNNER_ID="${EXISTING_RUNNER%%:*}"
 EXISTING_RUNNER_STATUS="${EXISTING_RUNNER##*:}"
 
 if [[ -n "$EXISTING_RUNNER_ID" && "$EXISTING_RUNNER_STATUS" == "online" ]]; then
-  echo "    Runner déjà enregistré et en ligne (id=$EXISTING_RUNNER_ID), rien à faire."
+  echo "    Runner déjà enregistré et en ligne (id=$EXISTING_RUNNER_ID)."
+  # Le réseau des jobs est écrit dans config.toml à l'enregistrement : après un changement de
+  # PLATFORM_NETWORK, il pointe encore vers l'ancien réseau. Le runner recharge config.toml à chaud.
+  RESEAU_JOBS=$(dc exec -T gitlab-runner \
+    sed -n 's/^ *network_mode = "\(.*\)"$/\1/p' /etc/gitlab-runner/config.toml | head -n1)
+  if [[ -n "$RESEAU_JOBS" && "$RESEAU_JOBS" != "$RESEAU" ]]; then
+    dc exec -T gitlab-runner \
+      sed -i "s/^\( *network_mode = \)\".*\"\$/\1\"$RESEAU\"/" /etc/gitlab-runner/config.toml
+    echo "    Réseau des jobs réaligné : $RESEAU_JOBS → $RESEAU."
+  fi
 else
   if [[ -n "$EXISTING_RUNNER_ID" ]]; then
     echo "    Runner id=$EXISTING_RUNNER_ID présent mais '$EXISTING_RUNNER_STATUS' — suppression et réenregistrement..."

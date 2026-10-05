@@ -8,14 +8,18 @@ services:
   # GitLab CE — forge, tickets, CI/CD
   # ---------------------------------------------------------------------------
   gitlab:
-    image: gitlab/gitlab-ce:19.4.1-ce.0
+    image: gitlab/gitlab-ce:${GITLAB_VERSION:-19.4.1-ce.0}
     container_name: gitlab
     restart: always
     hostname: gitlab
     environment:
       GITLAB_OMNIBUS_CONFIG: |
-        external_url '${GITLAB_EXTERNAL_URL}'
-        gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD}'
+        external_url '${GITLAB_EXTERNAL_URL:?GITLAB_EXTERNAL_URL obligatoire (voir envs/.env.example)}'
+        gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD:?GITLAB_ROOT_PASSWORD obligatoire (voir envs/.env.example)}'
+        # Port SSH publié sur l'hôte, affiché dans les URLs de clone
+        gitlab_rails['gitlab_shell_ssh_port'] = ${GITLAB_SSH_PORT:-2222}
+        # Écoute interne fixe sur 80, quel que soit le port porté par external_url (publié via GITLAB_HTTP_PORT)
+        nginx['listen_port'] = 80
 
         # Memory tuning — cible ~3-4 GB au lieu de 10 GB par défaut
         puma['worker_processes'] = 2
@@ -31,8 +35,8 @@ services:
         postgresql['shared_buffers'] = '256MB'
         postgresql['max_connections'] = 100
     ports:
-      - "80:80"
-      - "2222:22"
+      - "${GITLAB_HTTP_PORT:-80}:80"
+      - "${GITLAB_SSH_PORT:-2222}:22"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost/-/health"]
       interval: 30s
@@ -44,13 +48,13 @@ services:
       - gitlab_logs:/var/log/gitlab
       - gitlab_data:/var/opt/gitlab
     networks:
-      - factory-network
+      - platform
 
   # ---------------------------------------------------------------------------
   # GitLab Runner — exécuteur CI/CD
   # ---------------------------------------------------------------------------
   gitlab-runner:
-    image: gitlab/gitlab-runner:v19.4.1
+    image: gitlab/gitlab-runner:${GITLAB_RUNNER_VERSION:-v19.4.1}
     container_name: gitlab-runner
     restart: always
     environment:
@@ -58,7 +62,7 @@ services:
       LISTEN_ADDRESS: ":9252"
     volumes:
       - gitlab_runner_config:/etc/gitlab-runner
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "-sf", "-o", "/dev/null", "http://localhost:9252/metrics"]
       interval: 10s
@@ -66,15 +70,15 @@ services:
       retries: 10
       start_period: 20s
     networks:
-      - factory-network
+      - platform
     depends_on:
       gitlab:
         condition: service_healthy
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
-  factory-network:
-    name: factory-network
+  platform:
+    name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
 
 volumes:

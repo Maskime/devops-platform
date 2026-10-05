@@ -9,10 +9,36 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Configuration d'une instance entièrement portée par `envs/<env>.env` : ports publiés
+  (`GITLAB_HTTP_PORT`, `GITLAB_SSH_PORT`, `SONARQUBE_PORT`, `PORTAINER_PORT`, `PORTAINER_EDGE_PORT`,
+  `GRAFANA_PORT`, `PLANTUML_PORT`), URLs publiques (`SONARQUBE_EXTERNAL_URL`, `GRAFANA_EXTERNAL_URL`),
+  réseau (`PLATFORM_NETWORK`), socket Docker (`DOCKER_SOCKET`) et tags d'images (`*_VERSION`),
+  avec valeurs par défaut.
+- `envs/.env.example` documente chaque variable : rôle, valeur par défaut, obligatoire ou non.
+- `make check-env` (préalable des cibles d'instance) : exige `ENV=<env>` sur la ligne de commande,
+  valide son format, refuse les versions vides ou `latest` et signale les variables obligatoires
+  manquantes.
+- `verify.sh` vérifie que chaque variable des fichiers compose est documentée dans `envs/.env.example`.
+- GitLab : port SSH affiché dans les URLs de clone (`gitlab_shell_ssh_port`).
+- SonarQube : URL publique (`sonar.core.serverBaseURL`) issue de `SONARQUBE_EXTERNAL_URL` ;
+  Grafana : `root_url` issue de `GRAFANA_EXTERNAL_URL`.
 - Garde-fou contre les fuites de secrets `scripts/check-secrets.sh` (repris de Software Factory dans
   sa partie générique), exécuté par `make check-secrets`, `make verify` et la CI GitHub Actions
   sur chaque push et pull request ; mode `--history` pour l'historique de la branche.
 - Hook pre-commit optionnel (`.githooks/pre-commit`), activé par `make install-hooks`.
+
+### Modifié
+
+- Réseau Docker renommé `factory-network` → `devops-platform` (paramétrable via `PLATFORM_NETWORK`).
+  Au prochain `make deploy`, les conteneurs d'une instance existante sont recréés sur le nouveau
+  réseau (quelques minutes d'indisponibilité de GitLab, volumes conservés) : `make deploy` détecte
+  le changement de réseau et force la recréation, faute de quoi Compose se contente de reconnecter
+  les conteneurs, qui ne redémarrent plus (`network factory-network not found`). Le réseau des jobs CI du
+  runner déjà enregistré est réaligné par `make bootstrap-legacy`, ou à la main (`network_mode` dans
+  `/etc/gitlab-runner/config.toml`). L'ancien réseau peut ensuite être supprimé :
+  `docker network rm factory-network`.
+- `GITLAB_EXTERNAL_URL`, `GITLAB_ROOT_PASSWORD`, `SONARQUBE_DB_PASSWORD` et `GRAFANA_ADMIN_PASSWORD`
+  sont obligatoires : `docker compose` refuse de démarrer sans elles.
 
 ## [0.1.0] - 2026-10-05
 

@@ -8,12 +8,12 @@ services:
   # SonarQube DB — PostgreSQL 17 (SonarQube 26.5 supporte 15 à 17 ; 18 à partir de 26.8)
   # ---------------------------------------------------------------------------
   sonarqube-db:
-    image: postgres:17.11
+    image: postgres:${SONARQUBE_DB_VERSION:-17.11}
     container_name: sonarqube-db
     restart: always
     environment:
       POSTGRES_USER: sonar
-      POSTGRES_PASSWORD: ${SONARQUBE_DB_PASSWORD}
+      POSTGRES_PASSWORD: ${SONARQUBE_DB_PASSWORD:?SONARQUBE_DB_PASSWORD obligatoire (voir envs/.env.example)}
       POSTGRES_DB: sonar
     volumes:
       - sonarqube_db:/var/lib/postgresql/data
@@ -23,7 +23,7 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - factory-network
+      - platform
 
   # ---------------------------------------------------------------------------
   # SonarQube Community Edition + plugin community branch
@@ -31,7 +31,7 @@ services:
   # Prérequis hôte : sysctl -w vm.max_map_count=524288 (Elasticsearch intégré)
   # ---------------------------------------------------------------------------
   sonarqube:
-    image: mc1arke/sonarqube-with-community-branch-plugin:26.5.0.122743-community
+    image: mc1arke/sonarqube-with-community-branch-plugin:${SONARQUBE_VERSION:-26.5.0.122743-community}
     container_name: sonarqube
     restart: always
     depends_on:
@@ -40,9 +40,14 @@ services:
     environment:
       SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonar
       SONAR_JDBC_USERNAME: sonar
-      SONAR_JDBC_PASSWORD: ${SONARQUBE_DB_PASSWORD}
+      SONAR_JDBC_PASSWORD: ${SONARQUBE_DB_PASSWORD:?SONARQUBE_DB_PASSWORD obligatoire (voir envs/.env.example)}
+    # URL publique (liens des notifications, décoration des merge requests). Passée en option -D :
+    # la variable d'environnement SONAR_CORE_SERVERBASEURL serait lue en minuscules
+    # (sonar.core.serverbaseurl) et ignorée.
+    command:
+      - -Dsonar.core.serverBaseURL=${SONARQUBE_EXTERNAL_URL:-http://localhost:${SONARQUBE_PORT:-9000}}
     ports:
-      - "9000:9000"
+      - "${SONARQUBE_PORT:-9000}:9000"
     ulimits:
       nofile:
         soft: 65536
@@ -58,12 +63,12 @@ services:
       retries: 20
       start_period: 120s
     networks:
-      - factory-network
+      - platform
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
-  factory-network:
-    name: factory-network
+  platform:
+    name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
 
 volumes:

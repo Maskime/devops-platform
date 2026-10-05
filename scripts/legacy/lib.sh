@@ -4,12 +4,10 @@
 # À sourcer, pas à exécuter. Fournit :
 #   charger_env — exporte les variables de envs/$ENV.env (ENV obligatoire)
 #   dc          — docker compose de l'instance, quel que soit le répertoire courant
-#   ROOT        — racine du repo ; RESEAU — réseau Docker de la plateforme
+#   ROOT        — racine du repo
+#   RESEAU      — réseau Docker de la plateforme (positionné par charger_env)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# Nom du réseau fixé par `name:` dans compose/*.yml ; son paramétrage relève de l'épopée 2.
-# shellcheck disable=SC2034  # utilisée par les scripts qui sourcent ce fichier
-RESEAU="factory-network"
 
 # Lit le fichier d'environnement ligne à ligne (format env-file de Compose), sans `source` ni eval :
 # les valeurs peuvent contenir des caractères spéciaux du shell ($ & ; ' "…) sans être interprétées.
@@ -33,6 +31,10 @@ charger_env() {
     fi
     export "$cle=$valeur"
   done < "$ENV_FILE"
+
+  # Même défaut que `networks.platform.name` dans compose/*.yml
+  # shellcheck disable=SC2034  # utilisée par les scripts qui sourcent ce fichier
+  RESEAU="${PLATFORM_NETWORK:-devops-platform}"
 }
 
 dc() {

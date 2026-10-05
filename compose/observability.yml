@@ -7,10 +7,10 @@ services:
 
   # ---------------------------------------------------------------------------
   # Loki — agrégateur de logs
-  # Interne uniquement — accessible sur factory-network via loki:3100
+  # Interne uniquement — accessible sur le réseau de la plateforme via loki:3100
   # ---------------------------------------------------------------------------
   loki:
-    image: grafana/loki:3.7.8
+    image: grafana/loki:${LOKI_VERSION:-3.7.8}
     container_name: loki
     restart: unless-stopped
     command: -config.file=/etc/loki/loki-config.yaml
@@ -22,20 +22,20 @@ services:
     # Pas de healthcheck : l'image est distroless depuis Loki 3.6 (ni shell, ni wget, ni curl).
     # Disponibilité vérifiable via GET http://loki:3100/ready depuis le réseau.
     networks:
-      - factory-network
+      - platform
 
   # ---------------------------------------------------------------------------
   # Promtail — collecteur de logs Docker → Loki
   # Déprécié par Grafana (3.6.x = dernière version) : migration vers Alloy suivie dans #35
   # ---------------------------------------------------------------------------
   promtail:
-    image: grafana/promtail:3.6.11
+    image: grafana/promtail:${PROMTAIL_VERSION:-3.6.11}
     container_name: promtail
     restart: unless-stopped
     command: -config.file=/etc/promtail/promtail-config.yaml
     volumes:
       - ../config/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - promtail_positions:/var/promtail
     # Sonde /ready de promtail ET de loki : l'image loki est distroless (ni shell ni client HTTP),
     # promtail sert donc de témoin de santé de loki. Image sans curl ni wget : requête via /dev/tcp.
@@ -60,22 +60,23 @@ services:
       loki:
         condition: service_started
     networks:
-      - factory-network
+      - platform
 
   # ---------------------------------------------------------------------------
   # Grafana — UI de visualisation des logs
   # Image grafana/grafana : grafana/grafana-oss n'est plus publiée depuis la 13.0.2
-  # URL : http://localhost:${GRAFANA_PORT:-3100}
+  # URL : ${GRAFANA_EXTERNAL_URL} (défaut : http://localhost:${GRAFANA_PORT})
   # ---------------------------------------------------------------------------
   grafana:
-    image: grafana/grafana:13.2.3
+    image: grafana/grafana:${GRAFANA_VERSION:-13.2.3}
     container_name: grafana
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD obligatoire (voir envs/.env.example)}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SERVER_HTTP_PORT: "3000"
+      GF_SERVER_ROOT_URL: ${GRAFANA_EXTERNAL_URL:-http://localhost:${GRAFANA_PORT:-3100}}
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
     ports:
       - "${GRAFANA_PORT:-3100}:3000"
@@ -92,12 +93,12 @@ services:
       retries: 10
       start_period: 30s
     networks:
-      - factory-network
+      - platform
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
-  factory-network:
-    name: factory-network
+  platform:
+    name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
 
 volumes:

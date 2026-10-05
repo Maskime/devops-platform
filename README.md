@@ -51,13 +51,17 @@ make deploy ENV=local                 # démarre tous les services et attend qu'
 make bootstrap-legacy ENV=local       # optionnel : bootstrap repris de Software Factory
 ```
 
-| Service | URL locale |
-|---|---|
-| GitLab | http://localhost (SSH : port 2222) |
-| SonarQube | http://localhost:9000 |
-| Grafana | http://localhost:3100 (`GRAFANA_PORT`) |
-| Portainer | https://localhost:9443 |
-| PlantUML | http://localhost:8081 (`PLANTUML_PORT`) |
+Toute la configuration de l'instance (ports, URLs, réseau, versions, secrets) tient dans
+`envs/<env>.env` : chaque variable est documentée dans [`envs/.env.example`](envs/.env.example).
+Les URLs locales par défaut :
+
+| Service | URL locale | Variable de port |
+|---|---|---|
+| GitLab | http://localhost (SSH : port 2222) | `GITLAB_HTTP_PORT`, `GITLAB_SSH_PORT` |
+| SonarQube | http://localhost:9000 | `SONARQUBE_PORT` |
+| Grafana | http://localhost:3100 | `GRAFANA_PORT` |
+| Portainer | https://localhost:9443 | `PORTAINER_PORT` |
+| PlantUML | http://localhost:8081 | `PLANTUML_PORT` |
 
 > ⚠️ `make bootstrap-legacy` est **temporaire** : il reprend les scripts `setup-*.sh` de Software
 > Factory (`scripts/legacy/`), qui créent des **données de test** (projet `factory-test`, pipeline,
