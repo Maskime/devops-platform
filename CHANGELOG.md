@@ -9,6 +9,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- `GITLAB_EXTERNAL_URL` devient optionnelle : commenter la ligne de chaque `envs/<env>.env` existant
+  pour adopter l'URL dérivée (`https://<GITLAB_HOSTNAME>` en `letsencrypt` et `custom`,
+  `http://<GITLAB_HOSTNAME>` en `none`). Tant que le HTTPS n'est pas servi par Traefik (US 3-2, 3-3),
+  une instance en `letsencrypt` ou `custom` doit **garder** `GITLAB_EXTERNAL_URL=http://…` explicite.
+- Runner déjà enregistré par `make bootstrap-legacy` : la relance réaligne son `url` et son
+  `clone_url` (`config.toml`) sur l'URL publique.
 - Ajouter `PORTAINER_ADMIN_PASSWORD` (12 caractères minimum) à chaque `envs/<env>.env` existant, sinon
   `make deploy` et `make check-env` refusent de démarrer. Sur une instance déjà initialisée, Portainer
   ignore cette valeur : y reporter le mot de passe admin réel pour garder le fichier à jour.
@@ -16,6 +22,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- GitLab derrière le proxy : `external_url` dérivée de `GITLAB_HOSTNAME` et du `TLS_MODE` ; nginx
+  interne en HTTP seul (ni HTTPS, ni redirection, ni Let's Encrypt : pas de double TLS), schéma public
+  transmis (`X-Forwarded-Proto`), IP réelle des clients (`X-Forwarded-For`). `make check-env` valide
+  `GITLAB_SSH_PORT` (affiché dans les URLs de clone SSH) et signale une `GITLAB_EXTERNAL_URL` en
+  `http://` hors `TLS_MODE=none`.
+- Traefik porte les `*_HOSTNAME` en alias réseau : le runner (bootstrap legacy) s'enregistre et clone
+  par l'URL publique de GitLab, via Traefik ; clone par `http://gitlab` pour un hostname `*.localhost`
+  (libcurl le résout toujours vers `127.0.0.1`).
 - `TLS_MODE=none` (HTTP simple, usage local) : services servis en HTTP par Traefik sur le port 80.
   `make check-env` (donc `deploy`) valide `TLS_MODE` (vide ou absent : `none`), exige des
   `*_EXTERNAL_URL` en `http://` en mode `none` et avertit, sans bloquer, si un hostname n'est pas local
