@@ -94,13 +94,14 @@ deploy: check-env ## [ENV] Démarre l'instance ENV en local et attend que tous l
 	@scripts/check-doublons.sh "$(ENV_FILE)"
 	@# Compose reconnecte les conteneurs existants à un réseau renommé (PLATFORM_NETWORK) sans les
 	@# recréer : leur NetworkMode vise encore l'ancien réseau, supprimé, et ils ne redémarrent plus.
-	@# Dans ce cas, recréation forcée (volumes conservés).
-	@reseau="$$($(COMPOSE) config | sed -n '/^networks:/,/^[^ ]/ s/^    name: //p' | head -n1)"; \
+	@# Dans ce cas, recréation forcée (volumes conservés). Un conteneur peut n'être que sur un réseau
+	@# dédié (socket-proxy) : son réseau principal est comparé à l'ensemble des réseaux déclarés.
+	@reseaux=" $$($(COMPOSE) config | sed -n '/^networks:/,/^[^ ]/ s/^    name: //p' | paste -sd ' ' -) "; \
 	options=(); \
 	for id in $$($(COMPOSE) ps -aq); do \
 	  mode="$$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$$id")"; \
-	  if [[ "$$mode" != "$$reseau" ]]; then \
-	    echo "Réseau modifié ($$mode → $$reseau) : recréation des conteneurs."; options=(--force-recreate); break; \
+	  if [[ "$$reseaux" != *" $$mode "* ]]; then \
+	    echo "Réseau modifié ($$mode, absent de :$$reseaux) : recréation des conteneurs."; options=(--force-recreate); break; \
 	  fi; \
 	done; \
 	set -x; $(COMPOSE) up -d --wait --wait-timeout 900 "$${options[@]}"

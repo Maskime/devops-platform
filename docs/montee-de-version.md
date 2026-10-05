@@ -36,6 +36,7 @@ perte de données.
 | `portainer/portainer-ce` | `PORTAINER_VERSION` | variante `-alpine` (healthcheck) | [portainer](https://github.com/portainer/portainer/releases) |
 | `plantuml/plantuml-server` | `PLANTUML_VERSION` | variante `jetty-` | [plantuml-server](https://github.com/plantuml/plantuml-server/releases) |
 | `traefik` | `TRAEFIK_VERSION` | ≥ 3.6.1 pour Docker Engine 29 ; préfixe `v` | [traefik](https://github.com/traefik/traefik/releases) |
+| `wollomatic/socket-proxy` | `SOCKET_PROXY_VERSION` | tag sans préfixe `v` ; liste blanche à revalider ([accès à l'API Docker](acces-docker.md)) | [socket-proxy](https://github.com/wollomatic/socket-proxy/releases) |
 
 Images d'outillage, épinglées en dur dans les scripts (variables `*_IMAGE`, contrôlées par `make verify`) :
 

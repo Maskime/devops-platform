@@ -31,6 +31,9 @@ services:
       # Supprime les en-têtes alias (X_Forwarded_For…) : nginx (GitLab) les lirait comme les en-têtes
       # posés par Traefik, ce qui permettrait à un client de les usurper
       TRAEFIK_ENTRYPOINTS_WEB_HTTP_ALIASHEADERSSTRATEGY: delete
+      # API Docker lue via le proxy de socket filtrant (compose/socket-proxy.yml) : Traefik ne monte
+      # pas le socket, une compromission ne donne pas la main sur l'hôte
+      TRAEFIK_PROVIDERS_DOCKER_ENDPOINT: tcp://socket-proxy:2375
       # Seuls les conteneurs marqués traefik.enable=true sont exposés
       TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
       # Réseau par lequel joindre les services (requis dès qu'un conteneur en a plusieurs)
@@ -49,8 +52,9 @@ services:
       TRAEFIK_GLOBAL_SENDANONYMOUSUSAGE: "false"
     ports:
       - "80:80"
-    volumes:
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    depends_on:
+      socket-proxy:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 10s
@@ -58,6 +62,9 @@ services:
       retries: 10
       start_period: 10s
     networks:
+      # platform : seul réseau à passerelle (socket-proxy est interne), donc porteur des ports publiés
+      # et de l'accès sortant (ACME). Pas de gw_priority : il exigerait Compose 2.33 / Engine 28,
+      # au-delà des versions minimales de scripts/host-prereqs.sh.
       platform:
         # Hostnames publics résolus vers Traefik dans le réseau de la plateforme : le runner, les jobs CI
         # et les services joignent les URLs publiques par le même chemin (et le même certificat) que les
@@ -69,9 +76,15 @@ services:
           - ${GRAFANA_HOSTNAME:-grafana.localhost}
           - ${PORTAINER_HOSTNAME:-portainer.localhost}
           - ${PLANTUML_HOSTNAME:-plantuml.localhost}
+      # Accès à l'API Docker filtrée (compose/socket-proxy.yml)
+      socket-proxy: {}
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
   platform:
     name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
+  socket-proxy:
+    name: devops-platform_socket-proxy
+    driver: bridge
+    internal: true
