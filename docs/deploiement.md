@@ -52,8 +52,12 @@ le met à jour. Toutes les commandes Docker de l'instance passent ensuite par ce
   contexte.
 - Sans `DEPLOY_SSH`, `make` utilise le moteur courant du poste, comme avant.
 
-Compose ouvre plusieurs connexions SSH à la fois. Si le serveur coupe des connexions (`MaxStartups`,
-`MaxSessions` de sshd), un multiplexage SSH côté poste les regroupe en une seule :
+Chaque requête simultanée de Compose ouvre sa propre connexion SSH. Avec la configuration par
+défaut de sshd (`MaxStartups 10:30:100`), au-delà d'une dizaine de connexions en cours d'ouverture,
+le serveur en coupe (« Connection closed by … », `dial-stdio` en échec). En déploiement distant,
+`make` borne donc le parallélisme de Compose à 4 (`COMPOSE_PARALLEL_LIMIT`, une valeur exportée dans
+le shell reste prioritaire). Pour accélérer les commandes, un multiplexage SSH côté poste fait passer
+toutes ces connexions par une seule :
 
 ```text
 # ~/.ssh/config

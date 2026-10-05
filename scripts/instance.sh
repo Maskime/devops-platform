@@ -22,6 +22,7 @@ readonly BUSYBOX_IMAGE="busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfd
 readonly DEPLOY_DIR_DEFAUT=/opt/devops-platform
 readonly ENGINE_MIN=25
 readonly WAIT_TIMEOUT=900
+readonly PARALLELISME_SSH=4
 # Fichiers de config/ montés par les services (les env_file, lus par Compose sur le poste, n'en font
 # pas partie). TLS_MODE=custom : fichiers de compose/tls/custom.yml en plus.
 readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning)
@@ -94,6 +95,10 @@ preparer_contexte_distant() {
     echo "Contexte Docker $contexte mis à jour ($actuel → $deploy_ssh)."
   fi
   export DOCKER_CONTEXT="$contexte"
+  # Chaque requête concurrente de Compose ouvre sa propre connexion SSH : au-delà d'une dizaine de
+  # connexions simultanées, sshd en coupe (MaxStartups, 10:30:100 par défaut). Parallélisme borné,
+  # valeur du shell prioritaire.
+  export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-$PARALLELISME_SSH}"
 }
 
 afficher_cible() {
