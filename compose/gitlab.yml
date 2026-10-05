@@ -26,6 +26,10 @@ services:
         gitlab_rails['gitlab_shell_ssh_port'] = ${GITLAB_SSH_PORT:-2222}
         # Écoute interne fixe sur 80 (HTTP), servie par Traefik sur GITLAB_HOSTNAME
         nginx['listen_port'] = 80
+        # TLS terminé par Traefik : avec une external_url en https (TLS_MODE=custom), Omnibus
+        # activerait sinon son propre HTTPS et Let's Encrypt sur ce port
+        nginx['listen_https'] = false
+        letsencrypt['enable'] = false
 
         # Dimensionnement : valeurs du profil (config/profiles/<profil>.env, injecté par env_file)
         puma['worker_processes'] = Integer(ENV.fetch('PROFILE_GITLAB_PUMA_WORKERS'))
