@@ -1,0 +1,14 @@
+# Configuration dynamique de Traefik pour TLS_MODE=custom (montée par compose/tls/custom.yml).
+# Certificat servi pour tous les hostnames : la paire de config/certs/ (non versionnée), qui doit
+# couvrir chaque *_HOSTNAME de l'instance (SAN ou joker) — contrôlé par make deploy (check-env).
+# Voir docs/certificats.md.
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/cert.pem
+        keyFile: /certs/key.pem
+  options:
+    default:
+      # Valeur par défaut de Traefik v3, explicitée comme plancher de la plateforme
+      minVersion: VersionTLS12
