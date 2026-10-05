@@ -35,6 +35,9 @@ services:
     depends_on:
       sonarqube-db:
         condition: service_healthy
+    # Profil de dimensionnement (PLATFORM_PROFILE) : heaps JVM SONAR_{WEB,CE,SEARCH}_JAVAOPTS
+    env_file:
+      - ../config/profiles/${PLATFORM_PROFILE:-medium}.env
     environment:
       SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonar
       SONAR_JDBC_USERNAME: sonar

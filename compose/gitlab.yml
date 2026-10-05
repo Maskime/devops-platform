@@ -11,6 +11,9 @@ services:
     image: gitlab/gitlab-ce:${GITLAB_VERSION:-19.4.1-ce.0}
     restart: always
     hostname: gitlab
+    # Profil de dimensionnement (PLATFORM_PROFILE) : variables PROFILE_GITLAB_* lues ci-dessous
+    env_file:
+      - ../config/profiles/${PLATFORM_PROFILE:-medium}.env
     environment:
       GITLAB_OMNIBUS_CONFIG: |
         external_url '${GITLAB_EXTERNAL_URL:?GITLAB_EXTERNAL_URL obligatoire (voir envs/.env.example)}'
@@ -20,19 +23,17 @@ services:
         # Écoute interne fixe sur 80, quel que soit le port porté par external_url (publié via GITLAB_HTTP_PORT)
         nginx['listen_port'] = 80
 
-        # Memory tuning — cible ~3-4 GB au lieu de 10 GB par défaut
-        puma['worker_processes'] = 2
-        puma['min_threads'] = 1
-        puma['max_threads'] = 4
-        sidekiq['max_concurrency'] = 10
+        # Dimensionnement : valeurs du profil (config/profiles/<profil>.env, injecté par env_file)
+        puma['worker_processes'] = Integer(ENV.fetch('PROFILE_GITLAB_PUMA_WORKERS'))
+        puma['min_threads'] = Integer(ENV.fetch('PROFILE_GITLAB_PUMA_MIN_THREADS'))
+        puma['max_threads'] = Integer(ENV.fetch('PROFILE_GITLAB_PUMA_MAX_THREADS'))
+        sidekiq['concurrency'] = Integer(ENV.fetch('PROFILE_GITLAB_SIDEKIQ_CONCURRENCY'))
+        postgresql['shared_buffers'] = ENV.fetch('PROFILE_GITLAB_PG_SHARED_BUFFERS')
+        postgresql['max_connections'] = Integer(ENV.fetch('PROFILE_GITLAB_PG_MAX_CONNECTIONS'))
 
         # Désactive les services de monitoring intégrés
         prometheus_monitoring['enable'] = false
         alertmanager['enable'] = false
-
-        # Réduit les buffers PostgreSQL embarqué
-        postgresql['shared_buffers'] = '256MB'
-        postgresql['max_connections'] = 100
     ports:
       - "${GITLAB_HTTP_PORT:-80}:80"
       - "${GITLAB_SSH_PORT:-2222}:22"

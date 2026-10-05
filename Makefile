@@ -49,6 +49,20 @@ check-env:
 	@if grep -nE '^[A-Z0-9_]+_VERSION=["'"'"']?(latest)?["'"'"']?[[:space:]]*$$' "$(ENV_FILE)" >&2; then \
 	  echo "Version vide ou « latest » dans $(ENV_FILE) (voir ci-dessus) : épingler un tag." >&2; exit 1; \
 	fi
+	@# Profil effectif, comme Compose : variable du shell prioritaire, sinon dernière affectation du
+	@# fichier (guillemets englobants retirés), sinon medium. Lu avant `config` : un profil inconnu y
+	@# échouerait avec un message peu parlant (env file introuvable).
+	@if [[ -n "$${PLATFORM_PROFILE+x}" ]]; then profil="$${PLATFORM_PROFILE}"; else \
+	  profil="$$(sed -nE "s/^[[:space:]]*PLATFORM_PROFILE=[\"']?([^\"']*)[\"']?[[:space:]]*$$/\1/p" "$(ENV_FILE)" | tail -n1)"; \
+	fi; \
+	profil="$${profil:-medium}"; \
+	profils="$$(cd config/profiles && ls -- *.env | sed 's/\.env$$//' | paste -sd ' ' -)"; \
+	if [[ ! "$$profil" =~ ^[a-z0-9_-]+$$ || ! -f "config/profiles/$$profil.env" ]]; then \
+	  echo "PLATFORM_PROFILE invalide : $$profil (profils disponibles : $$profils)" >&2; exit 1; \
+	fi; \
+	if [[ -n "$${PLATFORM_PROFILE+x}" ]]; then \
+	  echo "Attention : PLATFORM_PROFILE=$$profil vient du shell et remplace la valeur de $(ENV_FILE)." >&2; \
+	fi
 	@$(COMPOSE) config -q || { echo "Configuration invalide pour $(ENV_FILE) (voir ci-dessus)." >&2; exit 1; }
 
 deploy: check-env ## [ENV] Démarre l'instance ENV en local et attend que tous les services soient healthy

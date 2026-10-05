@@ -58,6 +58,32 @@ else
   ok "pas encore de compose.yml"
 fi
 
+# 3 bis. Profils de dimensionnement : chacun se résout dans compose et tous définissent les mêmes clés
+#        (une clé absente ferait échouer le reconfigure GitLab au démarrage, invisible pour `config`)
+section "profils de dimensionnement"
+shopt -s nullglob
+profile_files=(config/profiles/*.env)
+shopt -u nullglob
+if [[ -f compose.yml ]] && ((${#profile_files[@]})); then
+  ref_keys="$(grep -oE '^[A-Z][A-Z0-9_]*=' "${profile_files[0]}" | sort)"
+  for f in "${profile_files[@]}"; do
+    p="$(basename "$f" .env)"
+    if PLATFORM_PROFILE="$p" docker compose --env-file envs/.env.example -f compose.yml config -q; then
+      ok "$p : compose"
+    else
+      ko "$p : compose"
+    fi
+    keys="$(grep -oE '^[A-Z][A-Z0-9_]*=' "$f" | sort)"
+    if [[ "$keys" == "$ref_keys" ]]; then
+      ok "$p : mêmes clés que ${profile_files[0]}"
+    else
+      ko "$p : clés différentes de ${profile_files[0]} : $(comm -3 <(echo "$ref_keys") <(echo "$keys") | tr -d '=\t' | paste -sd ' ' -)"
+    fi
+  done
+else
+  ok "aucun profil"
+fi
+
 # 4. Chaque variable interpolée par compose est documentée dans envs/.env.example
 #    ($${…} = échappement compose, ignoré ; minuscules = variables shell des healthchecks)
 section "variables documentées"
