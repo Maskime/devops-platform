@@ -50,6 +50,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   runner déjà enregistré est réaligné par `make bootstrap-legacy`, ou à la main (`network_mode` dans
   `/etc/gitlab-runner/config.toml`). L'ancien réseau peut ensuite être supprimé :
   `docker network rm factory-network`.
+- Conteneurs nommés par Compose (`devops-platform-<service>-1`) : plus de `container_name` fixe,
+  donc plus de collision avec d'autres stacks de l'hôte. Les commandes ciblent un service
+  (`docker compose exec <service>`) et non plus un nom (`docker exec <nom>`) ; `make verify` le contrôle.
+  Au prochain `make deploy`, les conteneurs d'une instance existante sont recréés : GitLab indisponible
+  quelques minutes, jobs CI en cours interrompus. Le label `container` des logs Loki prend les nouveaux
+  noms (le dashboard, fondé sur le label `service`, n'est pas affecté).
+- Volumes nommés explicitement (`devops-platform_<volume>`), sous le nom que leur donnait déjà
+  Compose : données conservées, aucune migration. Conséquence : ne jamais lancer `up` sur un module
+  seul ni sous un autre nom de projet (`-p`), les conteneurs créés partageraient les volumes de l'instance.
 - `GITLAB_EXTERNAL_URL`, `GITLAB_ROOT_PASSWORD`, `SONARQUBE_DB_PASSWORD` et `GRAFANA_ADMIN_PASSWORD`
   sont obligatoires : `docker compose` refuse de démarrer sans elles.
 

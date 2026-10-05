@@ -95,11 +95,15 @@ Pour chaque US confirmée, dans l'ordre (chaque étape est idempotente) :
    `.result.already_open` vaut `true` et que `herdr agent list` montre déjà un agent dans ce
    workspace, la session existe : passe à la US suivante. Si le pane racine n'est plus disponible
    (pas à l'invite du shell), prends un pane shell libre via `herdr pane list --workspace <id>`.
-4. **Session Claude** :
+4. **Session Claude** — démarre Claude sans argument, puis envoie la commande :
    ```bash
-   herdr agent start us-<N>-<X> --kind claude --pane <pane_id> --timeout 60000 -- '/implement-us <N>-<X>'
+   herdr agent start us-<N>-<X> --kind claude --pane <pane_id> --timeout 60000
+   herdr agent prompt us-<N>-<X> '/implement-us <N>-<X>'
    ```
-   La commande rend la main quand Claude est prêt ; le premier prompt lance `/implement-us`.
+   `agent start` ne rend la main (et ne nomme l'agent) qu'une fois Claude au repos : avec un premier
+   prompt passé après `--`, Claude se met aussitôt au travail et la commande échoue en `timeout`, la
+   session tournant pourtant sans nom (rattrapage : `herdr agent rename <pane_id> us-<N>-<X>`).
+   N'ajoute pas `--wait` à `agent prompt` : il attendrait la fin de la planification.
    - `agent_not_ready` : la session est bloquée au démarrage (ex : confiance dans le dossier). Lis
      l'écran (`herdr agent read us-<N>-<X> --source visible`) et présente-le à l'opérateur, sans
      répondre à sa place.

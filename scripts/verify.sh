@@ -126,7 +126,23 @@ done
 shopt -u nullglob
 ((images_ko)) || ok "$nb_images image(s)"
 
-# 6. Secrets : délégué au garde-fou du repo (fichiers suivis et non suivis non ignorés)
+# 6. Noms de conteneurs : Compose les attribue, les scripts ciblent les services
+#    (`docker compose exec <service>`). Commentaires ignorés ; `docker run` et `docker inspect <id>` admis.
+section "noms de conteneurs"
+if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml; then
+  ko "nom de conteneur fixé dans un fichier compose (voir ci-dessus)"
+else
+  ok "aucun nom fixé dans les fichiers compose"
+fi
+mapfile -t cible_files < <(git ls-files --cached --others --exclude-standard 'scripts/*.sh' Makefile)
+if ((${#cible_files[@]})) && grep -nE '^[^#]*\bdocker (container )?(exec|logs|cp|restart|stop|start|kill|rm)\b' \
+    "${cible_files[@]}"; then
+  ko "conteneur ciblé par son nom (voir ci-dessus) : passer par docker compose <commande> <service>"
+else
+  ok "${#cible_files[@]} fichier(s) (scripts, Makefile) : services ciblés par compose"
+fi
+
+# 7. Secrets : délégué au garde-fou du repo (fichiers suivis et non suivis non ignorés)
 section "secrets"
 if scripts/check-secrets.sh; then ok "rien à signaler"; else ko "secrets (voir ci-dessus)"; fi
 
