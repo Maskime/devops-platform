@@ -106,9 +106,11 @@ if [[ -f compose.yml && -f envs/.env.example ]]; then
     | sed -E 's/.*\$\{//' | sort -u)
   missing=0
   for v in "${compose_vars[@]}"; do
+    # Variables internes : fournie par Compose / définie par le garde-fou de lancement (section 6 bis)
+    [[ "$v" == COMPOSE_PROJECT_NAME || "$v" == PLATFORM_GARDE_FOU ]] && continue
     grep -qE "^#?${v}=" envs/.env.example || { ko "$v absente de envs/.env.example"; missing=1; }
   done
-  ((missing)) || ok "${#compose_vars[@]} variable(s)"
+  ((missing)) || ok "${#compose_vars[@]} variable(s) (dont 2 internes)"
 else
   ok "pas encore de compose.yml"
 fi
@@ -175,11 +177,51 @@ else
   ok "aucun nom fixé dans les fichiers compose"
 fi
 mapfile -t cible_files < <(git ls-files --cached --others --exclude-standard 'scripts/*.sh' Makefile)
+# Exception : ligne marquée `check-noms: id` (conteneurs désignés par leur identifiant)
 if ((${#cible_files[@]})) && grep -nE '^[^#]*\bdocker (container )?(exec|logs|cp|restart|stop|start|kill|rm)\b' \
-    "${cible_files[@]}"; then
+    "${cible_files[@]}" | grep -v 'check-noms: id'; then
   ko "conteneur ciblé par son nom (voir ci-dessus) : passer par docker compose <commande> <service>"
 else
   ok "${#cible_files[@]} fichier(s) (scripts, Makefile) : services ciblés par compose"
+fi
+
+# 6 bis. Garde-fou de lancement : un module seul ou un autre nom de projet doit être refusé au
+#        chargement (conteneurs en double sur les volumes de l'instance). Variables du shell neutralisées ;
+#        un refus ne compte que s'il vient du garde-fou (motif attendu dans la sortie).
+section "garde-fou de lancement"
+if [[ -f compose.yml ]]; then
+  compose_propre() { env -u COMPOSE_PROJECT_NAME -u PLATFORM_GARDE_FOU docker compose --env-file envs/.env.example "$@" config -q 2>&1; }
+  refus_attendu() { # <motif> <description> <arguments compose…>
+    local motif="$1" desc="$2" sortie; shift 2
+    if sortie="$(compose_propre "$@")"; then
+      ko "$desc : accepté (refus attendu)"
+    elif grep -q -- "$motif" <<<"$sortie"; then
+      ok "$desc : refusé"
+    else
+      ko "$desc : refusé pour une autre raison : $sortie"
+    fi
+  }
+  if sortie="$(compose_propre)"; then ok "compose.yml : accepté"; else ko "compose.yml : refusé : $sortie"; fi
+  for f in compose/*.yml; do
+    m="$(basename "$f" .yml)"
+    grep -qE "^x-garde-fou-${m}: \"\\$\{PLATFORM_GARDE_FOU:\?" "$f" || ko "$f : extension x-garde-fou-${m} absente"
+    refus_attendu "PLATFORM_GARDE_FOU" "$f seul" -f "$f"
+  done
+  refus_attendu "projet-autorise/devops-platform-garde-fou-test.env" "-p devops-platform-garde-fou-test" \
+    -p devops-platform-garde-fou-test
+  nb_includes="$(grep -cE '^  - path: compose/' compose.yml)"
+  # shellcheck disable=SC2016 # ${COMPOSE_PROJECT_NAME} littéral, interpolé par Compose
+  nb_gardes="$(grep -cxF '    env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env' compose.yml)"
+  if ((nb_includes == nb_gardes)); then
+    ok "$nb_includes include(s) avec env_file compose/projet-autorise/\${COMPOSE_PROJECT_NAME}.env"
+  else
+    ko "compose.yml : $((nb_includes - nb_gardes)) include(s) sans env_file du garde-fou"
+  fi
+  if grep -nE '^#?[[:space:]]*PLATFORM_GARDE_FOU=' envs/.env.example; then
+    ko "envs/.env.example définit PLATFORM_GARDE_FOU (neutraliserait le garde-fou des modules)"
+  fi
+else
+  ok "pas encore de compose.yml"
 fi
 
 # 7. Secrets : délégué au garde-fou du repo (fichiers suivis et non suivis non ignorés)

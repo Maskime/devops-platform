@@ -1,8 +1,12 @@
 # =============================================================================
 # Brique observabilité : centralisation et consultation des logs
-# Inclus par compose.yml ; ne se lance pas seul (voir l'en-tête de compose.yml).
+# Inclus par compose.yml ; lancé seul, il est refusé par le garde-fou ci-dessous (voir l'en-tête
+# de compose.yml).
 # Les chemins relatifs sont résolus depuis ce dossier (compose/).
 # =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-observability: "${PLATFORM_GARDE_FOU:?compose/observability.yml est un module de compose.yml et ne se lance pas seul (conteneurs en double sur les volumes de l'instance) : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
 services:
 
   # ---------------------------------------------------------------------------
@@ -103,8 +107,8 @@ networks:
     driver: bridge
 
 # Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
-# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml et le filtre de
-# config/promtail/promtail-config.yaml.
+# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml, le filtre de
+# config/promtail/promtail-config.yaml et le nom du fichier compose/projet-autorise/<projet>.env.
 volumes:
   loki_data:
     name: devops-platform_loki_data

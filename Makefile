@@ -79,6 +79,8 @@ check-env: check-env-name
 	@scripts/check-loki-config.sh "$(ENV_FILE)" >/dev/null
 
 deploy: check-env ## [ENV] Démarre l'instance ENV en local et attend que tous les services soient healthy
+	@# Conteneurs en double (lancés hors compose.yml ou sous un autre projet) : refus avant `up`
+	@scripts/check-doublons.sh "$(ENV_FILE)"
 	@# Compose reconnecte les conteneurs existants à un réseau renommé (PLATFORM_NETWORK) sans les
 	@# recréer : leur NetworkMode vise encore l'ancien réseau, supprimé, et ils ne redémarrent plus.
 	@# Dans ce cas, recréation forcée (volumes conservés).

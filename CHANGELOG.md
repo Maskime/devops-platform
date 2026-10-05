@@ -9,6 +9,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Garde-fou contre les lancements en double : un module `compose/<module>.yml` lancé seul ou la
+  plateforme lancée sous un autre nom de projet (`-p`) est refusé par Compose dès le chargement, avant
+  tout conteneur (`PLATFORM_GARDE_FOU`, `compose/projet-autorise/`). `make deploy` refuse en outre de
+  démarrer si des conteneurs d'un autre projet utilisent les volumes ou le réseau de l'instance
+  (`scripts/check-doublons.sh`) ; `make verify` contrôle le garde-fou.
 - `make init ENV=<env>` (`scripts/init-env.sh`) génère `envs/<env>.env` depuis le modèle : questions
   (domaine, hostnames, `TLS_MODE`, profil) avec valeurs par défaut, mots de passe aléatoires conformes
   aux règles SonarQube, fichier en permissions 600 ; refuse d'écraser un fichier existant sans
