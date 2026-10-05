@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Hook pre-commit optionnel : refuse le commit si le contenu indexé contient un secret.
+# Installation : make install-hooks ; contournement ponctuel : git commit --no-verify.
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/scripts/check-secrets.sh" --staged

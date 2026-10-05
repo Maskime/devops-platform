@@ -53,15 +53,9 @@ else
   ok "pas encore de compose.yml"
 fi
 
-# 4. Secrets : aucun fichier sensible versionné, aucun token reconnaissable dans les fichiers suivis
+# 4. Secrets : délégué au garde-fou du repo (fichiers suivis et non suivis non ignorés)
 section "secrets"
-if git ls-files --cached --others --exclude-standard | grep -E '^(envs/[^/]+\.env|outputs/|config/certs/[^.])' | grep -v '^envs/\.env\.example$'; then
-  ko "fichier sensible suivi par git (voir ci-dessus)"
-fi
-if git grep -nIE '(glpat-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sq[apu]_[a-f0-9]{30,}|sk-ant-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' -- . ':!.claude/scripts/verify.sh'; then
-  ko "token ou clé privée détecté (voir ci-dessus)"
-fi
-((failed)) || ok "rien à signaler"
+if scripts/check-secrets.sh; then ok "rien à signaler"; else ko "secrets (voir ci-dessus)"; fi
 
 echo
 if ((failed)); then echo "Vérification : ÉCHEC"; exit 1; fi
