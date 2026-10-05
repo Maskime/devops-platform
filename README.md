@@ -76,6 +76,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [GitLab derrière le proxy](docs/gitlab-proxy.md) | URL publique, nginx interne, SSH, runner |
 | [Dimensionnement](docs/dimensionnement.md) | Profils `small` / `medium` / `large` : ressources minimales et réglages |
 | [Rétention des logs](docs/logs.md) | Durée de rétention Loki, délai de purge |
+| [Accès à l'API Docker](docs/acces-docker.md) | Proxy de socket filtrant pour Traefik et Promtail : endpoints autorisés, isolement, limites |
 | [Garde-fous](docs/garde-fous.md) | Lancements compose en double, fuites de secrets (CI, hook pre-commit) |
 | [Montée de version](docs/montee-de-version.md) | Procédure par image (chemin de mise à jour GitLab, migration SonarQube) |
 

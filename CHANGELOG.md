@@ -9,6 +9,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Traefik et Promtail passent par le proxy de socket `socket-proxy` : au prochain `make deploy`, ils
+  sont recréés (coupure HTTP de quelques secondes ; Promtail reprend la collecte à ses positions) et
+  l'image `wollomatic/socket-proxy` est téléchargée. Une surcharge locale qui remonterait le socket
+  dans `traefik` ou `promtail` est refusée par `make verify` : la retirer.
 - `GITLAB_EXTERNAL_URL` devient optionnelle : commenter la ligne de chaque `envs/<env>.env` existant
   pour adopter l'URL dérivée (`https://<GITLAB_HOSTNAME>` en `letsencrypt` et `custom`,
   `http://<GITLAB_HOSTNAME>` en `none`). Une valeur explicite reste contrôlée (même hôte, schéma du mode).
@@ -25,6 +29,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Accès restreint à l'API Docker : Traefik (provider Docker) et Promtail (`docker_sd_configs`) ne
+  montent plus le socket Docker et passent par un proxy filtrant (`compose/socket-proxy.yml`,
+  `wollomatic/socket-proxy:1.13.1`, variable `SOCKET_PROXY_VERSION`) : lecture seule sur une liste
+  blanche d'endpoints (ping, version, conteneurs, logs, réseaux, événements), clients limités à
+  `traefik` et `promtail`, réseau dédié interne non partagé avec les jobs CI. `make verify` contrôle
+  les montages du socket et l'isolement de ce réseau ; le contrôle de réseau renommé de
+  `make deploy` admet un conteneur placé sur ce seul réseau. Détails : `docs/acces-docker.md`.
 - `TLS_MODE=letsencrypt` : HTTPS sur le port 443 avec des certificats Let's Encrypt obtenus et
   renouvelés automatiquement par Traefik (resolver ACME, `compose/tls/letsencrypt.yml`), port 80
   redirigé vers HTTPS. Nouvelles variables `ACME_EMAIL` (obligatoire dans ce mode), `ACME_CHALLENGE`
