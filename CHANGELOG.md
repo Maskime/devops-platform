@@ -118,6 +118,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Modifié
 
+- README raccourci (présentation, démarrage rapide, configuration, commandes) : la documentation
+  d'exploitation passe dans `docs/` (`initialisation.md`, `exposition.md`, `dimensionnement.md`,
+  `logs.md`, `garde-fous.md`), à côté des pages existantes.
 - **Services web derrière Traefik** : GitLab, SonarQube, Grafana, Portainer et PlantUML ne publient
   plus de port sur l'hôte ; ils sont servis sur `http://<hostname>` (défaut `<service>.localhost`).
   Portainer est servi en HTTP (port interne 9000) au lieu de HTTPS auto-signé sur 9443.
