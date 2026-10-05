@@ -53,7 +53,22 @@ else
   ok "pas encore de compose.yml"
 fi
 
-# 4. Secrets : aucun fichier sensible versionné, aucun token reconnaissable dans les fichiers suivis
+# 4. Chaque variable interpolée par compose est documentée dans envs/.env.example
+#    ($${…} = échappement compose, ignoré ; minuscules = variables shell des healthchecks)
+section "variables documentées"
+if [[ -f compose.yml && -f envs/.env.example ]]; then
+  mapfile -t compose_vars < <(grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml \
+    | sed -E 's/.*\$\{//' | sort -u)
+  missing=0
+  for v in "${compose_vars[@]}"; do
+    grep -qE "^#?${v}=" envs/.env.example || { ko "$v absente de envs/.env.example"; missing=1; }
+  done
+  ((missing)) || ok "${#compose_vars[@]} variable(s)"
+else
+  ok "pas encore de compose.yml"
+fi
+
+# 5. Secrets : aucun fichier sensible versionné, aucun token reconnaissable dans les fichiers suivis
 section "secrets"
 if git ls-files --cached --others --exclude-standard | grep -E '^(envs/[^/]+\.env|outputs/|config/certs/[^.])' | grep -v '^envs/\.env\.example$'; then
   ko "fichier sensible suivi par git (voir ci-dessus)"
