@@ -47,6 +47,8 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 - **`*_HOSTNAME`** : un hostname par service, routé par Traefik ; seuls 80, 443 et le SSH de GitLab
   sont publiés sur l'hôte.
 - **`*_VERSION`** : chaque image est épinglée sur une version précise, jamais `latest`.
+- **`DEPLOY_SSH`** : serveur cible (`ssh://utilisateur@hôte`) ; vide, l'instance tourne sur le
+  moteur Docker local.
 
 `make check-env`, préalable de `make deploy`, refuse une configuration incohérente et indique la ligne
 à corriger.
@@ -56,7 +58,9 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | Commande | Rôle |
 |---|---|
 | `make init ENV=<env>` | Génère `envs/<env>.env` (questions, secrets aléatoires) ; `FORCE=1` pour régénérer |
-| `make deploy ENV=<env>` | Démarre l'instance et attend que tous les services soient healthy |
+| `make deploy ENV=<env>` | Démarre l'instance, locale ou distante, et attend que tous les services soient healthy |
+| `make status ENV=<env>` | État des services et URLs de l'instance |
+| `make down ENV=<env>` | Arrête l'instance (volumes conservés) |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
 | `make verify` | Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis) |
 | `make check-secrets` | Recherche de secrets dans le dépôt |
@@ -70,6 +74,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | Page | Sujet |
 |---|---|
 | [Préparation d'un serveur](docs/serveur.md) | `scripts/host-prereqs.sh` : Docker, `vm.max_map_count`, `daemon.json`, pare-feu |
+| [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
@@ -83,8 +88,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 
 ## Avancement
 
-Le bootstrap définitif (instance vierge), la préparation et le déploiement de serveurs distants et le
-smoke test sont en cours de développement : voir les
+Le bootstrap définitif (instance vierge) et le smoke test sont en cours de développement : voir les
 [milestones](https://github.com/Maskime/devops-platform/milestones) et le
 [`CHANGELOG.md`](CHANGELOG.md).
 

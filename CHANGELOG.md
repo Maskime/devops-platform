@@ -9,6 +9,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Les montages de configuration de Loki, Promtail et Grafana passent en syntaxe longue
+  (`create_host_path: false`, source `${PLATFORM_CONFIG_DIR:-../config}`) : ces trois services sont
+  recréés au prochain `make deploy` (volumes conservés).
 - Traefik et Promtail passent par le proxy de socket `socket-proxy` : au prochain `make deploy`, ils
   sont recréés (coupure HTTP de quelques secondes ; Promtail reprend la collecte à ses positions) et
   l'image `wollomatic/socket-proxy` est téléchargée. Une surcharge locale qui remonterait le socket
@@ -29,6 +32,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Déploiement distant : `DEPLOY_SSH=ssh://[utilisateur@]hôte[:port]` dans `envs/<env>.env` fait
+  piloter l'instance par le contexte Docker SSH `devops-platform-<env>` (créé ou mis à jour par
+  `make`). Les fichiers de config montés sont copiés sur le serveur dans
+  `${DEPLOY_DIR}/config-<empreinte>` (`DEPLOY_DIR`, défaut `/opt/devops-platform`), par un conteneur
+  `busybox:1.38.0` ; un marqueur refuse une seconde instance sur le même serveur (`FORCER=1`).
+  Nouvelles cibles `make down` (volumes conservés) et `make status` ; `make deploy` et `make status`
+  affichent le récapitulatif des URLs. Commandes manuelles : `scripts/instance.sh compose <env> …`.
+  Détails : `docs/deploiement.md`.
 - Accès restreint à l'API Docker : Traefik (provider Docker) et Promtail (`docker_sd_configs`) ne
   montent plus le socket Docker et passent par un proxy filtrant (`compose/socket-proxy.yml`,
   `wollomatic/socket-proxy:1.13.1`, variable `SOCKET_PROXY_VERSION`) : lecture seule sur une liste
