@@ -29,6 +29,19 @@ if ((${#sh_files[@]})); then
 else
   ok "aucun script"
 fi
+# Script de nettoyage embarqué dans host-prereqs.sh (heredoc PRUNE), installé tel quel sur les serveurs
+PRUNE_SOURCE=scripts/host-prereqs.sh
+if [[ -f "$PRUNE_SOURCE" ]]; then
+  prune_ligne="$(grep -n "<<'PRUNE'\$" "$PRUNE_SOURCE" | cut -d: -f1 | head -n1)"
+  prune_script="$(sed -n "/<<'PRUNE'\$/,/^PRUNE\$/{//!p}" "$PRUNE_SOURCE")"
+  if [[ -z "$prune_ligne" || "$prune_script" != '#!/usr/bin/env bash'* ]]; then
+    ko "$PRUNE_SOURCE : heredoc PRUNE introuvable ou sans shebang"
+  elif docker run --rm -i "$SHELLCHECK_IMAGE" -s bash - <<<"$prune_script"; then
+    ok "$PRUNE_SOURCE : script de nettoyage embarqué"
+  else
+    ko "$PRUNE_SOURCE : script de nettoyage embarqué (ligne N ci-dessus = ligne $((prune_ligne)) + N du fichier)"
+  fi
+fi
 
 # 2. yamllint (config relaxed : on vise les erreurs de syntaxe, pas le style)
 section "yamllint"

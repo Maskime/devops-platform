@@ -32,6 +32,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Nettoyage Docker planifié : `scripts/host-prereqs.sh` installe `/usr/local/sbin/devops-platform-prune`
+  et le timer systemd `devops-platform-prune.timer` (chaque nuit vers 03:30). Supprime les conteneurs
+  de jobs CI arrêtés, les volumes de cache du runner orphelins (reporté pendant un job), les images
+  inutilisées (sauté si la plateforme est arrêtée par `down`) et le cache de build inutilisé ; volumes
+  et conteneurs de la plateforme jamais touchés. Désactivable par `systemctl mask`, respecté par
+  `host-prereqs.sh`. Le script, embarqué dans `host-prereqs.sh`, est contrôlé par shellcheck dans
+  `make verify`. Détails : `docs/serveur.md`.
 - Déploiement distant : `DEPLOY_SSH=ssh://[utilisateur@]hôte[:port]` dans `envs/<env>.env` fait
   piloter l'instance par le contexte Docker SSH `devops-platform-<env>` (créé ou mis à jour par
   `make`). Les fichiers de config montés sont copiés sur le serveur dans
