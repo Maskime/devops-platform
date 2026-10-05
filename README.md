@@ -36,7 +36,7 @@ make smoke       ENV=staging   # vérifie l'instance de bout en bout
 | `config/` | Configuration des services (Traefik, Loki, Promtail, Grafana…) |
 | `config/profiles/` | Profils de dimensionnement (`PLATFORM_PROFILE`), versionnés |
 | `config/certs/` | Certificats fournis pour `TLS_MODE=custom` (non versionnés) |
-| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md), [certificats fournis](docs/certificats.md)) |
+| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md), [certificats fournis](docs/certificats.md), [Let's Encrypt](docs/letsencrypt.md)) |
 | `envs/` | Un fichier `<env>.env` par instance (non versionné) ; seul `.env.example` est versionné |
 | `.github/workflows/` | CI GitHub Actions (garde-fou secrets) |
 | `.githooks/` | Hooks Git optionnels (`make install-hooks`) |
@@ -94,8 +94,12 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
     exige des `*_EXTERNAL_URL` en `https://` et refuse un certificat absent, invalide, expiré, non
     apparié à sa clé ou ne couvrant pas chaque hostname. Renouvellement : `make reload-certs ENV=<env>`.
     Détails : [certificats fournis](docs/certificats.md).
-  - `letsencrypt` : HTTPS à venir (US 3-2) ; d'ici là, sans effet (HTTP clair sur le port 80, signalé
-    par `make deploy`) : ne pas exposer l'instance hors d'un réseau maîtrisé.
+  - `letsencrypt` : HTTPS sur le port 443 avec des certificats Let's Encrypt obtenus et renouvelés
+    automatiquement par Traefik, stockés sur le volume `devops-platform_traefik_acme` ; le port 80
+    redirige vers HTTPS. Prérequis : hostnames publics résolus vers le serveur, port 80 (challenge
+    `ACME_CHALLENGE=http`, défaut) ou 443 (`tls`) joignable depuis Internet. `make deploy` exige
+    `ACME_EMAIL`, des `*_EXTERNAL_URL` en `https://` et refuse les hostnames locaux ou IP.
+    Détails : [certificats Let's Encrypt](docs/letsencrypt.md).
   - Toute autre valeur est refusée par `make deploy`.
 
 ### Surface d'exposition
@@ -140,10 +144,11 @@ inventer ni à copier :
   avec majuscule, minuscule, chiffre et caractère spécial (règles SonarQube), sans caractère
   problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
 - **Fichier** en permissions `600`, écrit de façon atomique.
-- **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames : `https://<hostname>` en `custom`,
-  `http://<hostname>` sinon. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
+- **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames : `https://<hostname>` en `custom` et
+  `letsencrypt`, `http://<hostname>` en `none`. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
   avertissement que `make deploy` ; en `custom`, il rappelle les certificats à déposer dans
-  `config/certs/` ; `letsencrypt` n'a pas encore d'effet (US 3-2).
+  `config/certs/` ; en `letsencrypt`, il demande l'email du compte ACME (`ACME_EMAIL`) et rappelle les
+  prérequis (DNS public, port 80).
 - **Sans terminal** (`make init ENV=<env> < /dev/null`, ou réponses passées sur l'entrée standard),
   une réponse vide prend la valeur par défaut et une réponse invalide arrête la commande.
 

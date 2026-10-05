@@ -306,7 +306,7 @@ else
   echo
   echo "Note : TLS_MODE=letsencrypt : avant make deploy, chaque hostname ci-dessus doit résoudre"
   echo "publiquement vers ce serveur, port 80 joignable depuis Internet (challenge HTTP-01) : voir"
-  echo "docs/certificats.md."
+  echo "docs/letsencrypt.md."
   # Même contrôle que make deploy (scripts/check-env-urls.sh), qui refusera ces hostnames
   refuses=()
   for s in "${services[@]}"; do

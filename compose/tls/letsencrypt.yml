@@ -2,7 +2,7 @@
 # Overlay du proxy pour TLS_MODE=letsencrypt : HTTPS avec des certificats Let's Encrypt obtenus et
 # renouvelés automatiquement par Traefik (resolver ACME `letsencrypt`)
 # Fusionné avec compose/proxy.yml par l'include de compose.yml (compose/tls/${TLS_MODE}.yml) ; ne
-# se lance pas seul. Prérequis, challenge et changement de CA : docs/certificats.md.
+# se lance pas seul. Prérequis, challenge et changement de CA : docs/letsencrypt.md.
 # Chemins relatifs : résolus depuis le répertoire du premier fichier de l'include (compose/), d'où
 # `../config/…`.
 # =============================================================================
