@@ -19,17 +19,46 @@ services:
     env_file:
       - ../config/profiles/${PLATFORM_PROFILE:-medium}.env
     environment:
+      # Valeurs de l'instance lues par le Ruby ci-dessous (ENV) : aucune interpolation Compose dans
+      # le code Ruby. Préfixe PLATFORM_ : pas de collision avec les variables lues par l'image.
+      PLATFORM_TLS_MODE: ${TLS_MODE:-none}
+      PLATFORM_GITLAB_HOSTNAME: ${GITLAB_HOSTNAME:-gitlab.localhost}
+      PLATFORM_GITLAB_EXTERNAL_URL: ${GITLAB_EXTERNAL_URL:-}
+      PLATFORM_GITLAB_SSH_PORT: ${GITLAB_SSH_PORT:-2222}
       GITLAB_OMNIBUS_CONFIG: |
-        external_url '${GITLAB_EXTERNAL_URL:?GITLAB_EXTERNAL_URL obligatoire (voir envs/.env.example)}'
+        # URL publique : GITLAB_EXTERNAL_URL si renseignée, sinon dérivée du hostname et du TLS_MODE
+        # (https en letsencrypt et custom, http sinon). Même règle que url_derivee
+        # (scripts/lib/tls.sh) : à garder identiques.
+        plateforme_url = ENV.fetch('PLATFORM_GITLAB_EXTERNAL_URL', '')
+        if plateforme_url.empty?
+          plateforme_schema = %w[letsencrypt custom].include?(ENV.fetch('PLATFORM_TLS_MODE', '')) ? 'https' : 'http'
+          plateforme_url = "#{plateforme_schema}://#{ENV.fetch('PLATFORM_GITLAB_HOSTNAME')}"
+        end
+        external_url plateforme_url
         gitlab_rails['initial_root_password'] = '${GITLAB_ROOT_PASSWORD:?GITLAB_ROOT_PASSWORD obligatoire (voir envs/.env.example)}'
-        # Port SSH publié sur l'hôte, affiché dans les URLs de clone
-        gitlab_rails['gitlab_shell_ssh_port'] = ${GITLAB_SSH_PORT:-2222}
-        # Écoute interne fixe sur 80 (HTTP), servie par Traefik sur GITLAB_HOSTNAME
+        # Port SSH publié sur l'hôte, affiché dans les URLs de clone (base 10 : « 0222 » n'est pas
+        # lu en octal ; format contrôlé par make check-env)
+        gitlab_rails['gitlab_shell_ssh_port'] = Integer(ENV.fetch('PLATFORM_GITLAB_SSH_PORT'), 10)
+
+        # Nginx interne derrière Traefik, qui termine le TLS : écoute HTTP fixe sur 80, ni HTTPS, ni
+        # redirection, ni Let's Encrypt propres (omnibus les activerait dès qu'external_url est en
+        # https → double TLS)
         nginx['listen_port'] = 80
-        # TLS terminé par Traefik : avec une external_url en https (TLS_MODE=custom), Omnibus
-        # activerait sinon son propre HTTPS et Let's Encrypt sur ce port
         nginx['listen_https'] = false
+        nginx['redirect_http_to_https'] = false
         letsencrypt['enable'] = false
+        # Schéma vu par le client (liens, cookies Secure, redirections), quel que soit le lien interne
+        nginx['proxy_set_headers'] = {
+          'X-Forwarded-Proto' => URI(plateforme_url).scheme,
+          'X-Forwarded-Ssl' => URI(plateforme_url).scheme == 'https' ? 'on' : 'off'
+        }
+        # IP réelle des clients, transmise par Traefik dans X-Forwarded-For. Sous-réseau Docker non
+        # fixé : plages privées (limite : #76)
+        plateforme_proxies = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+        nginx['real_ip_trusted_addresses'] = plateforme_proxies
+        nginx['real_ip_header'] = 'X-Forwarded-For'
+        nginx['real_ip_recursive'] = 'on'
+        gitlab_rails['trusted_proxies'] = plateforme_proxies
 
         # Dimensionnement : valeurs du profil (config/profiles/<profil>.env, injecté par env_file)
         puma['worker_processes'] = Integer(ENV.fetch('PROFILE_GITLAB_PUMA_WORKERS'))

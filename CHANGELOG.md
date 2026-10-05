@@ -9,6 +9,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- `GITLAB_EXTERNAL_URL` devient optionnelle : commenter la ligne de chaque `envs/<env>.env` existant
+  pour adopter l'URL dérivée (`https://<GITLAB_HOSTNAME>` en `letsencrypt` et `custom`,
+  `http://<GITLAB_HOSTNAME>` en `none`). Une valeur explicite reste contrôlée (même hôte, schéma du mode).
+- Runner déjà enregistré par `make bootstrap-legacy` : la relance réaligne son `url` et son
+  `clone_url` (`config.toml`) sur l'URL publique.
 - Traefik est désormais configuré par variables `TRAEFIK_*` (`environment`) et non plus par `command`,
   et ce qui dépend du mode TLS vit dans `compose/tls/<mode>.yml` (fusionné avec `compose/proxy.yml`).
   Les labels `traefik.http.routers.<service>.entrypoints` ont disparu : les routeurs suivent les
@@ -35,9 +40,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   des `*_EXTERNAL_URL` absentes ou hors `https://` ; avertissement à 30 jours de l'expiration. Nouvelle
   cible `make reload-certs ENV=<env>` après renouvellement ; procédure : `docs/certificats.md`.
   `make init` génère des URLs en `https://` en mode `custom`.
-- GitLab : TLS interne d'Omnibus désactivé (`nginx['listen_https']`, `letsencrypt['enable']`), le TLS
-  étant terminé par Traefik. **Le conteneur `gitlab` est recréé au prochain `make deploy`**
-  (configuration Omnibus modifiée : quelques minutes d'indisponibilité, sans effet en `TLS_MODE=none`).
+- GitLab derrière le proxy : `external_url` dérivée de `GITLAB_HOSTNAME` et du `TLS_MODE`
+  (`GITLAB_EXTERNAL_URL` optionnelle) ; nginx interne en HTTP seul (ni HTTPS, ni redirection, ni
+  Let's Encrypt d'Omnibus : pas de double TLS), schéma public transmis (`X-Forwarded-Proto`), IP réelle
+  des clients (`X-Forwarded-For`). `make check-env` valide `GITLAB_SSH_PORT` (affiché dans les URLs de
+  clone SSH). **Le conteneur `gitlab` est recréé au prochain `make deploy`** (configuration Omnibus
+  modifiée : quelques minutes d'indisponibilité). Détails : `docs/gitlab-proxy.md`.
+- Traefik porte les `*_HOSTNAME` en alias réseau : le runner (bootstrap legacy) s'enregistre et clone
+  par l'URL publique de GitLab, via Traefik ; clone par `http://gitlab` pour un hostname `*.localhost`
+  (libcurl le résout toujours vers `127.0.0.1`).
 
 - `TLS_MODE=none` (HTTP simple, usage local) : services servis en HTTP par Traefik sur le port 80.
   `make check-env` (donc `deploy`) valide `TLS_MODE` (vide ou absent : `none`), exige des

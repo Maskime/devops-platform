@@ -36,7 +36,7 @@ make smoke       ENV=staging   # vérifie l'instance de bout en bout
 | `config/` | Configuration des services (Traefik, Loki, Promtail, Grafana…) |
 | `config/profiles/` | Profils de dimensionnement (`PLATFORM_PROFILE`), versionnés |
 | `config/certs/` | Certificats fournis pour `TLS_MODE=custom` (non versionnés) |
-| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md), [certificats fournis](docs/certificats.md), [Let's Encrypt](docs/letsencrypt.md)) |
+| `docs/` | Documentation d'exploitation ([montée de version](docs/montee-de-version.md), [certificats fournis](docs/certificats.md), [Let's Encrypt](docs/letsencrypt.md), [GitLab derrière le proxy](docs/gitlab-proxy.md)) |
 | `envs/` | Un fichier `<env>.env` par instance (non versionné) ; seul `.env.example` est versionné |
 | `.github/workflows/` | CI GitHub Actions (garde-fou secrets) |
 | `.githooks/` | Hooks Git optionnels (`make install-hooks`) |
@@ -80,9 +80,10 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
   `*.localhost` est résolu vers `127.0.0.1` par les navigateurs et curl, mais pas toujours par le
   système (git, wget…) : `make init` le détecte et indique la ligne à ajouter à `/etc/hosts`
   (`127.0.0.1 gitlab.localhost sonarqube.localhost grafana.localhost portainer.localhost plantuml.localhost`).
-- **URLs publiques.** L'hôte de `GITLAB_EXTERNAL_URL`, `SONARQUBE_EXTERNAL_URL` et
-  `GRAFANA_EXTERNAL_URL` doit être le hostname du service, sans port : `make deploy` (cible
-  `check-env`) refuse une URL incohérente et indique la ligne à corriger.
+- **URLs publiques.** L'hôte de `GITLAB_EXTERNAL_URL` (optionnelle, dérivée par défaut),
+  `SONARQUBE_EXTERNAL_URL` et `GRAFANA_EXTERNAL_URL` doit être le hostname du service,
+  sans port : `make deploy` (cible `check-env`) refuse une URL incohérente et indique la ligne à
+  corriger.
 - **Mode TLS (`TLS_MODE`).**
   - `none` (défaut, usage local) : HTTP simple sur le port 80, sans certificat (Portainer n'est plus
     servi en HTTPS auto-signé sur 9443). `make deploy` (cible `check-env`) exige des `*_EXTERNAL_URL`
@@ -101,6 +102,13 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
     `ACME_EMAIL`, des `*_EXTERNAL_URL` en `https://` et refuse les hostnames locaux ou IP.
     Détails : [certificats Let's Encrypt](docs/letsencrypt.md).
   - Toute autre valeur est refusée par `make deploy`.
+
+### GitLab derrière le proxy
+
+L'URL publique de GitLab est dérivée de `GITLAB_HOSTNAME` et du `TLS_MODE` (`GITLAB_EXTERNAL_URL`,
+optionnelle, ne sert qu'à la forcer). Son nginx interne n'écoute qu'en HTTP derrière Traefik, et le
+SSH passe par `GITLAB_SSH_PORT`. Le runner s'enregistre et clone par l'URL publique, via Traefik.
+Détails et limites : [GitLab derrière le proxy](docs/gitlab-proxy.md).
 
 ### Surface d'exposition
 
@@ -144,8 +152,9 @@ inventer ni à copier :
   avec majuscule, minuscule, chiffre et caractère spécial (règles SonarQube), sans caractère
   problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
 - **Fichier** en permissions `600`, écrit de façon atomique.
-- **URLs publiques** (`*_EXTERNAL_URL`) dérivées des hostnames : `https://<hostname>` en `custom` et
-  `letsencrypt`, `http://<hostname>` en `none`. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
+- **URLs publiques** : `GITLAB_EXTERNAL_URL` n'est pas écrite (dérivée par GitLab du hostname et du
+  `TLS_MODE`) ; `SONARQUBE_EXTERNAL_URL` et `GRAFANA_EXTERNAL_URL` valent `https://<hostname>` en
+  `custom` et `letsencrypt`, `http://<hostname>` en `none`. Avec `TLS_MODE=none` et un hostname non local, `make init` affiche le même
   avertissement que `make deploy` ; en `custom`, il rappelle les certificats à déposer dans
   `config/certs/` ; en `letsencrypt`, il demande l'email du compte ACME (`ACME_EMAIL`) et rappelle les
   prérequis (DNS public, port 80).

@@ -18,6 +18,8 @@ services:
   # remplacé en entier. Entrypoint web (:80, HTTP) commun à tous les modes.
   # Routeurs : aucun label `entrypoints` sur les services ; ils suivent les entrypoints par défaut
   # (tous sauf `traefik` ; en HTTPS, l'overlay marque `websecure` asDefault).
+  # Alias réseau : les hostnames publics désignent Traefik dans le réseau de la plateforme (runner,
+  # jobs CI) ; le runner et les jobs dépendent donc de Traefik pour joindre GitLab.
   # ---------------------------------------------------------------------------
   traefik:
     image: traefik:${TRAEFIK_VERSION:-v3.7.13}
@@ -56,7 +58,17 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - platform
+      platform:
+        # Hostnames publics résolus vers Traefik dans le réseau de la plateforme : le runner, les jobs CI
+        # et les services joignent les URLs publiques par le même chemin (et le même certificat) que les
+        # clients externes, sans dépendre du DNS ni du hairpin NAT de l'hôte. Défauts identiques aux
+        # labels traefik.http.routers.<service>.rule des modules.
+        aliases:
+          - ${GITLAB_HOSTNAME:-gitlab.localhost}
+          - ${SONARQUBE_HOSTNAME:-sonarqube.localhost}
+          - ${GRAFANA_HOSTNAME:-grafana.localhost}
+          - ${PORTAINER_HOSTNAME:-portainer.localhost}
+          - ${PLANTUML_HOSTNAME:-plantuml.localhost}
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:

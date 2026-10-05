@@ -5,12 +5,13 @@
 #     (*_HOSTNAME), sans port, en http:// en mode none (Traefik n'y sert que le port 80) et
 #     obligatoirement en https:// en modes custom et letsencrypt (HTTP redirigé vers HTTPS) : sinon
 #     liens, redirections et appels des scripts aboutissent à un 404 du proxy, à un port non publié ou
-#     à une redirection ;
+#     à une redirection. GITLAB_EXTERNAL_URL peut être absente (dérivée du hostname et du TLS_MODE) ;
 #   - TLS_MODE=none avec un hostname non local : avertissement (HTTP clair), non bloquant ;
 #   - TLS_MODE=custom : certificats fournis dans config/certs/ présents, cohérents et couvrant chaque
 #     hostname (verifier_certificats_custom, scripts/lib/tls.sh) ;
 #   - TLS_MODE=letsencrypt : hostnames publics (ni local, ni IP), ACME_EMAIL valide, ACME_CHALLENGE
 #     connu (verifier_letsencrypt, scripts/lib/tls.sh).
+#   - GITLAB_SSH_PORT : entier de 1 à 65535, hors 80 et 443 (ports de Traefik) ; 22 signalé.
 #
 # Usage : scripts/check-env-urls.sh <fichier env>
 # Valeur effective, comme Compose : variable du shell prioritaire, sinon dernière affectation du
@@ -68,10 +69,10 @@ for service in gitlab sonarqube grafana; do
   # Mode none : HTTP seul (port 80) ; custom et letsencrypt : HTTPS seul (port 443)
   schema="http"
   [[ "$tls_mode" != none ]] && schema="https"
-  # URL absente : défaut compose dérivé du hostname (GITLAB_EXTERNAL_URL, obligatoire, est
-  # signalée par `docker compose config`). Ce défaut est en http:// : refusé en HTTPS.
+  # URL absente : GitLab la dérive du hostname et du TLS_MODE (compose/gitlab.yml, url_derivee) ;
+  # SonarQube et Grafana ont un défaut compose en http:// (#78), refusé en HTTPS.
   if [[ -z "$url" ]]; then
-    if [[ "$schema" == https ]]; then
+    if [[ "$service" != gitlab && "$schema" == https ]]; then
       echo "$cle_url absente : son défaut (http://$hote) est incorrect en TLS_MODE=$tls_mode." >&2
       echo "  Ajouter dans $fichier : $cle_url=$schema://$hote" >&2
       erreurs=1
@@ -91,8 +92,20 @@ for service in gitlab sonarqube grafana; do
   erreurs=1
 done
 
+# Port SSH de GitLab : publié par Compose et lu en base 10 par GitLab (URLs de clone) ; un zéro en tête
+# ou une valeur non numérique les ferait diverger, 80 et 443 sont pris par Traefik
+port_ssh="$(valeur_effective GITLAB_SSH_PORT)"
+port_ssh="${port_ssh:-2222}"
+if [[ ! "$port_ssh" =~ ^[1-9][0-9]{0,4}$ ]] || ((port_ssh > 65535)) || ((port_ssh == 80 || port_ssh == 443)); then
+  echo "GITLAB_SSH_PORT invalide : $port_ssh (entier de 1 à 65535, sans zéro en tête, hors 80 et 443)." >&2
+  echo "  Corriger dans $fichier : GITLAB_SSH_PORT=2222" >&2
+  erreurs=1
+elif ((port_ssh == 22)); then
+  echo "Attention : GITLAB_SSH_PORT=22 entre en conflit avec le sshd de l'hôte s'il écoute sur ce port." >&2
+fi
+
 if ((erreurs)); then
-  echo "URL(s) publique(s) incohérente(s) avec les hostnames de $fichier (voir ci-dessus)." >&2
+  echo "Exposition incohérente dans $fichier (voir ci-dessus)." >&2
   exit 1
 fi
 
