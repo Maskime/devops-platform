@@ -67,13 +67,11 @@ services:
       socket-proxy:
         condition: service_healthy
     networks:
-      platform:
-        # Réseau principal (passerelle) quel que soit l'ordre des clés : le réseau socket-proxy est
-        # interne
-        gw_priority: 1
+      # platform : seul réseau à passerelle (socket-proxy est interne), voir compose/proxy.yml
+      - platform
       # Découverte des conteneurs et lecture de leurs logs via l'API Docker filtrée
       # (compose/socket-proxy.yml, tcp://socket-proxy:2375 dans promtail-config.yaml)
-      socket-proxy: {}
+      - socket-proxy
 
   # ---------------------------------------------------------------------------
   # Grafana — UI de visualisation des logs

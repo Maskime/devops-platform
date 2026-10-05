@@ -35,8 +35,8 @@ Les deux services passent donc par un **proxy de socket filtrant**, `socket-prox
 - **Réseau dédié et interne.** Le proxy n'est que sur le réseau `devops-platform_socket-proxy`
   (`internal: true` : aucun accès sortant, aucun port publié), partagé avec ses seuls clients. Les jobs
   CI, lancés sur le réseau de la plateforme (`PLATFORM_NETWORK`), ne le voient pas : le nom
-  `socket-proxy` n'y est même pas résolu. Traefik et Promtail gardent le réseau de la plateforme comme
-  réseau principal (`gw_priority`).
+  `socket-proxy` n'y est même pas résolu. Le réseau interne n'ayant pas de passerelle, ports publiés et
+  accès sortant de Traefik (ACME) et de Promtail passent toujours par le réseau de la plateforme.
 - **Durcissement du conteneur.** Système de fichiers en lecture seule, aucune capacité Linux,
   `no-new-privileges`. Il tourne en `root` (uid 0, sans capacité) : l'utilisateur de l'image (65534)
   ne peut pas lire le socket (`root:docker`, `0660`, avec un GID `docker` propre à chaque hôte) ; en

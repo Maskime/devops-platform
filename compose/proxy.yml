@@ -62,10 +62,10 @@ services:
       retries: 10
       start_period: 10s
     networks:
+      # platform : seul réseau à passerelle (socket-proxy est interne), donc porteur des ports publiés
+      # et de l'accès sortant (ACME). Pas de gw_priority : il exigerait Compose 2.33 / Engine 28,
+      # au-delà des versions minimales de scripts/host-prereqs.sh.
       platform:
-        # Réseau principal (passerelle, ports publiés) quel que soit l'ordre des clés : le réseau
-        # socket-proxy est interne
-        gw_priority: 1
         # Hostnames publics résolus vers Traefik dans le réseau de la plateforme : le runner, les jobs CI
         # et les services joignent les URLs publiques par le même chemin (et le même certificat) que les
         # clients externes, sans dépendre du DNS ni du hairpin NAT de l'hôte. Défauts identiques aux
