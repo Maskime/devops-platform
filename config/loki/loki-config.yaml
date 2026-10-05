@@ -29,7 +29,19 @@ limits_config:
   reject_old_samples_max_age: 168h
   ingestion_rate_mb: 16
   ingestion_burst_size_mb: 32
+  # Rétention : durée de conservation des logs, purgés au-delà par le compacteur.
+  # Valeur issue de LOKI_RETENTION_PERIOD (envs/<env>.env, voir envs/.env.example), défaut 744h (31 jours).
+  # Unités h, d, w ; minimum 24h, multiple de 24h recommandé (période de l'index), au moins 168h
+  # recommandé (reject_old_samples_max_age ci-dessus) ; 0s = conservation illimitée.
+  # Fichier lu avec -config.expand-env=true : aucun dollar ailleurs, commentaires compris.
+  retention_period: "${LOKI_RETENTION_PERIOD:-744h}"
+  # API de suppression (/loki/api/v1/delete) inutile à la rétention : désactivée (auth_enabled: false).
+  deletion_mode: disabled
 
 compactor:
   working_directory: /loki/compactor
   compaction_interval: 10m
+  # Marque les chunks expirés à chaque compaction, puis les supprime après retention_delete_delay.
+  retention_enabled: true
+  retention_delete_delay: 2h
+  delete_request_store: filesystem
