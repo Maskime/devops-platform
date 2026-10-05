@@ -6,21 +6,21 @@ services:
 
   # ---------------------------------------------------------------------------
   # Portainer CE — gestion des conteneurs (UI web)
-  # UI HTTPS : https://localhost:9443  |  Edge agent tunnel : 8000
+  # UI HTTPS : https://localhost:${PORTAINER_PORT}  |  Edge agent tunnel : ${PORTAINER_EDGE_PORT}
   # Variante -alpine (même version) : l'image standard ne contient aucun shell ni client HTTP,
   # ce qui interdit tout healthcheck.
   # ---------------------------------------------------------------------------
   portainer:
-    image: portainer/portainer-ce:2.45.1-alpine
+    image: portainer/portainer-ce:${PORTAINER_VERSION:-2.45.1-alpine}
     container_name: portainer
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     ports:
-      - "8000:8000"
-      - "9443:9443"
+      - "${PORTAINER_EDGE_PORT:-8000}:8000"
+      - "${PORTAINER_PORT:-9443}:9443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - portainer_data:/data
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/api/system/status"]
@@ -29,16 +29,16 @@ services:
       retries: 10
       start_period: 20s
     networks:
-      - factory-network
+      - platform
 
   # ---------------------------------------------------------------------------
   # PlantUML Server — génération de diagrammes PNG/SVG via HTTP
-  # URL : http://localhost:${PLANTUML_PORT:-8081}
+  # URL : http://localhost:${PLANTUML_PORT}
   # API : GET /png/<encoded> ou GET /svg/<encoded>
   # Interne : http://plantuml:8080
   # ---------------------------------------------------------------------------
   plantuml:
-    image: plantuml/plantuml-server:jetty-v1.2026.8
+    image: plantuml/plantuml-server:${PLANTUML_VERSION:-jetty-v1.2026.8}
     container_name: plantuml
     restart: unless-stopped
     ports:
@@ -50,12 +50,12 @@ services:
       retries: 10
       start_period: 20s
     networks:
-      - factory-network
+      - platform
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
-  factory-network:
-    name: factory-network
+  platform:
+    name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
 
 volumes:
