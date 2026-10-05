@@ -12,7 +12,8 @@ services:
   # Traefik — reverse proxy, routage par hostname (*_HOSTNAME de l'instance)
   # Seul service web à publier un port sur l'hôte. Les services exposés le déclarent par leurs
   # labels traefik.* (traefik.enable=true, règle Host(`<hostname>`), port interne).
-  # HTTP seul sur 80 ; HTTPS (443) et TLS_MODE : US 3-2, 3-3 et 3-4.
+  # Entrypoint web (:80, HTTP) : mode TLS_MODE=none (contrôles et avertissement : make check-env,
+  # scripts/check-env-urls.sh). HTTPS (443) pour letsencrypt et custom : US 3-2 et 3-3.
   # ---------------------------------------------------------------------------
   traefik:
     image: traefik:${TRAEFIK_VERSION:-v3.7.13}
