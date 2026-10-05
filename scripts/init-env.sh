@@ -18,7 +18,8 @@ PROFILS_DIR="$ROOT/config/profiles"
 source "$ROOT/scripts/lib/tls.sh"
 
 # Clés des mots de passe générés (minuscules : pas de faux positif de check-secrets)
-cles_mdp=(GITLAB_ROOT_PASSWORD SONARQUBE_DB_PASSWORD SONARQUBE_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD)
+cles_mdp=(GITLAB_ROOT_PASSWORD SONARQUBE_DB_PASSWORD SONARQUBE_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD
+  PORTAINER_ADMIN_PASSWORD)
 services=(gitlab sonarqube grafana portainer plantuml)
 declare -A noms=([gitlab]=GitLab [sonarqube]=SonarQube [grafana]=Grafana [portainer]=Portainer [plantuml]=PlantUML)
 
@@ -164,6 +165,8 @@ generer_mot_de_passe() {
 
 declare -A valeurs
 nb_repris=0
+# Secrets absents du fichier existant (variable ajoutée depuis sa génération) : générés, à signaler
+absents=()
 for cle in "${cles_mdp[@]}"; do
   precedent="$(valeur_existante "$cle")"
   if [[ "$NOUVEAUX_MDP" != 1 && -n "$precedent" && "$precedent" != change_me* ]]; then
@@ -171,6 +174,7 @@ for cle in "${cles_mdp[@]}"; do
     nb_repris=$((nb_repris + 1))
   else
     valeurs[$cle]="$(generer_mot_de_passe)"
+    ((existant)) && [[ "$NOUVEAUX_MDP" != 1 && -z "$precedent" ]] && absents+=("$cle")
   fi
 done
 
@@ -263,8 +267,15 @@ fi
 if ((existant)) && [[ "$NOUVEAUX_MDP" == 1 ]]; then
   echo
   echo "Attention : nouveaux secrets. Sur une instance déjà déployée, le mot de passe PostgreSQL de"
-  echo "SonarQube est déjà inscrit dans son volume et le mot de passe root GitLab n'est appliqué qu'au"
-  echo "premier démarrage : les volumes doivent être recréés (ou les mots de passe changés dans les services)."
+  echo "SonarQube est déjà inscrit dans son volume et les mots de passe root GitLab et admin Portainer ne"
+  echo "sont appliqués qu'au premier démarrage : les volumes doivent être recréés (ou les mots de passe"
+  echo "changés dans les services)."
+fi
+if ((${#absents[@]})); then
+  echo
+  echo "Note : secret(s) absent(s) de l'ancien fichier, générés : ${absents[*]}."
+  echo "Sur une instance déjà déployée, un mot de passe admin appliqué au premier démarrage seulement"
+  echo "(Portainer) ne correspond pas au compte existant : y reporter le mot de passe réel si besoin."
 fi
 if [[ "$tls_mode" == none ]]; then
   # Même avertissement que make deploy (scripts/check-env-urls.sh)

@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+### Migration
+
+- Ajouter `PORTAINER_ADMIN_PASSWORD` (12 caractères minimum) à chaque `envs/<env>.env` existant, sinon
+  `make deploy` et `make check-env` refusent de démarrer. Sur une instance déjà initialisée, Portainer
+  ignore cette valeur : y reporter le mot de passe admin réel pour garder le fichier à jour.
+- Supprimer `PORTAINER_EDGE_PORT`, devenue sans effet.
+
 ### Ajouté
 
 - `TLS_MODE=none` (HTTP simple, usage local) : services servis en HTTP par Traefik sur le port 80.
@@ -21,8 +28,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   logs d'accès collectés par promtail. HTTP seul : TLS à venir (US 3-2 à 3-4).
 - `make check-env` (donc `deploy` et `bootstrap-legacy`) refuse une `*_EXTERNAL_URL` dont l'hôte
   diffère du `*_HOSTNAME` du service ou qui porte un port (`scripts/check-env-urls.sh`).
-- `make verify` contrôle les ports publiés : seuls Traefik (80), le SSH GitLab et le tunnel Edge
-  Portainer sont autorisés.
+- `make verify` contrôle les ports publiés : seuls Traefik (80, et 443 pour le TLS à venir) et le SSH
+  GitLab sont autorisés, en comparant port publié et port du conteneur ; tout `network_mode` `host`,
+  `service:` ou `container:` est refusé.
+- Portainer : compte `admin` créé au premier démarrage avec la nouvelle variable **obligatoire**
+  `PORTAINER_ADMIN_PASSWORD` (secret Compose ; ≥ 12 caractères, contrôlé par `make check-env` ;
+  générée par `make init`). Plus aucune fenêtre où un visiteur pourrait créer l'administrateur.
+- Grafana : inscription, création d'organisation, dashboards partagés publiquement et snapshots
+  désactivés explicitement (accès anonyme déjà désactivé).
 - `make init` signale les hostnames `*.localhost` non résolus par le système et la ligne
   `/etc/hosts` à ajouter.
 - Garde-fou contre les lancements en double : un module `compose/<module>.yml` lancé seul ou la
@@ -113,6 +126,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Supprimé
 
+- Publication du port du tunnel des agents Edge Portainer (`PORTAINER_EDGE_PORT`, 8000) : les agents
+  Edge déjà enrôlés ne peuvent plus joindre l'instance.
 - Variables de port web `GITLAB_HTTP_PORT`, `SONARQUBE_PORT`, `GRAFANA_PORT`, `PORTAINER_PORT` et
   `PLANTUML_PORT` (ignorées si encore présentes dans un `envs/<env>.env`).
 
