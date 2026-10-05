@@ -11,8 +11,13 @@
 #   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
 #   docker compose --env-file envs/<env>.env up -d gitlab gitlab-runner # une seule brique
 # Pour désactiver durablement une brique, commenter sa ligne d'`include` ci-dessous.
-# Un module seul (`-f compose/<module>.yml`) ne sert qu'à `config` : lancé ainsi, il prendrait un
-# autre nom de projet, donc d'autres volumes.
+#
+# Nommage : Compose nomme les conteneurs (devops-platform-<service>-1) ; les scripts les ciblent par
+# service (`docker compose exec <service>`). Les volumes portent un nom explicite et fixe
+# (devops-platform_<volume>, déclaré dans chaque module).
+# Ne jamais lancer `up` sur un module seul (`-f compose/<module>.yml`) ni sous un autre nom de projet
+# (`-p`) : les conteneurs ainsi créés partageraient les volumes et le réseau de l'instance (deux
+# sonarqube-db sur les mêmes données = corruption). Un module seul ne sert qu'à `config`.
 # =============================================================================
 name: devops-platform
 
