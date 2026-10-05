@@ -26,6 +26,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   sa partie générique), exécuté par `make check-secrets`, `make verify` et la CI GitHub Actions
   sur chaque push et pull request ; mode `--history` pour l'historique de la branche.
 - Hook pre-commit optionnel (`.githooks/pre-commit`), activé par `make install-hooks`.
+- Profils de dimensionnement `PLATFORM_PROFILE` (`small`, `medium`, `large` ; défaut `medium`) :
+  `config/profiles/<profil>.env` règle Puma, Sidekiq et le PostgreSQL embarqué de GitLab, ainsi que
+  les heaps JVM de SonarQube. `make check-env` valide le profil, `make verify` contrôle les profils.
 
 ### Modifié
 
@@ -45,6 +48,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   `docker network rm factory-network`.
 - `GITLAB_EXTERNAL_URL`, `GITLAB_ROOT_PASSWORD`, `SONARQUBE_DB_PASSWORD` et `GRAFANA_ADMIN_PASSWORD`
   sont obligatoires : `docker compose` refuse de démarrer sans elles.
+
+### Corrigé
+
+- GitLab : la concurrence Sidekiq était réglée par `sidekiq['max_concurrency']`, supprimé en GitLab
+  17.0 et ignoré (Sidekiq tournait à 20). Elle passe par `sidekiq['concurrency']` : 10 avec le
+  profil `medium`. Le profil `medium` porte aussi `max_connections` du PostgreSQL embarqué de 100 à 150.
+  Au prochain `make deploy`, `gitlab` et `sonarqube` sont recréés (volumes conservés).
 
 ## [0.1.0] - 2026-10-05
 
