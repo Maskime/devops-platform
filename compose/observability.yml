@@ -16,7 +16,11 @@ services:
   loki:
     image: grafana/loki:${LOKI_VERSION:-3.7.8}
     restart: unless-stopped
-    command: -config.file=/etc/loki/loki-config.yaml
+    # expand-env : loki-config.yaml lit LOKI_RETENTION_PERIOD (défaut 744h défini dans ce fichier,
+    # appliqué aussi quand la variable est vide)
+    command: -config.file=/etc/loki/loki-config.yaml -config.expand-env=true
+    environment:
+      LOKI_RETENTION_PERIOD: ${LOKI_RETENTION_PERIOD:-}
     volumes:
       - ../config/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - loki_data:/loki

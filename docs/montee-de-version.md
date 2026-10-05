@@ -206,7 +206,10 @@ dc exec -T sonarqube-db pg_restore -U sonar -d sonar < ~/sauvegardes/"$ENV"/sona
   sauvegarde à froid du volume obligatoire. Le provisioning (`config/grafana/`) est relu à chaque démarrage.
 - **Loki** : les notes de version peuvent imposer des changements de `config/loki/loki-config.yaml`
   (`schema_config`, options retirées). Valider la configuration avec la nouvelle image avant de déployer :
-  `docker run --rm -v "$PWD/config/loki:/etc/loki:ro" grafana/loki:<version> -config.file=/etc/loki/loki-config.yaml -verify-config`.
+  `LOKI_VERSION=<version> scripts/check-loki-config.sh envs/<env>.env` (image et rétention de
+  l'instance), ou à la main :
+  `docker run --rm -v "$PWD/config/loki:/etc/loki:ro" grafana/loki:<version> -config.file=/etc/loki/loki-config.yaml -config.expand-env=true -verify-config`
+  (`-config.expand-env=true` obligatoire : le fichier lit `LOKI_RETENTION_PERIOD`).
 - **Promtail** est déprécié par Grafana ; 3.6.x est la dernière version. Migration vers Alloy : #35.
 
 ## Portainer, PlantUML
