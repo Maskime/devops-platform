@@ -56,8 +56,7 @@ for service in gitlab sonarqube grafana; do
   cle_url="${service^^}_EXTERNAL_URL"
   cle_hote="${service^^}_HOSTNAME"
   url="$(valeur_effective "$cle_url")"
-  # URL absente : défaut compose dérivé du hostname (GITLAB_EXTERNAL_URL, obligatoire, est
-  # signalée par `docker compose config`)
+  # URL absente : défaut compose dérivé du hostname (et du TLS_MODE pour GitLab, compose/gitlab.yml)
   [[ -n "$url" ]] || continue
   hote="$(valeur_effective "$cle_hote")"
   hote="${hote:-$service.localhost}"

@@ -186,9 +186,10 @@ for s in "${services[@]}"; do
   valeurs[${s^^}_HOSTNAME]="${hostnames[$s]}"
 done
 
-# URLs publiques : hostname du service, servi par Traefik sur le port 80 (contrôlé par
-# scripts/check-env-urls.sh). http:// quel que soit TLS_MODE tant que le TLS n'est pas livré (US 3-2 et 3-3).
-valeurs[GITLAB_EXTERNAL_URL]="http://${hostnames[gitlab]}"
+# URLs publiques : hostname du service, servi par Traefik (contrôlé par scripts/check-env-urls.sh).
+# GitLab : non renseignée, dérivée du hostname et du TLS_MODE (compose/gitlab.yml). SonarQube et
+# Grafana : http:// quel que soit TLS_MODE tant que le TLS n'est pas livré (US 3-2 et 3-3).
+url_gitlab="$(url_derivee "${hostnames[gitlab]}" "$tls_mode")"
 valeurs[SONARQUBE_EXTERNAL_URL]="http://${hostnames[sonarqube]}"
 valeurs[GRAFANA_EXTERNAL_URL]="http://${hostnames[grafana]}"
 
@@ -256,7 +257,7 @@ for s in "${services[@]}"; do
   printf '  %-23s %s\n' "${s^^}_HOSTNAME" "${hostnames[$s]}"
 done
 printf '  %-23s %s\n' TLS_MODE "$tls_mode" PLATFORM_PROFILE "$profil" \
-  GITLAB_EXTERNAL_URL "${valeurs[GITLAB_EXTERNAL_URL]}" \
+  "GITLAB_EXTERNAL_URL" "$url_gitlab (dérivée)" \
   SONARQUBE_EXTERNAL_URL "${valeurs[SONARQUBE_EXTERNAL_URL]}" \
   GRAFANA_EXTERNAL_URL "${valeurs[GRAFANA_EXTERNAL_URL]}"
 if ((nb_repris)); then
