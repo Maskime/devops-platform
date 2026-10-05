@@ -12,6 +12,8 @@ services:
   # Traefik — reverse proxy, routage par hostname (*_HOSTNAME de l'instance)
   # Seul service web à publier un port sur l'hôte. Les services exposés le déclarent par leurs
   # labels traefik.* (traefik.enable=true, règle Host(`<hostname>`), port interne).
+  # Alias réseau : les hostnames publics désignent Traefik dans le réseau de la plateforme (runner,
+  # jobs CI) ; le runner et les jobs dépendent donc de Traefik pour joindre GitLab.
   # Entrypoint web (:80, HTTP) : mode TLS_MODE=none (contrôles et avertissement : make check-env,
   # scripts/check-env-urls.sh). HTTPS (443) pour letsencrypt et custom : US 3-2 et 3-3.
   # ---------------------------------------------------------------------------
@@ -52,7 +54,17 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - platform
+      platform:
+        # Hostnames publics résolus vers Traefik dans le réseau de la plateforme : le runner, les jobs CI
+        # et les services joignent les URLs publiques par le même chemin (et le même certificat) que les
+        # clients externes, sans dépendre du DNS ni du hairpin NAT de l'hôte. Défauts identiques aux
+        # labels traefik.http.routers.<service>.rule des modules.
+        aliases:
+          - ${GITLAB_HOSTNAME:-gitlab.localhost}
+          - ${SONARQUBE_HOSTNAME:-sonarqube.localhost}
+          - ${GRAFANA_HOSTNAME:-grafana.localhost}
+          - ${PORTAINER_HOSTNAME:-portainer.localhost}
+          - ${PLANTUML_HOSTNAME:-plantuml.localhost}
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
