@@ -32,7 +32,7 @@ services:
       - platform
 
   # ---------------------------------------------------------------------------
-  # Promtail — collecteur de logs Docker → Loki
+  # Promtail — collecteur de logs Docker → Loki, sans montage du socket Docker (proxy filtrant)
   # Déprécié par Grafana (3.6.x = dernière version) : migration vers Alloy suivie dans #35
   # ---------------------------------------------------------------------------
   promtail:
@@ -41,7 +41,6 @@ services:
     command: -config.file=/etc/promtail/promtail-config.yaml
     volumes:
       - ../config/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
       - promtail_positions:/var/promtail
     # Sonde /ready de promtail ET de loki : l'image loki est distroless (ni shell ni client HTTP),
     # promtail sert donc de témoin de santé de loki. Image sans curl ni wget : requête via /dev/tcp.
@@ -65,8 +64,16 @@ services:
     depends_on:
       loki:
         condition: service_started
+      socket-proxy:
+        condition: service_healthy
     networks:
-      - platform
+      platform:
+        # Réseau principal (passerelle) quel que soit l'ordre des clés : le réseau socket-proxy est
+        # interne
+        gw_priority: 1
+      # Découverte des conteneurs et lecture de leurs logs via l'API Docker filtrée
+      # (compose/socket-proxy.yml, tcp://socket-proxy:2375 dans promtail-config.yaml)
+      socket-proxy: {}
 
   # ---------------------------------------------------------------------------
   # Grafana — UI de visualisation des logs
@@ -116,6 +123,10 @@ networks:
   platform:
     name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
+  socket-proxy:
+    name: devops-platform_socket-proxy
+    driver: bridge
+    internal: true
 
 # Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
 # le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml, le filtre de
