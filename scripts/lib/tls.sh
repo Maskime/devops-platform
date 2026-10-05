@@ -9,6 +9,49 @@ est_hostname_local() {
   [[ "$h" == localhost || "$h" == *.localhost ]]
 }
 
+# Adresse IPv4 ou IPv6 (Let's Encrypt n'émet pas de certificat pour une IP via Traefik)
+est_adresse_ip() {
+  [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || "$1" == *:* ]]
+}
+
+# Email du compte ACME : forme x@y.z, sans espace. Motif du refus sur stderr.
+valider_email_acme() {
+  if [[ "$1" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; then return 0; fi
+  echo "  ACME_EMAIL invalide : ${1:-(vide)} (attendu : adresse joignable, ex. : ops@mondomaine.fr)" >&2
+  return 1
+}
+
+# Contrôles de TLS_MODE=letsencrypt : <email> <challenge> <hostname>...
+# Erreurs (retour 1) : email absent ou invalide ; challenge autre que http, tls (vide : http) ; hostname
+# local ou IP (Let's Encrypt ne peut pas les valider). Avertissement : email d'un domaine d'exemple,
+# refusé par Let's Encrypt. Messages sur stderr ; lecture seule.
+verifier_letsencrypt() {
+  local email="$1" challenge="${2:-http}" h erreurs=0 refuses=()
+  shift 2
+  if [[ -z "$email" ]]; then
+    echo "ACME_EMAIL absent : obligatoire en TLS_MODE=letsencrypt (compte Let's Encrypt, avis d'expiration)." >&2
+    erreurs=1
+  elif ! valider_email_acme "$email"; then
+    erreurs=1
+  elif [[ "${email##*@}" =~ ^example\.(com|org|net)$ ]]; then
+    echo "Attention : ACME_EMAIL=$email : Let's Encrypt refuse les domaines d'exemple." >&2
+  fi
+  case "$challenge" in
+    http | tls) ;;
+    *) echo "ACME_CHALLENGE invalide : $challenge (valeurs admises : http, tls)." >&2; erreurs=1 ;;
+  esac
+  for h in "$@"; do
+    if est_hostname_local "$h" || est_adresse_ip "$h"; then refuses+=("$h"); fi
+  done
+  if ((${#refuses[@]})); then
+    echo "Hostname(s) local(aux) ou IP en TLS_MODE=letsencrypt : ${refuses[*]}." >&2
+    echo "  Let's Encrypt ne valide que des noms publics résolus vers le serveur : définir chaque" >&2
+    echo "  *_HOSTNAME (défaut : <service>.localhost), ou TLS_MODE=none en local." >&2
+    erreurs=1
+  fi
+  return "$erreurs"
+}
+
 # Avertissement TLS_MODE=none avec des hostnames non locaux (passés en arguments), sur stderr
 avertir_tls_none_non_local() {
   {

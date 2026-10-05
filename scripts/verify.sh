@@ -50,6 +50,9 @@ shopt -s nullglob
 tls_modes=(compose/tls/*.yml)
 shopt -u nullglob
 tls_modes=("${tls_modes[@]##*/}") tls_modes=("${tls_modes[@]%.yml}")
+# Variables obligatoires d'un mode, absentes de l'exemple (lignes commentées) : valeurs de test
+# fournies quand un mode est imposé (ACME_EMAIL : TLS_MODE=letsencrypt)
+VARS_MODE_TLS=(ACME_EMAIL=verify@devops-platform.test)
 if [[ -f compose.yml ]]; then
   shopt -s nullglob dotglob
   env_files=(envs/*.env envs/.env.example)
@@ -60,12 +63,24 @@ if [[ -f compose.yml ]]; then
   done
   # Chaque overlay de mode TLS (compose/tls/<mode>.yml), sur l'exemple
   for mode in "${tls_modes[@]}"; do
-    if TLS_MODE="$mode" docker compose --env-file envs/.env.example -f compose.yml config -q; then
+    if env "${VARS_MODE_TLS[@]}" TLS_MODE="$mode" docker compose --env-file envs/.env.example -f compose.yml config -q; then
       ok "envs/.env.example, TLS_MODE=$mode"
     else
       ko "envs/.env.example, TLS_MODE=$mode"
     fi
   done
+  # Chaque challenge ACME de TLS_MODE=letsencrypt (config/traefik/acme-<challenge>.env), sur l'exemple
+  shopt -s nullglob
+  for c in config/traefik/acme-*.env; do
+    c="${c##*/acme-}" c="${c%.env}"
+    if env "${VARS_MODE_TLS[@]}" TLS_MODE=letsencrypt ACME_CHALLENGE="$c" \
+        docker compose --env-file envs/.env.example -f compose.yml config -q; then
+      ok "envs/.env.example, TLS_MODE=letsencrypt, ACME_CHALLENGE=$c"
+    else
+      ko "envs/.env.example, TLS_MODE=letsencrypt, ACME_CHALLENGE=$c"
+    fi
+  done
+  shopt -u nullglob
 else
   ok "pas encore de compose.yml"
 fi
@@ -135,7 +150,7 @@ if [[ -f compose.yml ]]; then
     [[ "$cible" == *"|"* ]] && mode="${cible#*|}" f="$f, TLS_MODE=$mode"
     # Sortie normalisée : service à 2 espaces, `ports:` / `network_mode:` à 4, éléments `- ` à 6,
     # champs `target:` / `published:` à 8
-    if ! config="$(if [[ -n "$mode" ]]; then export TLS_MODE="$mode"; fi
+    if ! config="$(if [[ -n "$mode" ]]; then export TLS_MODE="$mode" "${VARS_MODE_TLS[@]}"; fi
                    docker compose --env-file "${cible%%|*}" -f compose.yml config 2>/dev/null)"; then
       ko "$f : configuration illisible"; continue
     fi

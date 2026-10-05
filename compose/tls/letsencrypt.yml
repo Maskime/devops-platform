@@ -1,12 +1,46 @@
 # =============================================================================
-# Overlay du proxy pour TLS_MODE=letsencrypt (provisoire)
+# Overlay du proxy pour TLS_MODE=letsencrypt : HTTPS avec des certificats Let's Encrypt obtenus et
+# renouvelés automatiquement par Traefik (resolver ACME `letsencrypt`)
 # Fusionné avec compose/proxy.yml par l'include de compose.yml (compose/tls/${TLS_MODE}.yml) ; ne
-# se lance pas seul.
-# Bouche-trou identique à none.yml (HTTP clair sur le port 80, signalé par make deploy) : remplacé
-# par la US 3-2 (resolver ACME de Traefik).
+# se lance pas seul. Prérequis, challenge et changement de CA : docs/letsencrypt.md.
+# Chemins relatifs : résolus depuis le répertoire du premier fichier de l'include (compose/), d'où
+# `../config/…`.
 # =============================================================================
 # Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
 x-garde-fou-tls-letsencrypt: "${PLATFORM_GARDE_FOU:?compose/tls/letsencrypt.yml est un overlay du proxy de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
 
 services:
-  traefik: {}
+  traefik:
+    # Challenge ACME : http (HTTP-01, défaut) ou tls (TLS-ALPN-01), contrôlé par make deploy
+    env_file:
+      - ../config/traefik/acme-${ACME_CHALLENGE:-http}.env
+    environment:
+      # Entrypoint HTTPS, par défaut pour tous les routeurs (labels sans `entrypoints`), TLS activé
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: ":443"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ASDEFAULT: "true"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS: "true"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_ALIASHEADERSSTRATEGY: delete
+      # Certificat de chaque routeur demandé au resolver pour le hostname de sa règle Host()
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_CERTRESOLVER: letsencrypt
+      # HTTP (:80) redirigé vers HTTPS (le challenge HTTP-01, servi en priorité par Traefik, ne l'est
+      # pas). Redirection non permanente, comme en custom : une 308 mise en cache par les navigateurs
+      # gênerait un retour en TLS_MODE=none.
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_TO: websecure
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_SCHEME: https
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_PERMANENT: "false"
+      # Resolver ACME : compte Let's Encrypt, CA (production par défaut ; staging pour les essais)
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL obligatoire en TLS_MODE=letsencrypt (voir envs/.env.example)}
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_CASERVER: ${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      # Compte et certificats ACME (fichier créé en 600 par Traefik), conservés d'un redéploiement à
+      # l'autre : sans eux, chaque redémarrage redemanderait les certificats (limites de Let's Encrypt)
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE: /letsencrypt/acme.json
+    ports:
+      - "443:443"
+    volumes:
+      - traefik_acme:/letsencrypt
+
+# Nom explicite, comme les autres volumes (note de compose/gitlab.yml). Conservé, inutilisé, si
+# l'instance repasse dans un autre TLS_MODE.
+volumes:
+  traefik_acme:
+    name: devops-platform_traefik_acme

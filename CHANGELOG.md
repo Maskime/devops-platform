@@ -20,6 +20,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- `TLS_MODE=letsencrypt` : HTTPS sur le port 443 avec des certificats Let's Encrypt obtenus et
+  renouvelés automatiquement par Traefik (resolver ACME, `compose/tls/letsencrypt.yml`), port 80
+  redirigé vers HTTPS. Nouvelles variables `ACME_EMAIL` (obligatoire dans ce mode), `ACME_CHALLENGE`
+  (`http`, HTTP-01, par défaut ; ou `tls`, TLS-ALPN-01) et `ACME_CA_SERVER` (staging). Compte et
+  certificats conservés sur le volume `devops-platform_traefik_acme`. `make check-env` (donc `deploy`)
+  exige un email valide, des `*_EXTERNAL_URL` renseignées en `https://` et refuse les hostnames
+  locaux ou IP ; `make init` demande l'email et génère des URLs en `https://`. Procédure :
+  `docs/letsencrypt.md`.
 - `TLS_MODE=custom` : HTTPS sur le port 443 avec les certificats fournis dans `config/certs/`
   (`cert.pem`, chaîne complète ; `key.pem`, non chiffrée), port 80 redirigé vers HTTPS (302).
   `make check-env` (donc `deploy`) refuse un certificat absent, illisible, chiffré, expiré, sans SAN,
