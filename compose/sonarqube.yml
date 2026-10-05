@@ -9,7 +9,6 @@ services:
   # ---------------------------------------------------------------------------
   sonarqube-db:
     image: postgres:${SONARQUBE_DB_VERSION:-17.11}
-    container_name: sonarqube-db
     restart: always
     environment:
       POSTGRES_USER: sonar
@@ -32,7 +31,6 @@ services:
   # ---------------------------------------------------------------------------
   sonarqube:
     image: mc1arke/sonarqube-with-community-branch-plugin:${SONARQUBE_VERSION:-26.5.0.122743-community}
-    container_name: sonarqube
     restart: always
     depends_on:
       sonarqube-db:
@@ -74,8 +72,15 @@ networks:
     name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
 
+# Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
+# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml et le filtre de
+# config/promtail/promtail-config.yaml.
 volumes:
   sonarqube_db:
+    name: devops-platform_sonarqube_db
   sonarqube_data:
+    name: devops-platform_sonarqube_data
   sonarqube_extensions:
+    name: devops-platform_sonarqube_extensions
   sonarqube_logs:
+    name: devops-platform_sonarqube_logs

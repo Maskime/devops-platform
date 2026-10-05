@@ -11,7 +11,6 @@ services:
   # ---------------------------------------------------------------------------
   loki:
     image: grafana/loki:${LOKI_VERSION:-3.7.8}
-    container_name: loki
     restart: unless-stopped
     command: -config.file=/etc/loki/loki-config.yaml
     volumes:
@@ -30,7 +29,6 @@ services:
   # ---------------------------------------------------------------------------
   promtail:
     image: grafana/promtail:${PROMTAIL_VERSION:-3.6.11}
-    container_name: promtail
     restart: unless-stopped
     command: -config.file=/etc/promtail/promtail-config.yaml
     volumes:
@@ -69,7 +67,6 @@ services:
   # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION:-13.2.3}
-    container_name: grafana
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
@@ -101,7 +98,13 @@ networks:
     name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
 
+# Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
+# le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml et le filtre de
+# config/promtail/promtail-config.yaml.
 volumes:
   loki_data:
+    name: devops-platform_loki_data
   promtail_positions:
+    name: devops-platform_promtail_positions
   grafana_data:
+    name: devops-platform_grafana_data

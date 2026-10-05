@@ -19,6 +19,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   valide son format, refuse les versions vides ou `latest` et signale les variables obligatoires
   manquantes.
 - `verify.sh` vérifie que chaque variable des fichiers compose est documentée dans `envs/.env.example`.
+- Procédure de montée de version des images (`docs/montee-de-version.md`) : chemin de mise à jour
+  GitLab, migration de schéma SonarQube et renouvellement du volume des plugins, version majeure de
+  PostgreSQL, sauvegarde et retour arrière.
+- `verify.sh` contrôle l'épinglage des images : variable `*_VERSION` pour chaque image compose, défaut
+  versionné (`majeure.mineure`) et identique à `envs/.env.example`, images des scripts versionnées,
+  aucun tag `latest`, aucune version vide ou `latest` dans `envs/*.env`.
 - GitLab : port SSH affiché dans les URLs de clone (`gitlab_shell_ssh_port`).
 - SonarQube : URL publique (`sonar.core.serverBaseURL`) issue de `SONARQUBE_EXTERNAL_URL` ;
   Grafana : `root_url` issue de `GRAFANA_EXTERNAL_URL`.
@@ -35,6 +41,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - Outillage Claude Code migré en skills (`.claude/skills/`) : `implement-us`, `plan-epic`,
   `launch-wave` et `github`, qui embarque les scripts d'accès à GitHub et de suivi des US.
   `.claude/commands/`, `.claude/scripts/` et `.claude/workflows/` disparaissent.
+- `verify.sh` : image `cytopia/yamllint` figée par son digest (aucun tag versionné publié).
 - `verify.sh` déplacé dans `scripts/` (toujours lancé par `make verify`).
 - `/launch-wave` ouvre les sessions des US dans [herdr](https://herdr.dev) au lieu de tmux
   (`us-worktree.sh` supprimé) ; herdr devient un prérequis pour lancer une vague.
@@ -46,6 +53,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   runner déjà enregistré est réaligné par `make bootstrap-legacy`, ou à la main (`network_mode` dans
   `/etc/gitlab-runner/config.toml`). L'ancien réseau peut ensuite être supprimé :
   `docker network rm factory-network`.
+- Conteneurs nommés par Compose (`devops-platform-<service>-1`) : plus de `container_name` fixe,
+  donc plus de collision avec d'autres stacks de l'hôte. Les commandes ciblent un service
+  (`docker compose exec <service>`) et non plus un nom (`docker exec <nom>`) ; `make verify` le contrôle.
+  Au prochain `make deploy`, les conteneurs d'une instance existante sont recréés : GitLab indisponible
+  quelques minutes, jobs CI en cours interrompus. Le label `container` des logs Loki prend les nouveaux
+  noms (le dashboard, fondé sur le label `service`, n'est pas affecté).
+- Volumes nommés explicitement (`devops-platform_<volume>`), sous le nom que leur donnait déjà
+  Compose : données conservées, aucune migration. Conséquence : ne jamais lancer `up` sur un module
+  seul ni sous un autre nom de projet (`-p`), les conteneurs créés partageraient les volumes de l'instance.
 - `GITLAB_EXTERNAL_URL`, `GITLAB_ROOT_PASSWORD`, `SONARQUBE_DB_PASSWORD` et `GRAFANA_ADMIN_PASSWORD`
   sont obligatoires : `docker compose` refuse de démarrer sans elles.
 
