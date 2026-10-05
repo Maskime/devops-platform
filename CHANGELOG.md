@@ -19,6 +19,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   valide son format, refuse les versions vides ou `latest` et signale les variables obligatoires
   manquantes.
 - `verify.sh` vérifie que chaque variable des fichiers compose est documentée dans `envs/.env.example`.
+- Procédure de montée de version des images (`docs/montee-de-version.md`) : chemin de mise à jour
+  GitLab, migration de schéma SonarQube et renouvellement du volume des plugins, version majeure de
+  PostgreSQL, sauvegarde et retour arrière.
+- `verify.sh` contrôle l'épinglage des images : variable `*_VERSION` pour chaque image compose, défaut
+  versionné (`majeure.mineure`) et identique à `envs/.env.example`, images des scripts versionnées,
+  aucun tag `latest`, aucune version vide ou `latest` dans `envs/*.env`.
 - GitLab : port SSH affiché dans les URLs de clone (`gitlab_shell_ssh_port`).
 - SonarQube : URL publique (`sonar.core.serverBaseURL`) issue de `SONARQUBE_EXTERNAL_URL` ;
   Grafana : `root_url` issue de `GRAFANA_EXTERNAL_URL`.
@@ -32,6 +38,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - Outillage Claude Code migré en skills (`.claude/skills/`) : `implement-us`, `plan-epic`,
   `launch-wave` et `github`, qui embarque les scripts d'accès à GitHub et de suivi des US.
   `.claude/commands/`, `.claude/scripts/` et `.claude/workflows/` disparaissent.
+- `verify.sh` : image `cytopia/yamllint` figée par son digest (aucun tag versionné publié).
 - `verify.sh` déplacé dans `scripts/` (toujours lancé par `make verify`).
 - `/launch-wave` ouvre les sessions des US dans [herdr](https://herdr.dev) au lieu de tmux
   (`us-worktree.sh` supprimé) ; herdr devient un prérequis pour lancer une vague.
