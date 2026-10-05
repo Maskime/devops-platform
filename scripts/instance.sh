@@ -86,10 +86,11 @@ preparer_contexte_distant() {
   actuel="$(docker context inspect -f '{{.Endpoints.docker.Host}}' "$contexte" 2>/dev/null || true)"
   if [[ -z "$actuel" ]]; then
     docker context create "$contexte" --description "devops-platform : $env_file" \
-      --docker "host=$deploy_ssh" >/dev/null
+      --docker "host=$deploy_ssh" >/dev/null 2>&1 || erreur "création du contexte Docker $contexte impossible"
     echo "Contexte Docker $contexte créé ($deploy_ssh)."
   elif [[ "$actuel" != "$deploy_ssh" ]]; then
-    docker context update "$contexte" --docker "host=$deploy_ssh" >/dev/null
+    docker context update "$contexte" --docker "host=$deploy_ssh" >/dev/null 2>&1 \
+      || erreur "mise à jour du contexte Docker $contexte impossible"
     echo "Contexte Docker $contexte mis à jour ($actuel → $deploy_ssh)."
   fi
   export DOCKER_CONTEXT="$contexte"
