@@ -41,8 +41,11 @@ services:
       SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonar
       SONAR_JDBC_USERNAME: sonar
       SONAR_JDBC_PASSWORD: ${SONARQUBE_DB_PASSWORD:?SONARQUBE_DB_PASSWORD obligatoire (voir envs/.env.example)}
-      # URL publique (liens des notifications, décoration des merge requests)
-      SONAR_CORE_SERVERBASEURL: ${SONARQUBE_EXTERNAL_URL:-http://localhost:${SONARQUBE_PORT:-9000}}
+    # URL publique (liens des notifications, décoration des merge requests). Passée en option -D :
+    # la variable d'environnement SONAR_CORE_SERVERBASEURL serait lue en minuscules
+    # (sonar.core.serverbaseurl) et ignorée.
+    command:
+      - -Dsonar.core.serverBaseURL=${SONARQUBE_EXTERNAL_URL:-http://localhost:${SONARQUBE_PORT:-9000}}
     ports:
       - "${SONARQUBE_PORT:-9000}:9000"
     ulimits:
