@@ -36,6 +36,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   `traefik` et `promtail`, réseau dédié interne non partagé avec les jobs CI. `make verify` contrôle
   les montages du socket et l'isolement de ce réseau ; le contrôle de réseau renommé de
   `make deploy` admet un conteneur placé sur ce seul réseau. Détails : `docs/acces-docker.md`.
+- Préparation d'un serveur : `scripts/host-prereqs.sh`, idempotent, exécuté en root sur le serveur.
+  Installe Docker Engine et le plugin Compose depuis le dépôt officiel (Debian, Ubuntu ; ailleurs,
+  contrôle des versions minimales Engine 25.0 / Compose 2.24.0), applique et persiste
+  `vm.max_map_count` ≥ 524288, pose un `/etc/docker/daemon.json` borné (logs `json-file` 10m × 3, cache
+  de build ≤ 10 Go, autres clés conservées) sans redémarrer Docker quand des conteneurs tournent
+  (`--redemarrer-docker`), et autorise 80, 443 (sauf `--sans-https`) et le port SSH de GitLab
+  (`--port-ssh-gitlab`) dans ufw ou firewalld s'ils sont actifs. Procédure : `docs/serveur.md`.
 - `TLS_MODE=letsencrypt` : HTTPS sur le port 443 avec des certificats Let's Encrypt obtenus et
   renouvelés automatiquement par Traefik (resolver ACME, `compose/tls/letsencrypt.yml`), port 80
   redirigé vers HTTPS. Nouvelles variables `ACME_EMAIL` (obligatoire dans ce mode), `ACME_CHALLENGE`
