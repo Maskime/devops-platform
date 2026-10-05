@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-secrets install-hooks init check-env-name check-env deploy reload-certs bootstrap-legacy
+.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap-legacy
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -51,9 +51,16 @@ init: check-env-name ## [ENV] Génère envs/ENV.env (questions, secrets aléatoi
 	done
 	@FORCE="$(FORCE)" NOUVEAUX_MDP="$(NOUVEAUX_MDP)" scripts/init-env.sh "$(ENV)"
 
-# Garde-fous communs aux cibles qui agissent sur une instance (ENV exigé sur la ligne de commande)
-check-env: check-env-name
+# Fichier de l'instance présent ; FORCER (remplacement d'une instance sur un hôte, bootstrap-legacy hors
+# local) accepté seulement sur la ligne de commande
+check-env-file: check-env-name
 	@[[ -f "$(ENV_FILE)" ]] || { echo "Fichier introuvable : $(ENV_FILE) (le générer : make init ENV=$(ENV))" >&2; exit 1; }
+	@if [[ "$(origin FORCER)" == "environment" ]]; then \
+	  echo "FORCER hérité du shell refusé : le passer explicitement, make $(MAKECMDGOALS) ENV=$(ENV) FORCER=1" >&2; exit 1; \
+	fi
+
+# Garde-fous communs aux cibles qui démarrent une instance (ENV exigé sur la ligne de commande)
+check-env: check-env-file
 	@if grep -nE '^[A-Z0-9_]+=change_me' "$(ENV_FILE)" >&2; then \
 	  echo "Valeurs d'exemple encore présentes dans $(ENV_FILE) (voir ci-dessus) : à remplacer." >&2; exit 1; \
 	fi
@@ -89,23 +96,15 @@ check-env: check-env-name
 	@$(COMPOSE) config -q || { echo "Configuration invalide pour $(ENV_FILE) (voir ci-dessus)." >&2; exit 1; }
 	@scripts/check-loki-config.sh "$(ENV_FILE)" >/dev/null
 
-deploy: check-env ## [ENV] Démarre l'instance ENV en local et attend que tous les services soient healthy
-	@# Conteneurs en double (lancés hors compose.yml ou sous un autre projet) : refus avant `up`
-	@scripts/check-doublons.sh "$(ENV_FILE)"
-	@# Compose reconnecte les conteneurs existants à un réseau renommé (PLATFORM_NETWORK) sans les
-	@# recréer : leur NetworkMode vise encore l'ancien réseau, supprimé, et ils ne redémarrent plus.
-	@# Dans ce cas, recréation forcée (volumes conservés). Un conteneur peut n'être que sur un réseau
-	@# dédié (socket-proxy) : son réseau principal est comparé à l'ensemble des réseaux déclarés.
-	@reseaux=" $$($(COMPOSE) config | sed -n '/^networks:/,/^[^ ]/ s/^    name: //p' | paste -sd ' ' -) "; \
-	options=(); \
-	for id in $$($(COMPOSE) ps -aq); do \
-	  mode="$$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$$id")"; \
-	  if [[ "$$reseaux" != *" $$mode "* ]]; then \
-	    echo "Réseau modifié ($$mode, absent de :$$reseaux) : recréation des conteneurs."; options=(--force-recreate); break; \
-	  fi; \
-	done; \
-	set -x; $(COMPOSE) up -d --wait --wait-timeout 900 "$${options[@]}"
-	@$(COMPOSE) ps --format 'table {{.Service}}\t{{.Status}}'
+# Instance locale, ou distante si DEPLOY_SSH est défini dans le fichier (docs/deploiement.md)
+deploy: check-env ## [ENV] Démarre l'instance ENV (locale ou distante) et attend que tous les services soient healthy
+	@FORCER="$(FORCER)" scripts/instance.sh deploy "$(ENV)"
+
+down: check-env-file ## [ENV] Arrête l'instance ENV : conteneurs supprimés, volumes conservés
+	@FORCER="$(FORCER)" scripts/instance.sh down "$(ENV)"
+
+status: check-env-file ## [ENV] État des services de l'instance ENV et récapitulatif des URLs
+	@FORCER="$(FORCER)" scripts/instance.sh status "$(ENV)"
 
 reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_MODE=custom) : Traefik recréé
 	@# Mode effectif lu comme le profil (check-env) : variable du shell, sinon dernière affectation
@@ -115,14 +114,17 @@ reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_
 	if [[ "$${mode:-none}" != custom ]]; then \
 	  echo "reload-certs : réservé à TLS_MODE=custom ($(ENV_FILE) : TLS_MODE=$${mode:-none})." >&2; exit 1; \
 	fi
-	@# Certificats déjà contrôlés par check-env. Traefik ne relit pas les fichiers de certificat :
-	@# recréation (montages relus, y compris après un remplacement par mv), coupure de quelques secondes.
-	$(COMPOSE) up -d --wait --force-recreate traefik
+	@# Certificats déjà contrôlés par check-env ; recréation de Traefik par scripts/instance.sh
+	@FORCER="$(FORCER)" scripts/instance.sh reload-certs "$(ENV)"
 
 # Temporaire : scripts repris de Software Factory, qui créent des données de test (projet
 # factory-test, analyse SonarQube). Remplacé par `make bootstrap` (épopée 5).
 bootstrap-legacy: check-env ## [ENV] [Temporaire] Bootstrap repris de la factory (crée des données de test) ; FORCER=1 hors local
 	@if [[ "$(ENV)" != "local" && "$(FORCER)" != "1" ]]; then \
 	  echo "bootstrap-legacy crée des données de test : réservé à ENV=local (FORCER=1 pour passer outre)." >&2; exit 1; \
+	fi
+	@# Scripts repris tels quels : moteur Docker local uniquement
+	@source scripts/lib/env.sh; if [[ -n "$$(env_valeur_fichier "$(ENV_FILE)" DEPLOY_SSH)" ]]; then \
+	  echo "bootstrap-legacy : instance distante (DEPLOY_SSH dans $(ENV_FILE)) non gérée." >&2; exit 1; \
 	fi
 	ENV=$(ENV) scripts/legacy/setup-all.sh

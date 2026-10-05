@@ -3,6 +3,10 @@
 # Inclus par compose.yml ; lancé seul, il est refusé par le garde-fou ci-dessous (voir l'en-tête
 # de compose.yml).
 # Les chemins relatifs sont résolus depuis ce dossier (compose/).
+# Fichiers de config montés depuis ${PLATFORM_CONFIG_DIR:-../config} : positionnée par
+# scripts/instance.sh vers la copie de config/ sur l'hôte cible en déploiement distant
+# (docs/deploiement.md). Montages sans création du chemin sur l'hôte : une source absente fait
+# échouer `up` au lieu que Docker crée un répertoire vide.
 # =============================================================================
 # Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
 x-garde-fou-observability: "${PLATFORM_GARDE_FOU:?compose/observability.yml est un module de compose.yml et ne se lance pas seul (conteneurs en double sur les volumes de l'instance) : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
@@ -22,7 +26,12 @@ services:
     environment:
       LOKI_RETENTION_PERIOD: ${LOKI_RETENTION_PERIOD:-}
     volumes:
-      - ../config/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - type: bind
+        source: ${PLATFORM_CONFIG_DIR:-../config}/loki/loki-config.yaml
+        target: /etc/loki/loki-config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
       - loki_data:/loki
     expose:
       - "3100"
@@ -40,7 +49,12 @@ services:
     restart: unless-stopped
     command: -config.file=/etc/promtail/promtail-config.yaml
     volumes:
-      - ../config/promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - type: bind
+        source: ${PLATFORM_CONFIG_DIR:-../config}/promtail/promtail-config.yaml
+        target: /etc/promtail/promtail-config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
       - promtail_positions:/var/promtail
     # Sonde /ready de promtail ET de loki : l'image loki est distroless (ni shell ni client HTTP),
     # promtail sert donc de témoin de santé de loki. Image sans curl ni wget : requête via /dev/tcp.
@@ -103,7 +117,12 @@ services:
       traefik.http.services.grafana.loadbalancer.server.port: "3000"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ../config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - type: bind
+        source: ${PLATFORM_CONFIG_DIR:-../config}/grafana/provisioning
+        target: /etc/grafana/provisioning
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       loki:
         condition: service_started

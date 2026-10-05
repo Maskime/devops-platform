@@ -3,7 +3,8 @@
 # Fusionné avec compose/proxy.yml par l'include de compose.yml (compose/tls/${TLS_MODE}.yml) ; ne
 # se lance pas seul. Certificats attendus, contrôles et renouvellement : docs/certificats.md.
 # Chemins relatifs : résolus depuis le répertoire du premier fichier de l'include (compose/), d'où
-# `../config/…`.
+# `../config/…` ; ${PLATFORM_CONFIG_DIR} la remplace en déploiement distant (copie de config/ sur
+# l'hôte cible, positionnée par scripts/instance.sh : docs/deploiement.md).
 # =============================================================================
 # Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
 x-garde-fou-tls-custom: "${PLATFORM_GARDE_FOU:?compose/tls/custom.yml est un overlay du proxy de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
@@ -30,19 +31,19 @@ services:
     # lit les certificats au démarrage : après remplacement, make reload-certs ENV=<env>.
     volumes:
       - type: bind
-        source: ../config/traefik/tls-custom.yml
+        source: ${PLATFORM_CONFIG_DIR:-../config}/traefik/tls-custom.yml
         target: /etc/traefik/dynamic/tls-custom.yml
         read_only: true
         bind:
           create_host_path: false
       - type: bind
-        source: ../config/certs/cert.pem
+        source: ${PLATFORM_CONFIG_DIR:-../config}/certs/cert.pem
         target: /certs/cert.pem
         read_only: true
         bind:
           create_host_path: false
       - type: bind
-        source: ../config/certs/key.pem
+        source: ${PLATFORM_CONFIG_DIR:-../config}/certs/key.pem
         target: /certs/key.pem
         read_only: true
         bind:

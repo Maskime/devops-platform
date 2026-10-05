@@ -30,7 +30,8 @@
 #   - cet env_file est compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env, qui n'existe que pour
 #     devops-platform → autre nom de projet refusé (« …/projet-autorise/<autre>.env: no such file »).
 # Commande correcte : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la
-# racine du repo, sans -p ni -f. Valider un module : docker compose --env-file envs/<env>.env config <service>.
+# racine du repo, sans -p ni -f (instance distante, DEPLOY_SSH : scripts/instance.sh compose <env> …,
+# docs/deploiement.md). Valider un module : docker compose --env-file envs/<env>.env config <service>.
 # Mécanisme et limites : docs/garde-fous.md, section « Lancements en double ».
 # =============================================================================
 name: devops-platform
