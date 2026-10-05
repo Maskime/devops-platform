@@ -39,10 +39,13 @@ Hors périmètre : Temporal, serveurs MCP, workers et tout ce qui est propre à 
 
 ## Outillage
 
-- **Ne pas utiliser le CLI `gh`.** Passer par l'API REST via `.claude/scripts/gh-api.sh`
-  (token dans `~/.config/github/token`, jamais affiché ni versionné).
-- Pousser avec `.claude/scripts/git-push.sh` (token injecté par en-tête HTTP).
-- Vérifications statiques : `.claude/scripts/verify.sh` (linters dans des conteneurs, seul Docker requis).
+- **Ne pas utiliser le CLI `gh`.** GitHub passe par le skill `github` (`.claude/skills/github/`) :
+  API REST via `scripts/gh-api.sh`, push via `scripts/git-push.sh` (token dans
+  `~/.config/github/token`, jamais affiché ni versionné), suivi des US via `scripts/find-us.sh`.
+- Vérifications statiques : `make verify` (`scripts/verify.sh`, linters dans des conteneurs, seul
+  Docker requis).
+- Sessions parallèles : [herdr](https://herdr.dev). La session principale doit tourner dans herdr
+  pour `/launch-wave`.
 
 ## Suivi
 
@@ -54,10 +57,13 @@ Hors périmètre : Temporal, serveurs MCP, workers et tout ce qui est propre à 
 
 **Notation :** `us: N-X` désigne la user story X de l'épopée N.
 
-## Slash commands
+## Skills
+
+Chaque skill vit dans `.claude/skills/<nom>/` (`SKILL.md`, scripts et références). Le skill `github`
+n'est pas une commande : Claude le charge dès qu'il doit accéder à GitHub.
 
 | Commande | Rôle |
 |---|---|
-| `/implement-us <N>-<X>` | Implémente une US (cycle défini dans `.claude/workflows/us-implementation.md`) et ouvre la PR |
+| `/implement-us <N>-<X>` | Implémente une US (cycle défini dans `.claude/skills/implement-us/workflow.md`) et ouvre la PR |
 | `/plan-epic <N>` | Analyse les US d'une épopée et établit des vagues de livraison parallélisables |
-| `/launch-wave <N> [--nettoyer]` | Ouvre une session `/implement-us` par US de la vague courante (worktree + tmux), ou nettoie les worktrees des US terminées |
+| `/launch-wave <N> [--nettoyer]` | Ouvre une session `/implement-us` par US de la vague courante (worktree + workspace herdr), ou nettoie les worktrees des US terminées |

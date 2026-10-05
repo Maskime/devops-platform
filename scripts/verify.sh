@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Vérifications statiques du repo (étape 5 du workflow d'implémentation).
+# Vérifications statiques du repo (`make verify`, étape 5 du workflow d'implémentation).
 # Les linters tournent dans des conteneurs : rien à installer sur l'hôte hormis Docker.
 # Code de sortie non nul si au moins une vérification échoue.
 set -uo pipefail
