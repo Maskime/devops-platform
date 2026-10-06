@@ -92,7 +92,7 @@ if present sonarqube; then
   fi
   if [[ -z "$token" ]]; then
     # Ligne omise plutôt que vide : un `source` écraserait la variable du consommateur
-    lignes+=("# Token d'analyse absent de ce poste ($token_fichier) ; make bootstrap-sonarqube ENV=$env le génère.")
+    lignes+=("# Token d'analyse absent de ce poste ($token_fichier) ; make bootstrap-sonarqube ENV=$env le récupère.")
     echo "Attention : $token_fichier absent : SONAR_TOKEN non écrit dans $sortie." >&2
   else
     [[ "$token" =~ $MOTIF_JETON_SONAR ]] || erreur "contenu inattendu dans $token_fichier (token non exporté)"
