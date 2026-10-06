@@ -50,7 +50,7 @@ PLACEHOLDER_PATTERN='(PASSWORD|PASSWD|TOKEN|SECRET|API_KEY)[A-Z0-9_]*[[:space:]]
 
 # Fichiers qui ne doivent jamais être versionnés
 SENSITIVE_FILES='^(envs/[^/]+\.env(\.[^/]+)?|(.*/)?\.env|outputs/.+|config/certs/.+|.*\.(pem|key|p12|pfx|jks|keystore)|(.*/)?id_(rsa|ecdsa|ed25519))$'
-SENSITIVE_ALLOWED='^(envs/\.env\.example|config/certs/\.gitkeep)$'
+SENSITIVE_ALLOWED='^(envs/\.env\.example|config/certs/\.gitkeep|config/certs/ca/\.gitkeep)$'
 
 findings=0
 report() { echo "  ✖ $*" >&2; findings=$((findings + 1)); }
@@ -77,12 +77,15 @@ scan_files() {
 scan_gitignore() {
   echo "[2/4] Couverture du .gitignore"
   local path
-  for path in envs/instance.env envs/instance.env.bak.20260101-000000 outputs/fichier config/certs/cert.pem; do
+  for path in envs/instance.env envs/instance.env.bak.20260101-000000 outputs/fichier config/certs/cert.pem \
+    config/certs/ca/ca.pem config/certs/ca/ca.key; do
     git check-ignore -q --no-index "$path" || report "$path n'est pas ignoré par .gitignore"
   done
-  if git check-ignore -q --no-index envs/.env.example; then
-    report "envs/.env.example est ignoré par .gitignore alors qu'il doit être versionné"
-  fi
+  for path in envs/.env.example config/certs/.gitkeep config/certs/ca/.gitkeep; do
+    if git check-ignore -q --no-index "$path"; then
+      report "$path est ignoré par .gitignore alors qu'il doit être versionné"
+    fi
+  done
 }
 
 scan_tokens() {
