@@ -18,6 +18,7 @@ profil de dimensionnement, versions et secrets.
 ```bash
 make init ENV=local                   # génère envs/local.env (Entrée pour garder chaque défaut)
 make deploy ENV=local                 # démarre tous les services et attend qu'ils soient healthy
+make bootstrap-sonarqube ENV=local    # sécurise le compte admin SonarQube, génère le token d'analyse
 make bootstrap-legacy ENV=local       # optionnel : runner, PAT et données de test (voir ci-dessous)
 ```
 
@@ -61,6 +62,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make deploy ENV=<env>` | Démarre l'instance, locale ou distante, et attend que tous les services soient healthy |
 | `make status ENV=<env>` | État des services et URLs de l'instance |
 | `make down ENV=<env>` | Arrête l'instance (volumes conservés) |
+| `make bootstrap-sonarqube ENV=<env>` | Configure SonarQube : `vm.max_map_count`, mot de passe admin, plugin, token d'analyse (idempotent) |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
 | `make verify` | Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis) |
 | `make check-secrets` | Recherche de secrets dans le dépôt |
@@ -75,6 +77,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 |---|---|
 | [Préparation d'un serveur](docs/serveur.md) | `scripts/host-prereqs.sh` : Docker, `vm.max_map_count`, `daemon.json`, pare-feu, nettoyage Docker planifié |
 | [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
+| [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | `make bootstrap-sonarqube` : étapes, token d'analyse, mot de passe admin inconnu |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
