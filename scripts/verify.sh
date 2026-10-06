@@ -74,7 +74,7 @@ if [[ -f compose.yml ]]; then
   for f in "${env_files[@]}"; do
     if docker compose --env-file "$f" -f compose.yml config -q; then ok "$f"; else ko "$f"; fi
   done
-  # Chaque overlay de mode TLS (compose/tls/<mode>.yml), sur l'exemple
+  # Chaque overlay de mode TLS (compose/tls/<mode>.yml et compose/tls/gitlab/<mode>.yml), sur l'exemple
   for mode in "${tls_modes[@]}"; do
     if env "${VARS_MODE_TLS[@]}" TLS_MODE="$mode" docker compose --env-file envs/.env.example -f compose.yml config -q; then
       ok "envs/.env.example, TLS_MODE=$mode"
@@ -289,8 +289,8 @@ section "variables documentées"
 if [[ -f compose.yml && -f envs/.env.example ]]; then
   # Variables interpolées, et sources `environment: <VAR>` des secrets (lues sans interpolation)
   mapfile -t compose_vars < <({
-    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml compose/tls/*.yml | sed -E 's/.*\$\{//'
-    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml compose/tls/*.yml
+    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml | sed -E 's/.*\$\{//'
+    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml
   } | sort -u)
   missing=0
   for v in "${compose_vars[@]}"; do
@@ -333,7 +333,7 @@ if [[ -f compose.yml ]]; then
     if [[ "$doc" != "$defaut" ]]; then
       ko "$var : défaut compose ($defaut) ≠ envs/.env.example (${doc:-absent})"; images_ko=1
     fi
-  done < <(grep -nE '^[[:space:]]*image:' compose.yml compose/*.yml compose/tls/*.yml)
+  done < <(grep -nE '^[[:space:]]*image:' compose.yml compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml)
 fi
 # Images lancées par les scripts : variables *_IMAGE à tag versionné ou digest
 while IFS=: read -r fichier num ligne; do
@@ -360,7 +360,7 @@ shopt -u nullglob
 # 6. Noms de conteneurs : Compose les attribue, les scripts ciblent les services
 #    (`docker compose exec <service>`). Commentaires ignorés ; `docker run` et `docker inspect <id>` admis.
 section "noms de conteneurs"
-if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml compose/tls/*.yml; then
+if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml; then
   ko "nom de conteneur fixé dans un fichier compose (voir ci-dessus)"
 else
   ok "aucun nom fixé dans les fichiers compose"
@@ -391,9 +391,12 @@ if [[ -f compose.yml ]]; then
     fi
   }
   if sortie="$(compose_propre)"; then ok "compose.yml : accepté"; else ko "compose.yml : refusé : $sortie"; fi
-  for f in compose/*.yml compose/tls/*.yml; do
+  for f in compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml; do
     m="$(basename "$f" .yml)"
-    [[ "$f" == compose/tls/* ]] && m="tls-$m"
+    case "$f" in
+      compose/tls/gitlab/*) m="tls-gitlab-$m" ;;
+      compose/tls/*) m="tls-$m" ;;
+    esac
     grep -qE "^x-garde-fou-${m}: \"\\$\{PLATFORM_GARDE_FOU:\?" "$f" || ko "$f : extension x-garde-fou-${m} absente"
     refus_attendu "PLATFORM_GARDE_FOU" "$f seul" -f "$f"
   done

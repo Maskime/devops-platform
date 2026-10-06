@@ -31,7 +31,9 @@ Lancé directement, un script d'étape refuse une instance distante.
 
 1. **Attente de GitLab** : services `gitlab` et `gitlab-runner` démarrés, puis GitLab prêt
    (`/-/readiness`, 15 minutes au plus), puis URL publique joignable depuis le runner, par Traefik
-   (5 minutes au plus ; un certificat refusé ou un routage absent s'y signale).
+   (5 minutes au plus ; un certificat refusé ou un routage absent s'y signale). En `TLS_MODE=custom`,
+   le certificat y est vérifié avec la CA privée si elle est fournie
+   ([CA privée](certificats.md#ca-privée)).
 2. **Jeton d'accès personnel d'administration** : voir ci-dessous.
 3. **Runner d'instance** : voir ci-dessous. Le bootstrap attend enfin que le runner soit en ligne.
 
@@ -59,14 +61,15 @@ processus : elle ne sert qu'à la durée du bootstrap.
 
 Le runner est enregistré avec l'exécuteur `docker`, l'image par défaut `alpine` (version épinglée
 dans `scripts/bootstrap/gitlab.sh`), l'URL publique de GitLab et l'URL de clone décrite dans
-[GitLab derrière le proxy](gitlab-proxy.md#runner-et-jobs-ci). Il porte la note de maintenance
+[GitLab derrière le proxy](gitlab-proxy.md#runner-et-jobs-ci). En `TLS_MODE=custom` avec une CA privée,
+il est enregistré avec `--tls-ca-file` ([CA privée](certificats.md#ca-privée)). Il porte la note de maintenance
 « Géré par devops-platform (make bootstrap) » : c'est elle, et non la description, qui identifie les
 runners du bootstrap.
 
 La plateforme considère `config.toml` du conteneur `gitlab-runner` comme le sien. À chaque passage :
 
 1. Le runner courant est celui de `config.toml` dont la configuration (description, URL, URL de clone,
-   exécuteur, image, réseau) est celle attendue et qui existe dans GitLab.
+   exécuteur, image, réseau, CA) est celle attendue et qui existe dans GitLab.
 2. Sont supprimés de GitLab : les autres runners de `config.toml` (ancienne description, ancienne
    URL, runner de `make bootstrap-legacy`…) et les runners d'instance portant la note de maintenance
    (orphelins, par exemple après perte du volume du runner).
@@ -75,8 +78,8 @@ La plateforme considère `config.toml` du conteneur `gitlab-runner` comme le sie
 4. Sans runner courant, un runner d'instance est créé (`POST /user/runners`) puis enregistré
    (`gitlab-runner register`).
 
-Changer la description, le réseau, le hostname ou le `TLS_MODE` conduit donc à un ré-enregistrement,
-sans runner orphelin. Les runners enregistrés à la main (hors `config.toml` de la plateforme, sans la
+Changer la description, le réseau, le hostname, le `TLS_MODE`, ou ajouter ou retirer la CA privée,
+conduit donc à un ré-enregistrement, sans runner orphelin. Les runners enregistrés à la main (hors `config.toml` de la plateforme, sans la
 note de maintenance) ne sont pas touchés.
 
 ## Limites
@@ -92,5 +95,3 @@ note de maintenance) ne sont pas touchés.
 - **Plusieurs postes** : le token d'analyse SonarQube n'existe que sur le poste qui l'a généré ;
   depuis un autre poste, `make bootstrap` le révoque et le remplace
   ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)).
-- **`TLS_MODE=custom` avec une CA privée** : le runner ne fait pas confiance à cette CA (#79), l'attente
-  de l'URL publique échoue.

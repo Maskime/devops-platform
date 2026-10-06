@@ -10,6 +10,8 @@
 #   compose/socket-proxy.yml   socket-proxy (API Docker filtrée, en lecture, pour traefik et promtail)
 #   compose/tls/<mode>.yml     overlay de traefik propre au TLS_MODE de l'instance (none, custom,
 #                              letsencrypt), fusionné avec compose/proxy.yml dans le même include
+#   compose/tls/gitlab/<mode>.yml  overlay de gitlab-runner propre au TLS_MODE (CA privée en custom),
+#                              fusionné avec compose/gitlab.yml dans le même include
 #
 # Toujours piloter la plateforme depuis ce fichier, avec le fichier d'environnement de l'instance :
 #   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
@@ -37,7 +39,10 @@
 name: devops-platform
 
 include:
-  - path: compose/gitlab.yml
+  # GitLab : overlay propre au mode TLS (compose/tls/gitlab/<mode>.yml : CA privée du runner en custom)
+  - path:
+      - compose/gitlab.yml
+      - compose/tls/gitlab/${TLS_MODE:-none}.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
   - path: compose/sonarqube.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env

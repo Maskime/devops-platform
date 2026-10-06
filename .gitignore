@@ -9,6 +9,10 @@ outputs/
 # Certificats fournis (TLS_MODE=custom)
 config/certs/*
 !config/certs/.gitkeep
+# CA facultative (config/certs/ca/ca.pem) : seul le répertoire est versionné
+!config/certs/ca/
+config/certs/ca/*
+!config/certs/ca/.gitkeep
 
 # Divers
 *.log

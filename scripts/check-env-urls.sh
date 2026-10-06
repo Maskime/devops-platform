@@ -8,7 +8,8 @@
 #     à une redirection. GITLAB_EXTERNAL_URL peut être absente (dérivée du hostname et du TLS_MODE) ;
 #   - TLS_MODE=none avec un hostname non local : avertissement (HTTP clair), non bloquant ;
 #   - TLS_MODE=custom : certificats fournis dans config/certs/ présents, cohérents et couvrant chaque
-#     hostname (verifier_certificats_custom, scripts/lib/tls.sh) ;
+#     hostname, CA facultative config/certs/ca/ca.pem cohérente (verifier_certificats_custom,
+#     scripts/lib/tls.sh) ; hors custom, une CA présente est signalée (ignorée) ;
 #   - TLS_MODE=letsencrypt : hostnames publics (ni local, ni IP), ACME_EMAIL valide, ACME_CHALLENGE
 #     connu (verifier_letsencrypt, scripts/lib/tls.sh).
 #   - GITLAB_SSH_PORT : entier de 1 à 65535, hors 80 et 443 (ports de Traefik) ; 22 signalé.
@@ -100,6 +101,11 @@ for service in gitlab sonarqube grafana portainer plantuml; do
   hote="$(valeur_effective "${service^^}_HOSTNAME")"
   hotes+=("${hote:-$service.localhost}")
 done
+
+# CA facultative : utilisée seulement en custom (compose/tls/gitlab/custom.yml, make bootstrap)
+if [[ "$tls_mode" != custom && -f "$ROOT/config/certs/ca/ca.pem" ]]; then
+  echo "Attention : config/certs/ca/ca.pem ignorée pour $fichier (TLS_MODE=$tls_mode, utilisée seulement en custom)." >&2
+fi
 
 # Une branche par mode
 case "$tls_mode" in
