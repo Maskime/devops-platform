@@ -7,7 +7,8 @@
 # DEPLOY_SSH et DEPLOY_DIR sont lues dans le fichier uniquement (jamais depuis le shell) : la cible
 # d'une commande ne dépend que du fichier de l'instance. Documentation : docs/deploiement.md.
 #
-# Usage : scripts/instance.sh <deploy|down|status|reload-certs|bootstrap> <env>
+# Usage : scripts/instance.sh <deploy|down|status|reload-certs> <env>
+#         scripts/instance.sh bootstrap <env> [sonarqube] [gitlab]   (défaut : toutes les étapes)
 #         scripts/instance.sh compose <env> <arguments docker compose…>   (commande manuelle)
 # Garde-fous de configuration (make check-env) : appliqués par le Makefile avant deploy et reload-certs.
 set -euo pipefail
@@ -23,6 +24,9 @@ readonly DEPLOY_DIR_DEFAUT=/opt/devops-platform
 readonly ENGINE_MIN=25
 readonly WAIT_TIMEOUT=900
 readonly PARALLELISME_SSH=4
+# Étapes de make bootstrap, dans l'ordre d'exécution (scripts/bootstrap/<étape>.sh) : SonarQube
+# d'abord, son token d'analyse servant à la configuration de GitLab
+readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
 # Fichiers de config/ montés par les services (les env_file, lus par Compose sur le poste, n'en font
 # pas partie). TLS_MODE=custom : fichiers de compose/tls/custom.yml en plus.
 readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning)
@@ -31,7 +35,8 @@ readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.p
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
 usage() {
-  echo "Usage : $0 <deploy|down|status|reload-certs|bootstrap> <env>" >&2
+  echo "Usage : $0 <deploy|down|status|reload-certs> <env>" >&2
+  echo "        $0 bootstrap <env> $(printf '[%s] ' "${ETAPES_BOOTSTRAP[@]}")" >&2
   echo "        $0 compose <env> <arguments docker compose…>" >&2
   exit 1
 }
@@ -40,7 +45,14 @@ usage() {
 action="$1" env="$2"
 shift 2
 case "$action" in
-  deploy | down | status | reload-certs | bootstrap) (($# == 0)) || usage ;;
+  deploy | down | status | reload-certs) (($# == 0)) || usage ;;
+  bootstrap)
+    # Étapes demandées (toutes par défaut), dédoublonnées et remises dans l'ordre d'exécution
+    demandees=" ${*:-${ETAPES_BOOTSTRAP[*]}} "
+    for e in "$@"; do [[ " ${ETAPES_BOOTSTRAP[*]} " == *" $e "* ]] || usage; done
+    etapes=()
+    for e in "${ETAPES_BOOTSTRAP[@]}"; do [[ "$demandees" == *" $e "* ]] && etapes+=("$e"); done
+    ;;
   compose) (($#)) || usage ;;
   *) usage ;;
 esac
@@ -284,11 +296,22 @@ case "$action" in
     if [[ -n "$deploy_ssh" ]]; then nettoyer_config; fi
     ;;
   bootstrap)
-    # Configuration de l'instance déployée (docs/bootstrap.md) : la cible Docker (contexte SSH d'une
-    # instance distante) est héritée par les scripts de scripts/bootstrap/
+    # Configuration de l'instance déployée (docs/bootstrap.md) : cible Docker (contexte SSH d'une
+    # instance distante) et garde-fou préparés une seule fois, hérités par les scripts de
+    # scripts/bootstrap/. Aucune copie de config : les étapes n'utilisent que exec et ps, sans
+    # recréer de service ; une étape qui en recréerait un devrait d'abord passer par copier_config.
     afficher_cible
     if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
-    scripts/bootstrap/gitlab.sh "$env_file"
+    services=" $("${compose[@]}" config --services | paste -sd ' ' -) "
+    for etape in "${etapes[@]}"; do
+      echo
+      if [[ "$services" != *" $etape "* ]]; then
+        echo "==> Bootstrap $etape : service $etape absent de l'instance, étape ignorée."
+        continue
+      fi
+      echo "==> Bootstrap $etape"
+      "scripts/bootstrap/$etape.sh" "$env_file"
+    done
     ;;
   compose)
     # Commande manuelle (exec, logs, restart…) avec la cible et les montages de l'instance

@@ -5,14 +5,16 @@
 #   3. remplace le mot de passe par défaut du compte admin par SONARQUBE_ADMIN_PASSWORD ;
 #   4. vérifie la présence du plugin community branch ;
 #   5. génère le token d'analyse (outputs/<env>.sonarqube-token), conservé tant qu'il reste valide.
-# Toutes les commandes passent par scripts/instance.sh compose (même cible que make deploy) ; l'API est
-# appelée depuis le conteneur sonarqube, identifiants transmis à curl par l'entrée standard (jamais
-# en argument). Documentation : docs/bootstrap-sonarqube.md.
+# Lancé par `make bootstrap ENV=<env>` (ou seul : `make bootstrap-sonarqube`) via scripts/instance.sh
+# bootstrap, qui positionne une seule fois la cible Docker (contexte SSH d'une instance distante) : les
+# commandes appellent ensuite docker compose directement. L'API est appelée depuis le conteneur
+# sonarqube, identifiants transmis à curl par l'entrée standard (jamais en argument).
+# Documentation : docs/bootstrap-sonarqube.md.
 #
-# Usage : scripts/bootstrap-sonarqube.sh <env>   (ou make bootstrap-sonarqube ENV=<env>)
+# Usage : scripts/bootstrap/sonarqube.sh envs/<env>.env
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 # shellcheck source=scripts/lib/env.sh
 source "$ROOT/scripts/lib/env.sh"
@@ -27,12 +29,19 @@ readonly API=http://localhost:9000
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
-(($# == 1)) || { echo "Usage : $0 <env>" >&2; exit 1; }
-env="$1"
-[[ "$env" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || erreur "ENV invalide : $env (attendu : minuscules, chiffres, - et _)"
-env_file="envs/$env.env"
-[[ -f "$env_file" ]] || erreur "fichier introuvable : $env_file (le générer : make init ENV=$env)"
+(($# == 1)) || { echo "Usage : $0 envs/<env>.env" >&2; exit 1; }
+env_file="$1"
+[[ -f "$env_file" ]] || erreur "fichier introuvable : $env_file"
+env="$(basename "$env_file" .env)"
 token_fichier="outputs/$env.sonarqube-token"
+
+dc() { docker compose --env-file "$env_file" "$@"; }
+
+# Garde-fou : lancé hors `make bootstrap`, une instance distante serait cherchée sur le moteur local
+# (même nom de projet compose) et une éventuelle instance locale reconfigurée à sa place
+if [[ -n "$(env_valeur_fichier "$env_file" DEPLOY_SSH)" && "${DOCKER_CONTEXT:-}" != "devops-platform-$env" ]]; then
+  erreur "instance distante (DEPLOY_SSH dans $env_file) : lancer make bootstrap ENV=$env"
+fi
 
 # Lu dans le fichier uniquement : une variable exportée par le shell (autre instance) serait posée
 # sur SonarQube sans être celle de envs/<env>.env.
@@ -41,8 +50,6 @@ if [[ -z "$admin_mdp" || "$admin_mdp" == change_me* ]]; then
   erreur "SONARQUBE_ADMIN_PASSWORD absent ou valeur d'exemple dans $env_file"
 fi
 [[ "$admin_mdp" =~ [[:cntrl:]] ]] && erreur "SONARQUBE_ADMIN_PASSWORD contient un caractère de contrôle ($env_file)"
-
-dc() { "$ROOT/scripts/instance.sh" compose "$env" "$@"; }
 
 # Chaîne entre guillemets pour un fichier de config curl (\ et " échappés)
 cfg() { local v="${1//\\/\\\\}"; printf '"%s"' "${v//\"/\\\"}"; }
@@ -76,7 +83,7 @@ identite_valide() { api GET /api/authentication/validate "$1" && [[ "$CORPS" == 
 # sysctl non namespacé : la base (qui démarre même quand SonarQube échoue faute de ce réglage) lit
 # la valeur du noyau de l'hôte cible.
 echo "==> vm.max_map_count sur l'hôte cible..."
-max_map_count="$(dc exec -T sonarqube-db cat /proc/sys/vm/max_map_count 2>/dev/null)" \
+max_map_count="$(dc exec -T sonarqube-db cat /proc/sys/vm/max_map_count </dev/null 2>/dev/null)" \
   || erreur "service sonarqube-db injoignable : instance non déployée ? (make deploy ENV=$env)"
 [[ "$max_map_count" =~ ^[0-9]+$ ]] || erreur "valeur de vm.max_map_count illisible : $max_map_count"
 if ((max_map_count < MAX_MAP_COUNT_MIN)); then
