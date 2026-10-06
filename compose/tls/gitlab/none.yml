@@ -1,0 +1,10 @@
+# =============================================================================
+# Overlay de la brique GitLab pour TLS_MODE=none : rien à ajouter
+# Fusionné avec compose/gitlab.yml par l'include de compose.yml (compose/tls/gitlab/${TLS_MODE}.yml) ;
+# ne se lance pas seul.
+# =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-tls-gitlab-none: "${PLATFORM_GARDE_FOU:?compose/tls/gitlab/none.yml est un overlay de la brique GitLab de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
+services:
+  gitlab-runner: {}
