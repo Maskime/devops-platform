@@ -40,16 +40,18 @@ Token de type `GLOBAL_ANALYSIS_TOKEN` du compte `admin` : il permet d'analyser n
 sans aucun droit d'administration. Sans date d'expiration.
 
 - **Fichier.** `outputs/<env>.sonarqube-token` (une ligne), permissions `600` dans `outputs/` en
-  `700`, non versionné. SonarQube ne restitue jamais un token : ce fichier est la seule copie.
+  `700`, non versionné. SonarQube ne restitue jamais un token : ce fichier est la référence
+  du bootstrap. Le [fichier de sortie](sortie-instance.md) `outputs/<env>.env` en reprend une copie,
+  régénérée à chaque passage.
 - **Relance.** Le token du fichier est conservé s'il est encore valide et toujours présent dans
   SonarQube. Sinon (fichier absent ou invalide, instance réinstallée), le token du même nom est
   révoqué et remplacé.
 - **Variable CI.** L'étape GitLab de `make bootstrap` pose ce token en variable CI d'instance
   `SONAR_TOKEN` ([Analyse SonarQube depuis la CI](analyse-sonarqube.md)).
 - **Rotation.** Supprimer le fichier puis lancer `make bootstrap` : l'ancien token est révoqué, la
-  variable CI `SONAR_TOKEN` mise à jour. Avec `make bootstrap-sonarqube` seul, la variable CI garde
-  l'ancien token jusqu'au prochain `make bootstrap-gitlab`. Tout autre utilisateur du token est à
-  mettre à jour.
+  variable CI `SONAR_TOKEN` mise à jour et `outputs/<env>.env` régénéré. Avec `make bootstrap-sonarqube`
+  seul, `outputs/<env>.env` est régénéré mais la variable CI garde l'ancien token jusqu'au prochain
+  `make bootstrap-gitlab`. Tout autre utilisateur du token (projets consommateurs) est à mettre à jour.
 - **Plusieurs postes.** Le fichier n'existe que sur le poste qui a lancé le bootstrap. Lancé depuis un
   autre poste, `make bootstrap` révoque et remplace le token (variable CI comprise), avec un
   avertissement : le lancer depuis le poste qui détient `outputs/`, ou `make bootstrap-gitlab` pour ne
