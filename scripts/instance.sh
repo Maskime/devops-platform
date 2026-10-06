@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Pilote une instance, locale ou distante : make deploy, down, status, reload-certs, bootstrap.
+# Pilote une instance, locale ou distante : make deploy, down, status, reload-certs, bootstrap
+# (qui régénère aussi le fichier de sortie outputs/<env>.env).
 #   - DEPLOY_SSH vide ou absente de envs/<env>.env : moteur Docker courant du poste (comme avant) ;
 #   - DEPLOY_SSH=ssh://[user@]hôte[:port] : contexte Docker SSH devops-platform-<env> (créé ou mis à
 #     jour), fichiers de config montés par les services copiés sur l'hôte dans
@@ -313,6 +314,9 @@ case "$action" in
     afficher_cible
     if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
     services=" $("${compose[@]}" config --services | paste -sd ' ' -) "
+    # Fichier de sortie outputs/<env>.env régénéré après chaque étape réussie : une étape en échec
+    # après une rotation du token SonarQube ne laisse pas un token révoqué (docs/sortie-instance.md)
+    export SORTIE_SERVICES="$services" SORTIE_ETAPES=""
     for etape in "${etapes[@]}"; do
       echo
       if [[ "$services" != *" $etape "* ]]; then
@@ -321,6 +325,8 @@ case "$action" in
       fi
       echo "==> Bootstrap $etape"
       "scripts/bootstrap/$etape.sh" "$env_file"
+      SORTIE_ETAPES="${SORTIE_ETAPES:+$SORTIE_ETAPES }$etape"
+      scripts/bootstrap/outputs.sh "$env_file"
     done
     ;;
   compose)
