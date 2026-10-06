@@ -11,14 +11,14 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-legacy
+.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-legacy
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
 	@echo "Les cibles marquées [ENV] exigent ENV=<env> (fichier envs/<env>.env)."
 	@echo
 	@echo "Cibles disponibles :"
-	@awk 'BEGIN { FS = ":.*## " } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-18s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN { FS = ":.*## " } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 verify: ## Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis)
 	@scripts/verify.sh
@@ -117,8 +117,11 @@ reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_
 	@# Certificats déjà contrôlés par check-env ; recréation de Traefik par scripts/instance.sh
 	@FORCER="$(FORCER)" scripts/instance.sh reload-certs "$(ENV)"
 
-bootstrap: check-env ## [ENV] Configure l'instance déployée : jeton d'administration GitLab, runner d'instance
+bootstrap: check-env ## [ENV] GitLab : jeton d'administration, runner d'instance (idempotent)
 	@FORCER="$(FORCER)" scripts/instance.sh bootstrap "$(ENV)"
+
+bootstrap-sonarqube: check-env ## [ENV] SonarQube : vm.max_map_count, mot de passe admin, plugin branch, token d'analyse (idempotent)
+	@scripts/bootstrap-sonarqube.sh "$(ENV)"
 
 # Temporaire : scripts repris de Software Factory, qui créent des données de test (projet
 # factory-test, analyse SonarQube). Remplacé par `make bootstrap` et le smoke test (épopée 5).

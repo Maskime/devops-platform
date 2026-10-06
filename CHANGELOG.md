@@ -39,6 +39,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   au lendemain) et enregistre un runner d'instance ; `gitlab-runner verify --delete` avant tout
   ré-enregistrement, aucun runner orphelin, aucune donnée de test, idempotent. Variables optionnelles
   `GITLAB_RUNNER_DESCRIPTION` et `GITLAB_RUNNER_NETWORK`. Voir `docs/bootstrap.md`.
+- Bootstrap SonarQube : `make bootstrap-sonarqube ENV=<env>` (`scripts/bootstrap-sonarqube.sh`),
+  instance locale ou distante. Vérifie `vm.max_map_count` sur l'hôte cible et la présence du plugin
+  community branch, remplace le mot de passe par défaut du compte `admin` par
+  `SONARQUBE_ADMIN_PASSWORD` et génère un token d'analyse (`GLOBAL_ANALYSIS_TOKEN`) dans
+  `outputs/<env>.sonarqube-token` (600), conservé tant qu'il reste valide. Idempotent, aucune donnée
+  créée. Documentation : `docs/bootstrap-sonarqube.md`.
 - Nettoyage Docker planifié : `scripts/host-prereqs.sh` installe `/usr/local/sbin/devops-platform-prune`
   et le timer systemd `devops-platform-prune.timer` (chaque nuit vers 03:30). Supprime les conteneurs
   de jobs CI arrêtés, les volumes de cache du runner orphelins (reporté pendant un job), les images
@@ -213,6 +219,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Corrigé
 
+- `scripts/instance.sh` : en distant (`DEPLOY_SSH`), le pré-test SSH consommait l'entrée standard
+  destinée à `scripts/instance.sh compose <env> exec -T …` (`ssh -n`).
 - GitLab : la concurrence Sidekiq était réglée par `sidekiq['max_concurrency']`, supprimé en GitLab
   17.0 et ignoré (Sidekiq tournait à 20). Elle passe par `sidekiq['concurrency']` : 10 avec le
   profil `medium`. Le profil `medium` porte aussi `max_connections` du PostgreSQL embarqué de 100 à 150.
