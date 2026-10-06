@@ -4,7 +4,8 @@
 l'emploi. Il vise la même cible que `make deploy` : moteur Docker local, ou serveur distant si
 `DEPLOY_SSH` est défini ([déploiement](deploiement.md)). Il ne crée **aucune donnée de test** (ni
 projet, ni utilisateur, ni pipeline) et peut être relancé à volonté : une relance sur une instance à
-jour ne change que le jeton d'administration GitLab.
+jour ne change que le jeton d'administration GitLab. Une seule étape GitLab à la fois par instance
+([exécutions simultanées](#exécutions-simultanées)).
 
 Rien n'est installé sur le poste : les appels aux API partent des conteneurs `sonarqube` et `gitlab`,
 indépendamment du DNS et du TLS du poste.
@@ -29,7 +30,8 @@ Lancé directement, un script d'étape refuse une instance distante.
 
 ## Étape GitLab
 
-1. **Attente de GitLab** : services `gitlab` et `gitlab-runner` démarrés, puis GitLab prêt
+1. **Attente de GitLab** : services `gitlab` et `gitlab-runner` démarrés, verrou de l'instance pris,
+   puis GitLab prêt
    (`/-/readiness`, 15 minutes au plus), puis URL publique joignable depuis le runner, par Traefik
    (5 minutes au plus ; un certificat refusé ou un routage absent s'y signale). En `TLS_MODE=custom`,
    le certificat y est vérifié avec la CA privée si elle est fournie
@@ -82,6 +84,29 @@ Changer la description, le réseau, le hostname, le `TLS_MODE`, ou ajouter ou re
 conduit donc à un ré-enregistrement, sans runner orphelin. Les runners enregistrés à la main (hors `config.toml` de la plateforme, sans la
 note de maintenance) ne sont pas touchés.
 
+## Exécutions simultanées
+
+Un verrou garantit qu'une seule étape GitLab de `make bootstrap` modifie une instance à la fois : sans
+lui, deux exécutions concurrentes (deux opérateurs, ou une relance pendant une exécution) révoqueraient le jeton
+l'une de l'autre et supprimeraient le runner l'une de l'autre, ou en laisseraient deux enregistrés.
+
+| Propriété | Valeur |
+|---|---|
+| Fichier | `/etc/gitlab-runner/.bootstrap.lock` du conteneur `gitlab-runner` (volume du runner) |
+| Mécanisme | `flock`, tenu par un `docker compose exec` qui dure toute l'étape GitLab |
+| Portée | étape GitLab, de la vérification des services jusqu'à la fin : jeton d'administration et runner (l'étape SonarQube, lancée avant, n'est pas couverte) |
+| Second bootstrap | attend 5 s au plus, puis s'arrête sans modifier GitLab, avec le dernier détenteur connu (utilisateur@poste, pid, date) |
+
+Le fichier vit sur l'hôte de l'instance : le verrou vaut pour tous les postes, que l'instance soit
+locale ou distante (`DEPLOY_SSH`). Il est libéré dès que le bootstrap se termine, y compris en échec,
+sur Ctrl-C ou si le poste est tué : la commande qui le tient perd son entrée standard et s'arrête, le
+noyau libère le verrou. Il n'y a jamais de déverrouillage manuel à faire ; le fichier, qui reste dans
+le volume, est sans effet hors d'un bootstrap.
+
+Un redémarrage du conteneur `gitlab-runner` (`make deploy` concurrent) ou une coupure de la connexion
+SSH pendant le bootstrap fait perdre le verrou : le bootstrap le détecte avant de modifier les runners
+et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
+
 ## Limites
 
 - **Réseau des jobs** : les jobs clonent par Traefik (ou par le service `gitlab` en `*.localhost`),
@@ -89,9 +114,13 @@ note de maintenance) ne sont pas touchés.
   permettre ; le bootstrap avertit mais ne le vérifie pas.
 - **`--docker-extra-hosts host.docker.internal:host-gateway`** de l'ancien bootstrap n'est plus posé :
   les jobs n'ont pas d'accès dédié à l'hôte.
-- **Exécutions simultanées** : deux `make bootstrap` en parallèle sur la même instance peuvent
-  enregistrer deux runners ou régénérer deux fois le token d'analyse SonarQube (aucun verrou, #101).
-  Relancer `make bootstrap` seul remet l'instance en ordre.
+- **Verrou contourné** : `make bootstrap-legacy` et un `gitlab-runner register` lancé à la main ne
+  prennent pas le verrou (#107) ; lancés pendant un bootstrap, leur runner peut être supprimé.
+- **Connexion SSH inactive** : en distant, la connexion qui tient le verrou reste sans trafic pendant
+  l'attente de GitLab ; un pare-feu ou un NAT qui la coupe fait échouer le bootstrap, à relancer (#108).
+- **Étape SonarQube non verrouillée** : deux `make bootstrap` en parallèle sur la même instance
+  peuvent régénérer deux fois le token d'analyse SonarQube, le verrou ne couvrant que l'étape
+  GitLab. Relancer `make bootstrap` seul remet l'instance en ordre.
 - **Plusieurs postes** : le token d'analyse SonarQube n'existe que sur le poste qui l'a généré ;
   depuis un autre poste, `make bootstrap` le révoque et le remplace
   ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)).

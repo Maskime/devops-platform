@@ -50,6 +50,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   au lendemain) et enregistre un runner d'instance ; `gitlab-runner verify --delete` avant tout
   ré-enregistrement, aucun runner orphelin, aucune donnée de test, idempotent. Variables optionnelles
   `GITLAB_RUNNER_DESCRIPTION` et `GITLAB_RUNNER_NETWORK`. Voir `docs/bootstrap.md`.
+- Verrou du bootstrap : une seule étape GitLab de `make bootstrap` à la fois par instance (`flock` sur
+  `/etc/gitlab-runner/.bootstrap.lock`, dans le volume du runner, valable quel que soit le poste) ; une
+  seconde exécution s'arrête sans modifier GitLab en indiquant le détenteur. Libéré en fin de script,
+  y compris en échec ou sur interruption. L'étape SonarQube n'est pas couverte.
 - Bootstrap SonarQube : étape de `make bootstrap` (`scripts/bootstrap/sonarqube.sh`),
   instance locale ou distante. Vérifie `vm.max_map_count` sur l'hôte cible et la présence du plugin
   community branch, remplace le mot de passe par défaut du compte `admin` par
