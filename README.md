@@ -61,7 +61,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make deploy ENV=<env>` | Démarre l'instance, locale ou distante, et attend que tous les services soient healthy |
 | `make status ENV=<env>` | État des services et URLs de l'instance |
 | `make down ENV=<env>` | Arrête l'instance (volumes conservés) |
-| `make bootstrap ENV=<env>` | Configure SonarQube puis GitLab : compte admin, token d'analyse, runner d'instance (idempotent) |
+| `make bootstrap ENV=<env>` | Configure SonarQube puis GitLab : compte admin, token d'analyse, runner d'instance (idempotent) ; `ROTATION=1` remplace le token d'analyse |
 | `make bootstrap-sonarqube ENV=<env>` / `bootstrap-gitlab` | Une seule étape de `make bootstrap` |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
 | `make verify` | Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis) |

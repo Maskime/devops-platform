@@ -446,14 +446,15 @@ else
   definir_variable SONAR_HOST_URL 0 "$sonar_host_url"
   etat_sonar_url="$sonar_host_url ($raison)"
 
-  # Token : celui du fichier, s'il est valide. Un token révoqué (bootstrap lancé depuis un autre poste)
-  # remplacerait le token courant de GitLab : la variable est alors laissée telle quelle.
+  # Token : copie locale écrite par l'étape SonarQube (qui la récupère du stockage de l'instance), si elle
+  # est valide. Un token révoqué (copie périmée, rotation depuis un autre poste) remplacerait le token
+  # courant de GitLab : la variable est alors laissée telle quelle.
   token_sonar=""
   if [[ -f "$sonar_token_fichier" ]]; then IFS= read -r token_sonar < "$sonar_token_fichier" || true; fi
   if [[ -z "$token_sonar" ]]; then
     {
       echo "Attention : $sonar_token_fichier absent ou vide : SONAR_TOKEN non mise à jour."
-      echo "  Lancer make bootstrap ENV=$env depuis ce poste (docs/analyse-sonarqube.md)."
+      echo "  make bootstrap ENV=$env la récupère du stockage de l'instance (docs/analyse-sonarqube.md)."
     } >&2
     etat_sonar_token="non mise à jour (token local absent)"
   # Règle de masquage de GitLab : 8 caractères au moins, alphabet Base64 (les tokens SonarQube s'y tiennent)
@@ -462,9 +463,9 @@ else
     etat_sonar_token="non mise à jour (token local illisible)"
   elif ! token_sonar_valide "$token_sonar"; then
     {
-      echo "Attention : token de $sonar_token_fichier refusé par SonarQube (révoqué depuis un autre poste ?)"
-      echo "  ou SonarQube injoignable : SONAR_TOKEN non mise à jour. Lancer make bootstrap ENV=$env"
-      echo "  (docs/analyse-sonarqube.md)."
+      echo "Attention : token de $sonar_token_fichier refusé par SonarQube (copie périmée, rotation depuis un"
+      echo "  autre poste ?) ou SonarQube injoignable : SONAR_TOKEN non mise à jour. make bootstrap ENV=$env"
+      echo "  récupère le token courant du stockage de l'instance (docs/analyse-sonarqube.md)."
     } >&2
     etat_sonar_token="non mise à jour (token local refusé par SonarQube)"
   else

@@ -4,8 +4,10 @@
 #   2. attend que SonarQube soit prêt (statut UP) ;
 #   3. remplace le mot de passe par défaut du compte admin par SONARQUBE_ADMIN_PASSWORD ;
 #   4. vérifie la présence du plugin community branch ;
-#   5. génère le token d'analyse (outputs/<env>.sonarqube-token), conservé tant qu'il reste valide ;
-#      l'étape GitLab (scripts/bootstrap/gitlab.sh) le pose en variable CI d'instance SONAR_TOKEN.
+#   5. génère le token d'analyse, conservé tant qu'il reste valide : référence dans le stockage de
+#      l'instance (volume sonarqube_data, récupérable depuis tout poste), copie locale dans
+#      outputs/<env>.sonarqube-token ; l'étape GitLab (scripts/bootstrap/gitlab.sh) le pose en
+#      variable CI d'instance SONAR_TOKEN. ROTATION=1 le révoque et le remplace.
 # Lancé par `make bootstrap ENV=<env>` (ou seul : `make bootstrap-sonarqube`) via scripts/instance.sh
 # bootstrap, qui positionne une seule fois la cible Docker (contexte SSH d'une instance distante) : les
 # commandes appellent ensuite docker compose directement. L'API est appelée depuis le conteneur
@@ -27,6 +29,12 @@ readonly ATTENTE_PAUSE=10
 readonly TOKEN_NOM=devops-platform-analyse # nom du token, pas sa valeur (check-secrets: ignore)
 readonly PLUGIN_CLE=communityBranchPlugin
 readonly API=http://localhost:9000
+# Stockage du token dans le conteneur sonarqube (volume sonarqube_data, sur l'hôte de l'instance)
+readonly STOCKAGE_DIR=/opt/sonarqube/data/devops-platform
+readonly STOCKAGE_FICHIER=analyse-token
+readonly STOCKAGE="$STOCKAGE_DIR/$STOCKAGE_FICHIER"
+# Format d'un token (règle de masquage des variables CI GitLab, comme scripts/bootstrap/gitlab.sh)
+readonly MOTIF_JETON='^[A-Za-z0-9_]{8,}$'
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
@@ -35,6 +43,7 @@ env_file="$1"
 [[ -f "$env_file" ]] || erreur "fichier introuvable : $env_file"
 env="$(basename "$env_file" .env)"
 token_fichier="outputs/$env.sonarqube-token"
+[[ "${ROTATION:-}" =~ ^1?$ ]] || erreur "ROTATION invalide : $ROTATION (1 ou vide)"
 
 dc() { docker compose --env-file "$env_file" "$@"; }
 
@@ -150,27 +159,81 @@ fi
 echo "    $PLUGIN_CLE installé : OK."
 
 # --- 5. Token d'analyse --------------------------------------------------------------------------
-# SonarQube ne restitue jamais un token : celui du fichier est conservé tant qu'il reste valide,
-# sinon le token du même nom est révoqué et remplacé.
+# SonarQube ne restitue jamais un token : sa référence est le stockage de l'instance (volume
+# sonarqube_data, lisible depuis tout poste), outputs/<env>.sonarqube-token n'en est qu'une copie locale.
+# Token conservé tant qu'il reste valide ; sinon le token du même nom est révoqué et remplacé.
+# Le token ne passe que par des variables et des entrées standard : jamais affiché ni en argument.
 echo "==> Token d'analyse ($TOKEN_NOM)..."
 api GET /api/user_tokens/search "$admin" || erreur "liste des tokens inaccessible (service sonarqube injoignable)"
 [[ "$CODE" == 200 ]] || erreur "HTTP $CODE inattendu sur api/user_tokens/search : $CORPS"
 token_existe=0
 [[ "$CORPS" == *"\"name\":\"$TOKEN_NOM\""* ]] && token_existe=1
 
+# Stockage de l'instance : chaîne vide si le fichier n'existe pas ; un fichier présent mais illisible
+# est une erreur (le traiter comme absent ferait révoquer un token valide)
+lire_stockage() {
+  # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+  dc exec -T sonarqube sh -c '[ -e "$1" ] || exit 0; cat "$1"' sh "$STOCKAGE" </dev/null 2>/dev/null \
+    || erreur "lecture de $STOCKAGE impossible dans le conteneur sonarqube (fichier illisible ou service injoignable)"
+}
+
+# Écriture atomique dans le stockage de l'instance : répertoire 700, fichier 600, token sur l'entrée standard
+ecrire_stockage() { # <token>
+  # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+  printf '%s\n' "$1" | dc exec -T sonarqube sh -c '
+      umask 077
+      mkdir -p "$1" && chmod 700 "$1" && t="$(mktemp "$1/.$2.XXXXXX")" || exit 1
+      cat >"$t" && mv -f "$t" "$1/$2" || { rm -f "$t"; exit 1; }' sh "$STOCKAGE_DIR" "$STOCKAGE_FICHIER" \
+    || return 1
+}
+
+# Écriture atomique de la copie locale : répertoire 700, fichier 600
+ecrire_local() { # <token>
+  (
+    umask 077
+    mkdir -p outputs && chmod 700 outputs || exit 1
+    tmp="$(mktemp "outputs/.$env.sonarqube-token.XXXXXX")" || exit 1
+    if ! { printf '%s\n' "$1" >"$tmp" && mv -f "$tmp" "$token_fichier"; }; then rm -f "$tmp"; exit 1; fi
+  )
+}
+
+# Token utilisable : format attendu, token du nom présent dans SonarQube et accepté par SonarQube
+token_utilisable() { # <token>
+  [[ "$1" =~ $MOTIF_JETON ]] && ((token_existe)) && identite_valide "$1:"
+}
+
+token_stocke="$(lire_stockage)"
+token_local=''
+if [[ -f "$token_fichier" ]]; then IFS= read -r token_local <"$token_fichier" || true; fi
+
 token=''
-if [[ -f "$token_fichier" ]]; then IFS= read -r token <"$token_fichier" || true; fi
-if [[ -n "$token" ]] && ((token_existe)) && identite_valide "$token:"; then
-  echo "    Token de $token_fichier valide : conservé."
+if [[ "${ROTATION:-}" == 1 ]]; then
+  echo "    ROTATION=1 : token révoqué et remplacé."
+elif [[ -n "$token_stocke" ]] && token_utilisable "$token_stocke"; then
+  token="$token_stocke"
+  echo "    Token du stockage de l'instance valide : conservé."
+elif [[ -n "$token_local" ]] && token_utilisable "$token_local"; then
+  # Instance bootstrappée avant le stockage de l'instance : le token de ce poste devient la référence
+  token="$token_local"
+  ecrire_stockage "$token" || erreur "écriture du token dans le stockage de l'instance ($STOCKAGE) impossible"
+  echo "    Token de $token_fichier valide : recopié dans le stockage de l'instance ($STOCKAGE)."
+elif ((token_existe)) && [[ -z "$token_stocke" && -z "$token_local" ]]; then
+  # Garde-fou : token créé par un bootstrap antérieur au stockage de l'instance, depuis un autre poste
+  echo "Erreur : token $TOKEN_NOM présent dans SonarQube, mais ni dans le stockage de l'instance ni dans" >&2
+  echo "  $token_fichier : il a été généré depuis un autre poste, avant le stockage de l'instance." >&2
+  echo "  Lancer d'abord make bootstrap-sonarqube ENV=$env depuis le poste qui détient ce fichier : le token" >&2
+  echo "  y est recopié dans le stockage de l'instance, puis récupérable depuis tout poste." >&2
+  echo "  Fichier perdu : make bootstrap ENV=$env ROTATION=1 révoque et remplace le token (consommateurs" >&2
+  echo "  hors plateforme à reconfigurer, docs/bootstrap-sonarqube.md)." >&2
+  exit 1
+elif ((token_existe)); then
+  echo "    Aucun token valide (stockage de l'instance, $token_fichier) : token remplacé."
 else
+  echo "    Aucun token $TOKEN_NOM dans SonarQube : génération."
+fi
+
+if [[ -z "$token" ]]; then
   if ((token_existe)); then
-    if [[ -n "$token" ]]; then
-      echo "    Token de $token_fichier invalide : remplacé."
-    else
-      echo "Attention : token $TOKEN_NOM présent dans SonarQube mais absent de $token_fichier (autre poste," >&2
-      echo "  fichier supprimé) : il est révoqué et remplacé. La variable CI SONAR_TOKEN suit à l'étape" >&2
-      echo "  GitLab de make bootstrap ; ses autres utilisateurs sont à reconfigurer." >&2
-    fi
     api POST /api/user_tokens/revoke "$admin" "name=$TOKEN_NOM" || erreur "révocation du token impossible"
     [[ "$CODE" == 204 ]] || erreur "HTTP $CODE inattendu à la révocation du token : $CORPS"
   fi
@@ -178,20 +241,25 @@ else
     || erreur "génération du token impossible (service sonarqube injoignable)"
   [[ "$CODE" == 200 ]] || erreur "HTTP $CODE inattendu à la génération du token : $CORPS"
   token="$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' <<<"$CORPS")"
-  [[ -n "$token" ]] || erreur "réponse de génération du token sans token"
+  CORPS=''
+  [[ "$token" =~ $MOTIF_JETON ]] || erreur "réponse de génération du token sans token reconnaissable"
 
-  # Écriture atomique, répertoire 700 et fichier 600 ; un échec ici se répare au passage suivant
-  # (token du même nom révoqué puis régénéré).
-  umask 077
-  mkdir -p outputs
-  chmod 700 outputs
-  tmp="$(mktemp "outputs/.$env.sonarqube-token.XXXXXX")"
-  trap 'rm -f "$tmp"' EXIT
-  printf '%s\n' "$token" >"$tmp"
-  mv -f "$tmp" "$token_fichier"
-  trap - EXIT
-  echo "    Token généré : $token_fichier (variable CI SONAR_TOKEN mise à jour par l'étape GitLab)."
+  # Stockage de l'instance d'abord (la référence), puis copie locale. Un échec arrête l'étape avant la
+  # régénération de outputs/<env>.env ; la relance révoque et remplace le token du même nom.
+  if ! ecrire_stockage "$token"; then
+    echo "Erreur : token généré mais non écrit dans le stockage de l'instance ($STOCKAGE)." >&2
+    echo "  outputs/$env.env n'est pas régénéré ; relancer make bootstrap ENV=$env." >&2
+    exit 1
+  fi
+  echo "    Token généré, écrit dans le stockage de l'instance (variable CI SONAR_TOKEN mise à jour par l'étape GitLab)."
 fi
+
+# Copie locale rafraîchie (autre poste, fichier supprimé, rotation)
+if [[ "$token_local" != "$token" ]]; then
+  ecrire_local "$token" || erreur "écriture de $token_fichier impossible (le stockage de l'instance est à jour : relancer)"
+  echo "    Copie locale $token_fichier mise à jour."
+fi
+unset token token_stocke token_local
 
 # --- Récapitulatif -------------------------------------------------------------------------------
 url="$(env_valeur "$env_file" SONARQUBE_EXTERNAL_URL)"
@@ -203,4 +271,5 @@ echo
 echo "SonarQube de l'instance $env prêt :"
 echo "  URL             $url"
 echo "  Compte admin    admin / SONARQUBE_ADMIN_PASSWORD de $env_file"
-echo "  Token d'analyse $token_fichier (type GLOBAL_ANALYSIS_TOKEN)"
+echo "  Token d'analyse type GLOBAL_ANALYSIS_TOKEN, stockage de l'instance ($STOCKAGE),"
+echo "                  copie locale $token_fichier"

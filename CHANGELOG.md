@@ -34,6 +34,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - `TLS_MODE=custom` : `gitlab-runner` monte `config/certs/ca/` et est recréé au prochain
   `make deploy` (jobs en cours interrompus). En déploiement distant, la copie de configuration change
   d'empreinte une fois. Rien ne change en `none` et `letsencrypt`.
+- Token d'analyse SonarQube stocké sur l'instance : lancer d'abord `make bootstrap-sonarqube ENV=<env>`
+  depuis le poste qui détient `outputs/<env>.sonarqube-token`, qui le recopie dans le stockage de
+  l'instance. Depuis un autre poste, le bootstrap refuse de révoquer un token dont il n'a aucune copie.
+  Supprimer ce fichier ne provoque plus de rotation : utiliser `ROTATION=1`.
 
 ### Ajouté
 
@@ -194,6 +198,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Modifié
 
+- **Token d'analyse SonarQube récupérable depuis tout poste** : référence dans le volume `sonarqube_data`
+  de l'instance (`600`), `outputs/<env>.sonarqube-token` devient une copie locale rafraîchie à chaque
+  bootstrap. Relancé depuis un autre poste, le bootstrap réutilise le token au lieu de le révoquer
+  (variable CI `SONAR_TOKEN` et `outputs/<env>.env` restent valides). Rotation explicite par
+  `make bootstrap ENV=<env> ROTATION=1`.
 - README raccourci (présentation, démarrage rapide, configuration, commandes) : la documentation
   d'exploitation passe dans `docs/` (`initialisation.md`, `exposition.md`, `dimensionnement.md`,
   `logs.md`, `garde-fous.md`), à côté des pages existantes.
