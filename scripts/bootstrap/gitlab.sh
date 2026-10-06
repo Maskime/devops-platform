@@ -11,6 +11,7 @@
 # GitLab : rien à installer sur le poste. Les jetons ne passent jamais en argument de processus.
 # Seuls l'URL publique, l'enregistrement et les jobs passent par Traefik et son certificat : en
 # TLS_MODE=custom, la CA privée facultative montée dans le runner les vérifie (docs/certificats.md).
+# Un seul bootstrap à la fois par instance : verrou flock dans le volume du runner (voir « Verrou »).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -32,8 +33,10 @@ readonly CONFIG_RUNNER=/etc/gitlab-runner/config.toml
 # CA privée de TLS_MODE=custom dans le conteneur gitlab-runner : montage de compose/tls/gitlab/custom.yml
 # (config/certs/ca/ca.pem), à garder identiques
 readonly CA_CONTENEUR=/etc/devops-platform/ca/ca.pem
+# Verrou de l'instance : dans le volume du runner, donc sur l'hôte de l'instance quel que soit le poste
+readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
 readonly RUBY=/opt/gitlab/embedded/bin/ruby
-readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 PAS=10
+readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 ATTENTE_VERROU=60 PAS=10
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -77,6 +80,79 @@ url="${url%/}"
 # Clone des jobs : URL publique (alias réseau de Traefik), sauf *.localhost, que libcurl (donc git)
 # résout toujours vers 127.0.0.1 : nom de service Docker (docs/gitlab-proxy.md)
 if est_hostname_local "$hostname"; then clone_url="http://gitlab"; else clone_url="$url"; fi
+
+# --- Verrou -----------------------------------------------------------------------------------------
+
+# Les commandes du bootstrap sont des docker compose exec séparés : le verrou est tenu, pendant tout le
+# script, par un détenteur lancé en coprocessus. C'est un sh du conteneur gitlab-runner qui garde le
+# verrou (fd 9) jusqu'à la fin de son entrée standard. Script terminé, en échec, interrompu ou tué :
+# entrée fermée, verrou libéré par le noyau. Dans toutes ses branches, le détenteur attend la fin de
+# son entrée avant de sortir, pour que ses réponses restent lisibles. Son entrée n'est ouverte que par
+# le script (descripteur du coprocessus, fermé au lancement des commandes) : seule sa fin la ferme.
+verrou_pid="" verrou_in="" verrou_out="" erreurs_rails=""
+
+nettoyer() {
+  local code=$? i
+  if [[ -n "$erreurs_rails" ]]; then rm -f "$erreurs_rails"; fi
+  if [[ -n "$verrou_pid" ]]; then
+    exec {verrou_in}>&-
+    # Attente bornée : la fin de l'entrée se propage au conteneur (par SSH pour une instance distante)
+    for ((i = 0; i < 20; i++)); do
+      kill -0 "$verrou_pid" 2> /dev/null || break
+      sleep 0.5
+    done
+    if kill -0 "$verrou_pid" 2> /dev/null; then
+      echo "Attention : le détenteur du verrou ne s'est pas arrêté, interrompu (verrou libéré à la fin de sa connexion)." >&2
+      kill "$verrou_pid" 2> /dev/null || true
+    fi
+    wait "$verrou_pid" 2> /dev/null || true
+  fi
+  exit "$code"
+}
+trap nettoyer EXIT
+
+prendre_verrou() {
+  local detenteur reponse ligne lignes=()
+  detenteur="$(id -un)@${HOSTNAME:-$(uname -n)} (pid $$), depuis le $(date '+%F %T %z')"
+  # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+  coproc verrou_detenteur {
+    exec docker compose --env-file "$env_file" exec -T gitlab-runner sh -c '
+      if ! (: >> "$1") 2> /dev/null; then echo "ECHEC $1 inaccessible en écriture"; exec cat > /dev/null; fi
+      exec 9>> "$1"
+      if ! flock -w "$3" 9; then echo OCCUPE; cat "$1"; echo FIN; exec cat > /dev/null; fi
+      printf "%s\n" "$2" > "$1"
+      echo PRIS
+      exec cat > /dev/null' sh "$FICHIER_VERROU" "$detenteur" 5
+  }
+  # shellcheck disable=SC2154 # variables créées par coproc
+  verrou_pid="$verrou_detenteur_PID" verrou_in="${verrou_detenteur[1]}"
+  # Copie de la sortie du détenteur : bash ferme les descripteurs du coprocessus dès qu'il s'arrête
+  exec {verrou_out}<&"${verrou_detenteur[0]}"
+  if ! IFS= read -r -t "$ATTENTE_VERROU" -u "$verrou_out" reponse; then
+    erreur "verrou $FICHIER_VERROU : pas de réponse du conteneur gitlab-runner en $ATTENTE_VERROU s (voir ci-dessus)"
+  fi
+  case "$reponse" in
+    PRIS) ;;
+    OCCUPE)
+      while IFS= read -r -t 10 -u "$verrou_out" ligne && [[ "$ligne" != FIN ]]; do lignes+=("$ligne"); done
+      {
+        echo "Erreur : un autre make bootstrap est en cours sur l'instance $env (verrou $FICHIER_VERROU du conteneur gitlab-runner)."
+        echo "  Dernier détenteur connu : ${lignes[*]:-inconnu}"
+        echo "  Aucune modification faite. Attendre la fin de cette exécution, puis relancer make bootstrap ENV=$env."
+      } >&2
+      exit 1
+      ;;
+    *) erreur "verrou $FICHIER_VERROU : réponse inattendue du conteneur gitlab-runner : $reponse" ;;
+  esac
+  exec {verrou_out}<&-
+}
+
+# Détenteur toujours actif : sinon (conteneur gitlab-runner redémarré, connexion SSH coupée), le verrou
+# est perdu et une autre exécution a pu le prendre
+verrou_tenu() {
+  kill -0 "$verrou_pid" 2> /dev/null \
+    || erreur "verrou $FICHIER_VERROU perdu (conteneur gitlab-runner redémarré, connexion SSH coupée ?) : relancer make bootstrap ENV=$env"
+}
 
 # --- Fonctions ------------------------------------------------------------------------------------
 
@@ -199,6 +275,9 @@ for service in gitlab gitlab-runner; do
   [[ -n "$(dc ps -q --status running "$service")" ]] \
     || erreur "service $service arrêté : démarrer l'instance (make deploy ENV=$env)"
 done
+prendre_verrou
+echo "    Verrou de l'instance pris ($FICHIER_VERROU, conteneur gitlab-runner)."
+
 # CA privée : utilisée seulement en TLS_MODE=custom, URL en https et ca.pem monté dans le runner ; sinon
 # magasin système (comportement de letsencrypt et none)
 ca_runner=""
@@ -254,7 +333,6 @@ puts "EXPIRATION=#{t.expires_at}"
 puts "PAT=#{t.token}"
 '
 erreurs_rails="$(mktemp)"
-trap 'rm -f "$erreurs_rails"' EXIT
 if ! sortie_pat="$(dc exec -T -e BOOTSTRAP_PAT_NOM="$PAT_NOM" gitlab gitlab-rails runner "$code_pat" 2> "$erreurs_rails")"; then
   cat "$erreurs_rails" >&2
   erreur "création du jeton d'accès personnel impossible (voir ci-dessus)"
@@ -268,6 +346,7 @@ echo "    Jeton créé (expire le $expiration) ; $revoques ancien(s) jeton(s) r�
 # --- 3. Runner d'instance ------------------------------------------------------------------------------
 
 etape "Runner d'instance « $description » (réseau des jobs : $reseau)"
+verrou_tenu
 # Blocs de config.toml : candidats conformes à la configuration attendue, et tous les ids présents
 candidats=() ids_config=()
 while IFS=$'\037' read -r b_id b_nom b_url b_clone b_exe b_image b_reseau b_ca; do
@@ -328,6 +407,7 @@ fi
 if [[ -n "$courant" ]]; then
   echo "    Runner déjà enregistré et conforme (id=$courant) : rien à faire."
 else
+  verrou_tenu
   # shellcheck disable=SC2016 # code Ruby
   code_creation='
 d = api!("post", "/user/runners", 201,
@@ -364,6 +444,7 @@ code_statut='puts api!("get", "/runners/#{ARGV[0]}", 200)["status"]'
 runner_en_ligne() { [[ "$(gitlab_api "$code_statut" "$courant")" == online ]]; }
 attendre "Runner $courant en ligne" "$ATTENTE_EN_LIGNE" runner_en_ligne \
   || erreur "le runner $courant n'est pas en ligne après $ATTENTE_EN_LIGNE s (docker compose logs gitlab-runner)"
+verrou_tenu
 
 echo
 echo "Bootstrap GitLab terminé ($env) :"
