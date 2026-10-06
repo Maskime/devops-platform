@@ -54,8 +54,8 @@ et le même certificat que pour un client externe, sans dépendre du DNS ni du h
 runner s'enregistre sur cette URL et ses jobs clonent par elle ; il dépend donc de Traefik pour
 joindre GitLab.
 
-Sur un runner déjà enregistré, la relance du bootstrap réaligne `url` et `clone_url` dans
-`config.toml` (après un changement de hostname ou de `TLS_MODE`), puis recharge le runner.
+Après un changement de hostname ou de `TLS_MODE`, `make bootstrap` ré-enregistre le runner sur la
+nouvelle URL et supprime l'ancien ([bootstrap](bootstrap.md)).
 
 Limites :
 

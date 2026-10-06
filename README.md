@@ -18,7 +18,7 @@ profil de dimensionnement, versions et secrets.
 ```bash
 make init ENV=local                   # génère envs/local.env (Entrée pour garder chaque défaut)
 make deploy ENV=local                 # démarre tous les services et attend qu'ils soient healthy
-make bootstrap-legacy ENV=local       # optionnel : runner, PAT et données de test (voir ci-dessous)
+make bootstrap ENV=local              # configure l'instance : jeton d'administration, runner d'instance
 ```
 
 | Service | URL locale par défaut |
@@ -32,7 +32,7 @@ make bootstrap-legacy ENV=local       # optionnel : runner, PAT et données de t
 Les mots de passe générés par `make init` se lisent dans `envs/local.env`. Si git ou wget ne résolvent
 pas `*.localhost`, `make init` indique la ligne à ajouter à `/etc/hosts`.
 
-> ⚠️ `make bootstrap-legacy` est **temporaire** : repris de Software Factory, il crée des **données de
+> ⚠️ `make bootstrap-legacy ENV=local` est **temporaire** : repris de Software Factory, il crée des **données de
 > test** (projet `factory-test`, pipeline, analyse SonarQube) et n'est accepté qu'en `ENV=local`
 > (`FORCER=1` pour passer outre). Il requiert `curl`, `python3` et `vm.max_map_count` ≥ 524288.
 
@@ -61,6 +61,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make deploy ENV=<env>` | Démarre l'instance, locale ou distante, et attend que tous les services soient healthy |
 | `make status ENV=<env>` | État des services et URLs de l'instance |
 | `make down ENV=<env>` | Arrête l'instance (volumes conservés) |
+| `make bootstrap ENV=<env>` | Configure l'instance déployée : jeton d'administration GitLab, runner d'instance (idempotent) |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
 | `make verify` | Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis) |
 | `make check-secrets` | Recherche de secrets dans le dépôt |
@@ -76,6 +77,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Préparation d'un serveur](docs/serveur.md) | `scripts/host-prereqs.sh` : Docker, `vm.max_map_count`, `daemon.json`, pare-feu, nettoyage Docker planifié |
 | [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
+| [Bootstrap](docs/bootstrap.md) | `make bootstrap` : attente de GitLab, jeton d'administration, runner d'instance, idempotence |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
 | [Let's Encrypt](docs/letsencrypt.md) | `TLS_MODE=letsencrypt` : prérequis, challenge, stockage, renouvellement |
@@ -88,7 +90,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 
 ## Avancement
 
-Le bootstrap définitif (instance vierge) et le smoke test sont en cours de développement : voir les
+Le bootstrap SonarQube, les variables CI et le smoke test sont en cours de développement : voir les
 [milestones](https://github.com/Maskime/devops-platform/milestones) et le
 [`CHANGELOG.md`](CHANGELOG.md).
 
