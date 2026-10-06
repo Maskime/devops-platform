@@ -79,6 +79,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
 | [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance, image auxiliaire), idempotence |
+| [Analyse SonarQube depuis la CI](docs/analyse-sonarqube.md) | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN`, exemple de job `sonar-scanner` |
 | [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | Étape SonarQube : `vm.max_map_count`, compte admin, token d'analyse, mot de passe admin inconnu |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
@@ -92,7 +93,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 
 ## Avancement
 
-Le bootstrap SonarQube, les variables CI et le smoke test sont en cours de développement : voir les
+Le smoke test est en cours de développement : voir les
 [milestones](https://github.com/Maskime/devops-platform/milestones) et le
 [`CHANGELOG.md`](CHANGELOG.md).
 

@@ -15,9 +15,10 @@ indépendamment du DNS et du TLS du poste.
 | Ordre | Étape | Script | Lancée seule par |
 |---|---|---|---|
 | 1 | SonarQube : `vm.max_map_count`, compte admin, plugin, token d'analyse ([détails](bootstrap-sonarqube.md)) | `scripts/bootstrap/sonarqube.sh` | `make bootstrap-sonarqube` |
-| 2 | GitLab : jeton d'administration, runner d'instance (ci-dessous) | `scripts/bootstrap/gitlab.sh` | `make bootstrap-gitlab` |
+| 2 | GitLab : jeton d'administration, variables CI SonarQube, runner d'instance (ci-dessous) | `scripts/bootstrap/gitlab.sh` | `make bootstrap-gitlab` |
 
-SonarQube passe en premier : son token d'analyse est disponible pour la configuration de GitLab. Une
+SonarQube passe en premier : son token d'analyse est posé en variable CI d'instance par l'étape
+GitLab. Une
 étape en échec arrête le bootstrap ; après correction, relancer `make bootstrap`, ou l'étape restante
 seule. Une étape dont le service est absent de l'instance (brique retirée de `compose.yml`) est
 ignorée, avec un message.
@@ -37,9 +38,13 @@ Lancé directement, un script d'étape refuse une instance distante.
    le certificat y est vérifié avec la CA privée si elle est fournie
    ([CA privée](certificats.md#ca-privée)).
 2. **Jeton d'accès personnel d'administration** : voir ci-dessous.
-3. **Runner d'instance** : voir ci-dessous. Le bootstrap attend enfin que le runner soit en ligne.
+3. **Variables CI d'instance** `SONAR_HOST_URL` et `SONAR_TOKEN` (masquée), créées ou mises à jour,
+   token validé auprès de SonarQube avant écriture : voir [Analyse SonarQube depuis la
+   CI](analyse-sonarqube.md). Ignorée si le service `sonarqube` est absent de l'instance.
+4. **Runner d'instance** : voir ci-dessous. Le bootstrap attend enfin que le runner soit en ligne.
 
-Le récapitulatif final affiche l'id du runner, son réseau, l'URL et l'expiration du jeton.
+Le récapitulatif final affiche l'id du runner, son réseau, l'URL, l'expiration du jeton et l'état des
+variables CI.
 
 ## Jeton d'administration
 
@@ -112,7 +117,7 @@ l'une de l'autre et supprimeraient le runner l'une de l'autre, ou en laisseraien
 |---|---|
 | Fichier | `/etc/gitlab-runner/.bootstrap.lock` du conteneur `gitlab-runner` (volume du runner) |
 | Mécanisme | `flock`, tenu par un `docker compose exec` qui dure toute l'étape GitLab |
-| Portée | étape GitLab, de la vérification des services jusqu'à la fin : jeton d'administration et runner (l'étape SonarQube, lancée avant, n'est pas couverte) |
+| Portée | étape GitLab, de la vérification des services jusqu'à la fin : jeton d'administration, variables CI et runner (l'étape SonarQube, lancée avant, n'est pas couverte) |
 | Second bootstrap | attend 5 s au plus, puis s'arrête sans modifier GitLab, avec le dernier détenteur connu (utilisateur@poste, pid, date) |
 
 Le fichier vit sur l'hôte de l'instance : le verrou vaut pour tous les postes, que l'instance soit
@@ -127,8 +132,8 @@ et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
 
 ## Limites
 
-- **Réseau des jobs** : les jobs clonent par Traefik (ou par le service `gitlab` en `*.localhost`),
-  joignables seulement sur le réseau de la plateforme. Un `GITLAB_RUNNER_NETWORK` différent doit le
+- **Réseau des jobs** : les jobs clonent par Traefik (ou par le service `gitlab` en `*.localhost`) et
+  joignent SonarQube par `SONAR_HOST_URL`, joignables seulement sur le réseau de la plateforme. Un `GITLAB_RUNNER_NETWORK` différent doit le
   permettre ; le bootstrap avertit mais ne le vérifie pas.
 - **`--docker-extra-hosts host.docker.internal:host-gateway`** de l'ancien bootstrap n'est plus posé :
   les jobs n'ont pas d'accès dédié à l'hôte.

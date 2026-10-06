@@ -44,11 +44,16 @@ sans aucun droit d'administration. Sans date d'expiration.
 - **Relance.** Le token du fichier est conservé s'il est encore valide et toujours présent dans
   SonarQube. Sinon (fichier absent ou invalide, instance réinstallée), le token du même nom est
   révoqué et remplacé.
-- **Rotation.** Supprimer le fichier puis lancer `make bootstrap-sonarqube` : l'ancien token est
-  révoqué. Tout ce qui l'utilise (variables CI, projets consommateurs) est à mettre à jour.
+- **Variable CI.** L'étape GitLab de `make bootstrap` pose ce token en variable CI d'instance
+  `SONAR_TOKEN` ([Analyse SonarQube depuis la CI](analyse-sonarqube.md)).
+- **Rotation.** Supprimer le fichier puis lancer `make bootstrap` : l'ancien token est révoqué, la
+  variable CI `SONAR_TOKEN` mise à jour. Avec `make bootstrap-sonarqube` seul, la variable CI garde
+  l'ancien token jusqu'au prochain `make bootstrap-gitlab`. Tout autre utilisateur du token est à
+  mettre à jour.
 - **Plusieurs postes.** Le fichier n'existe que sur le poste qui a lancé le bootstrap. Lancé depuis un
-  autre poste, `make bootstrap` révoque et remplace le token, avec un avertissement : le lancer depuis
-  le poste qui détient `outputs/`, ou `make bootstrap-gitlab` pour ne configurer que GitLab.
+  autre poste, `make bootstrap` révoque et remplace le token (variable CI comprise), avec un
+  avertissement : le lancer depuis le poste qui détient `outputs/`, ou `make bootstrap-gitlab` pour ne
+  configurer que GitLab (la variable CI `SONAR_TOKEN` est alors laissée telle quelle).
 
 ## Mot de passe admin inconnu
 
