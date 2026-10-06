@@ -31,6 +31,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   `make deploy` et `make check-env` refusent de démarrer. Sur une instance déjà initialisée, Portainer
   ignore cette valeur : y reporter le mot de passe admin réel pour garder le fichier à jour.
 - Supprimer `PORTAINER_EDGE_PORT`, devenue sans effet.
+- `TLS_MODE=custom` : `gitlab-runner` monte `config/certs/ca/` et est recréé au prochain
+  `make deploy` (jobs en cours interrompus). En déploiement distant, la copie de configuration change
+  d'empreinte une fois. Rien ne change en `none` et `letsencrypt`.
 
 ### Ajouté
 
@@ -38,6 +41,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   préparée une seule fois (contexte SSH, garde-fou d'instance en lecture seule) ; une étape dont le
   service est absent de l'instance est ignorée. `make bootstrap-sonarqube` et `make bootstrap-gitlab`
   lancent une seule étape. Voir `docs/bootstrap.md`.
+- CA privée en `TLS_MODE=custom` : `config/certs/ca/ca.pem`, facultatif, est monté en lecture seule
+  dans `gitlab-runner` (`compose/tls/gitlab/custom.yml`) ; `make bootstrap` vérifie l'URL publique
+  avec cette CA et enregistre le runner avec `--tls-ca-file` (enregistrement, jobs, clone du helper,
+  `CI_SERVER_TLS_CA_FILE`) ; `make check-env` contrôle la CA. Voir `docs/certificats.md`.
 - Bootstrap GitLab : `make bootstrap ENV=<env>` (instance locale ou distante) attend GitLab, renouvelle
   le jeton d'administration root `devops-platform-bootstrap` (révocation des précédents, expiration
   au lendemain) et enregistre un runner d'instance ; `gitlab-runner verify --delete` avant tout

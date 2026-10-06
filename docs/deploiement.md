@@ -78,8 +78,9 @@ doivent donc y être présents.
 - `config/loki/loki-config.yaml`
 - `config/promtail/promtail-config.yaml`
 - `config/grafana/provisioning/`
-- en `TLS_MODE=custom` : `config/traefik/tls-custom.yml`, `config/certs/cert.pem` et
-  `config/certs/key.pem`
+- en `TLS_MODE=custom` : `config/traefik/tls-custom.yml`, `config/certs/cert.pem`,
+  `config/certs/key.pem` et, s'il existe, `config/certs/ca/ca.pem` (seul fichier copié de
+  `config/certs/ca/`, créé vide sur le serveur sinon : [CA privée](certificats.md#ca-privée))
 
 **Où** : dans `${DEPLOY_DIR}/config-<empreinte>` sur le serveur. L'empreinte est calculée sur les
 chemins et le contenu de ces fichiers. Les montages pointent vers ce répertoire via la variable interne
@@ -89,7 +90,7 @@ chemins et le contenu de ces fichiers. Les montages pointent vers ce répertoire
 
 **Prise en compte d'une modification** : un fichier modifié produit une nouvelle empreinte, donc un
 nouveau répertoire. `make deploy` recrée alors les services qui montent la configuration (Loki,
-Promtail, Grafana, et Traefik en `TLS_MODE=custom`), et eux seuls.
+Promtail, Grafana, et Traefik et `gitlab-runner` en `TLS_MODE=custom`), et eux seuls.
 
 **Méthode de copie** : le transfert passe par le contexte Docker. Un conteneur `busybox` (sans réseau)
 extrait une archive tar envoyée depuis le poste. Il ne faut ni `rsync`, ni `scp`, ni `sudo`.

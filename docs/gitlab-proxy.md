@@ -52,7 +52,8 @@ Traefik porte les `*_HOSTNAME` de l'instance en **alias réseau** sur le réseau
 (`compose/proxy.yml`). Dans ce réseau, l'URL publique de GitLab mène donc à Traefik, par le même chemin
 et le même certificat que pour un client externe, sans dépendre du DNS ni du hairpin NAT de l'hôte. Le
 runner s'enregistre sur cette URL et ses jobs clonent par elle ; il dépend donc de Traefik pour
-joindre GitLab.
+joindre GitLab. En `TLS_MODE=custom` avec un certificat d'une CA interne, le runner et les jobs
+vérifient ce certificat avec la [CA privée](certificats.md#ca-privée) fournie.
 
 Après un changement de hostname ou de `TLS_MODE`, `make bootstrap` ré-enregistre le runner sur la
 nouvelle URL et supprime l'ancien ([bootstrap](bootstrap.md)).
@@ -63,5 +64,3 @@ Limites :
   consulter DNS ni `/etc/hosts`. Les jobs clonent alors par `http://gitlab` (nom de service Docker).
   `CI_SERVER_URL` et `CI_API_V4_URL` (`http://gitlab.localhost`) restent injoignables par curl depuis
   un job : utiliser un hostname hors `*.localhost` pour tester des appels API depuis la CI.
-- **`TLS_MODE=custom` avec une CA privée** : le runner, les jobs et le bootstrap ne font pas confiance
-  à cette CA (#79).
