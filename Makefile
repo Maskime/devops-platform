@@ -52,12 +52,14 @@ init: check-env-name ## [ENV] Génère envs/ENV.env (questions, secrets aléatoi
 	@FORCE="$(FORCE)" NOUVEAUX_MDP="$(NOUVEAUX_MDP)" scripts/init-env.sh "$(ENV)"
 
 # Fichier de l'instance présent ; FORCER (remplacement d'une instance sur un hôte, bootstrap-legacy hors
-# local) accepté seulement sur la ligne de commande
+# local) et ROTATION (token d'analyse SonarQube remplacé) acceptés seulement sur la ligne de commande
 check-env-file: check-env-name
 	@[[ -f "$(ENV_FILE)" ]] || { echo "Fichier introuvable : $(ENV_FILE) (le générer : make init ENV=$(ENV))" >&2; exit 1; }
-	@if [[ "$(origin FORCER)" == "environment" ]]; then \
-	  echo "FORCER hérité du shell refusé : le passer explicitement, make $(MAKECMDGOALS) ENV=$(ENV) FORCER=1" >&2; exit 1; \
-	fi
+	@for v in "FORCER:$(origin FORCER)" "ROTATION:$(origin ROTATION)"; do \
+	  if [[ "$${v#*:}" == "environment" ]]; then \
+	    echo "$${v%%:*} hérité du shell refusé : le passer explicitement, make $(MAKECMDGOALS) ENV=$(ENV) $${v%%:*}=1" >&2; exit 1; \
+	  fi; \
+	done
 
 # Garde-fous communs aux cibles qui démarrent une instance (ENV exigé sur la ligne de commande)
 check-env: check-env-file
@@ -118,11 +120,11 @@ reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_
 	@FORCER="$(FORCER)" scripts/instance.sh reload-certs "$(ENV)"
 
 # Étapes dans l'ordre : SonarQube puis GitLab, cible préparée une seule fois (docs/bootstrap.md)
-bootstrap: check-env ## [ENV] Configure SonarQube puis GitLab (mot de passe admin, token d'analyse, runner…) ; idempotent
-	@FORCER="$(FORCER)" scripts/instance.sh bootstrap "$(ENV)"
+bootstrap: check-env ## [ENV] Configure SonarQube puis GitLab (mot de passe admin, token d'analyse, runner…) ; idempotent ; ROTATION=1 remplace le token
+	@FORCER="$(FORCER)" ROTATION="$(ROTATION)" scripts/instance.sh bootstrap "$(ENV)"
 
 bootstrap-sonarqube: check-env ## [ENV] Étape SonarQube seule de make bootstrap
-	@FORCER="$(FORCER)" scripts/instance.sh bootstrap "$(ENV)" sonarqube
+	@FORCER="$(FORCER)" ROTATION="$(ROTATION)" scripts/instance.sh bootstrap "$(ENV)" sonarqube
 
 bootstrap-gitlab: check-env ## [ENV] Étape GitLab seule de make bootstrap
 	@FORCER="$(FORCER)" scripts/instance.sh bootstrap "$(ENV)" gitlab

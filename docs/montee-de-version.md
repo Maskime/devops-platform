@@ -161,7 +161,8 @@ section *Server upgrade and maintenance*).
    chargé en `-javaagent`) vit dans ce volume, qui n'est rempli depuis l'image **qu'à sa création** : sans
    cette étape, l'ancien plugin est conservé et SonarQube démarre avec un plugin incompatible. Le volume ne
    contient que les plugins de l'image (un plugin installé à la main via le Marketplace serait perdu) ;
-   **ne pas** toucher à `sonarqube_data` ni `sonarqube_db`.
+   **ne pas** toucher à `sonarqube_data` (qui contient aussi le [token
+   d'analyse](bootstrap-sonarqube.md#token-danalyse)) ni `sonarqube_db`.
 
    ```bash
    dc rm -sf sonarqube

@@ -12,6 +12,8 @@
 #         scripts/instance.sh bootstrap <env> [sonarqube] [gitlab]   (défaut : toutes les étapes)
 #         scripts/instance.sh compose <env> <arguments docker compose…>   (commande manuelle)
 # Garde-fous de configuration (make check-env) : appliqués par le Makefile avant deploy et reload-certs.
+# Variables transmises par le Makefile : FORCER=1 (garde-fou de l'hôte), ROTATION=1 (bootstrap : token
+# d'analyse SonarQube remplacé, voir scripts/bootstrap/sonarqube.sh).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

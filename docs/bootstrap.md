@@ -154,8 +154,7 @@ et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
   (ou cache de proxy) l'évite.
 - **Étape SonarQube non verrouillée** : deux `make bootstrap` en parallèle sur la même instance
   peuvent régénérer deux fois le token d'analyse SonarQube, le verrou ne couvrant que l'étape
-  GitLab. Relancer `make bootstrap` seul remet l'instance en ordre.
-- **Plusieurs postes** : le token d'analyse SonarQube, comme le fichier de sortie
-  `outputs/<env>.env`, n'existe que sur le poste qui l'a généré ;
-  depuis un autre poste, `make bootstrap` le révoque et le remplace
+  GitLab (#122). Relancer `make bootstrap` seul remet l'instance en ordre.
+- **Plusieurs postes** : le token d'analyse SonarQube est stocké sur l'instance et récupéré depuis tout
+  poste ; le fichier de sortie `outputs/<env>.env` n'existe que sur le poste qui l'a généré
   ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)).
