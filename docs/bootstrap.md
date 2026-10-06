@@ -4,12 +4,30 @@
 l'emploi. Il vise la même cible que `make deploy` : moteur Docker local, ou serveur distant si
 `DEPLOY_SSH` est défini ([déploiement](deploiement.md)). Il ne crée **aucune donnée de test** (ni
 projet, ni utilisateur, ni pipeline) et peut être relancé à volonté : une relance sur une instance à
-jour ne change que le jeton d'administration.
+jour ne change que le jeton d'administration GitLab.
 
-Rien n'est installé sur le poste : les appels à l'API GitLab partent du conteneur `gitlab`
-(`http://localhost`), indépendamment du DNS et du TLS du poste.
+Rien n'est installé sur le poste : les appels aux API partent des conteneurs `sonarqube` et `gitlab`,
+indépendamment du DNS et du TLS du poste.
 
-## Étapes
+## Enchaînement
+
+| Ordre | Étape | Script | Lancée seule par |
+|---|---|---|---|
+| 1 | SonarQube : `vm.max_map_count`, compte admin, plugin, token d'analyse ([détails](bootstrap-sonarqube.md)) | `scripts/bootstrap/sonarqube.sh` | `make bootstrap-sonarqube` |
+| 2 | GitLab : jeton d'administration, runner d'instance (ci-dessous) | `scripts/bootstrap/gitlab.sh` | `make bootstrap-gitlab` |
+
+SonarQube passe en premier : son token d'analyse est disponible pour la configuration de GitLab. Une
+étape en échec arrête le bootstrap ; après correction, relancer `make bootstrap`, ou l'étape restante
+seule. Une étape dont le service est absent de l'instance (brique retirée de `compose.yml`) est
+ignorée, avec un message.
+
+La cible est préparée **une seule fois** par `scripts/instance.sh bootstrap` : contexte Docker SSH et
+pré-test de connexion, garde-fou d'instance (en lecture seule : le bootstrap n'écrit rien dans
+`DEPLOY_DIR`). Les scripts d'étape appellent ensuite `docker compose` directement. Aucune copie de la
+configuration n'est faite : le bootstrap ne recrée aucun service, il n'utilise que `exec` et `ps`.
+Lancé directement, un script d'étape refuse une instance distante.
+
+## Étape GitLab
 
 1. **Attente de GitLab** : services `gitlab` et `gitlab-runner` démarrés, puis GitLab prêt
    (`/-/readiness`, 15 minutes au plus), puis URL publique joignable depuis le runner, par Traefik
@@ -69,6 +87,10 @@ note de maintenance) ne sont pas touchés.
 - **`--docker-extra-hosts host.docker.internal:host-gateway`** de l'ancien bootstrap n'est plus posé :
   les jobs n'ont pas d'accès dédié à l'hôte.
 - **Exécutions simultanées** : deux `make bootstrap` en parallèle sur la même instance peuvent
-  enregistrer deux runners (aucun verrou, #101). Relancer `make bootstrap` seul remet l'instance en ordre.
+  enregistrer deux runners ou régénérer deux fois le token d'analyse SonarQube (aucun verrou, #101).
+  Relancer `make bootstrap` seul remet l'instance en ordre.
+- **Plusieurs postes** : le token d'analyse SonarQube n'existe que sur le poste qui l'a généré ;
+  depuis un autre poste, `make bootstrap` le révoque et le remplace
+  ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)).
 - **`TLS_MODE=custom` avec une CA privée** : le runner ne fait pas confiance à cette CA (#79), l'attente
   de l'URL publique échoue.
