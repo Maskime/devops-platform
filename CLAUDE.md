@@ -72,3 +72,4 @@ n'est pas une commande : Claude le charge dès qu'il doit accéder à GitHub.
 | `/implement-us <N>-<X>` | Implémente une US (cycle défini dans `.claude/skills/implement-us/workflow.md`) et ouvre la PR |
 | `/plan-epic <N>` | Analyse les US d'une épopée et établit des vagues de livraison parallélisables |
 | `/launch-wave <N> [--nettoyer]` | Ouvre une session `/implement-us` par US de la vague courante (worktree + workspace herdr), ou nettoie les worktrees des US terminées |
+| `/triage-backlog` | Attribue une priorité (`high`, `moderate`, `low`) aux issues qui n'ont que le label `backlog` |
