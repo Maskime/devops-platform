@@ -23,6 +23,9 @@ GitLab. Une
 seule. Une étape dont le service est absent de l'instance (brique retirée de `compose.yml`) est
 ignorée, avec un message.
 
+Après chaque étape réussie, le [fichier de sortie](sortie-instance.md) `outputs/<env>.env` (URLs
+publiques, API GitLab, token d'analyse) est régénéré pour les projets consommateurs.
+
 La cible est préparée **une seule fois** par `scripts/instance.sh bootstrap` : contexte Docker SSH et
 pré-test de connexion, garde-fou d'instance (en lecture seule : le bootstrap n'écrit rien dans
 `DEPLOY_DIR`). Les scripts d'étape appellent ensuite `docker compose` directement. Aucune copie de la
@@ -149,6 +152,7 @@ et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
 - **Étape SonarQube non verrouillée** : deux `make bootstrap` en parallèle sur la même instance
   peuvent régénérer deux fois le token d'analyse SonarQube, le verrou ne couvrant que l'étape
   GitLab. Relancer `make bootstrap` seul remet l'instance en ordre.
-- **Plusieurs postes** : le token d'analyse SonarQube n'existe que sur le poste qui l'a généré ;
+- **Plusieurs postes** : le token d'analyse SonarQube, comme le fichier de sortie
+  `outputs/<env>.env`, n'existe que sur le poste qui l'a généré ;
   depuis un autre poste, `make bootstrap` le révoque et le remplace
   ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)).

@@ -80,6 +80,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
 | [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance, image auxiliaire), idempotence |
 | [Analyse SonarQube depuis la CI](docs/analyse-sonarqube.md) | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN`, exemple de job `sonar-scanner` |
+| [Fichier de sortie](docs/sortie-instance.md) | `outputs/<env>.env` pour les projets consommateurs : URLs, API GitLab, token d'analyse |
 | [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | Étape SonarQube : `vm.max_map_count`, compte admin, token d'analyse, mot de passe admin inconnu |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
@@ -107,7 +108,7 @@ Le smoke test est en cours de développement : voir les
 | `envs/` | Un fichier `<env>.env` par instance (non versionné) ; seul `.env.example` est versionné |
 | `scripts/` | Scripts d'exploitation et de vérification |
 | `docs/` | Documentation d'exploitation |
-| `outputs/` | Informations de connexion générées par le bootstrap (non versionné) |
+| `outputs/` | Informations de connexion générées par le bootstrap, dont `<env>.env` (non versionné) |
 
 ## Origine
 
