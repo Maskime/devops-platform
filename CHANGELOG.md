@@ -32,6 +32,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Bootstrap SonarQube : `make bootstrap-sonarqube ENV=<env>` (`scripts/bootstrap-sonarqube.sh`),
+  instance locale ou distante. Vérifie `vm.max_map_count` sur l'hôte cible et la présence du plugin
+  community branch, remplace le mot de passe par défaut du compte `admin` par
+  `SONARQUBE_ADMIN_PASSWORD` et génère un token d'analyse (`GLOBAL_ANALYSIS_TOKEN`) dans
+  `outputs/<env>.sonarqube-token` (600), conservé tant qu'il reste valide. Idempotent, aucune donnée
+  créée. Documentation : `docs/bootstrap-sonarqube.md`.
 - Nettoyage Docker planifié : `scripts/host-prereqs.sh` installe `/usr/local/sbin/devops-platform-prune`
   et le timer systemd `devops-platform-prune.timer` (chaque nuit vers 03:30). Supprime les conteneurs
   de jobs CI arrêtés, les volumes de cache du runner orphelins (reporté pendant un job), les images
