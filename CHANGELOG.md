@@ -37,6 +37,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Variables CI d'instance SonarQube : l'étape GitLab de `make bootstrap` crée ou met à jour
+  `SONAR_HOST_URL` (URL publique, ou `http://sonarqube:9000` en `*.localhost` et avec une CA privée) et
+  `SONAR_TOKEN` (masquée, token d'analyse validé auprès de SonarQube avant écriture). Exemple de job
+  `sonar-scanner` dans `docs/analyse-sonarqube.md`.
 - Bootstrap commun : `make bootstrap ENV=<env>` enchaîne SonarQube puis GitLab sur une cible Docker
   préparée une seule fois (contexte SSH, garde-fou d'instance en lecture seule) ; une étape dont le
   service est absent de l'instance est ignorée. `make bootstrap-sonarqube` et `make bootstrap-gitlab`
