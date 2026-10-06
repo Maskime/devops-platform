@@ -28,9 +28,11 @@ readonly PARALLELISME_SSH=4
 # d'abord, son token d'analyse servant à la configuration de GitLab
 readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
 # Fichiers de config/ montés par les services (les env_file, lus par Compose sur le poste, n'en font
-# pas partie). TLS_MODE=custom : fichiers de compose/tls/custom.yml en plus.
+# pas partie). TLS_MODE=custom : fichiers de compose/tls/custom.yml en plus, et la CA facultative
+# montée par compose/tls/gitlab/custom.yml (seul ca.pem est copié : jamais une clé de CA déposée à côté).
 readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning)
 readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.pem)
+readonly CA_CUSTOM=certs/ca/ca.pem
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
@@ -160,7 +162,10 @@ config_montee() {
   local tls_mode
   tls_mode="$(env_valeur "$env_file" TLS_MODE)"
   printf '%s\n' "${CONFIG_MONTEE[@]}"
-  [[ "$tls_mode" == custom ]] && printf '%s\n' "${CONFIG_MONTEE_CUSTOM[@]}"
+  if [[ "$tls_mode" == custom ]]; then
+    printf '%s\n' "${CONFIG_MONTEE_CUSTOM[@]}"
+    if [[ -f "config/$CA_CUSTOM" ]]; then printf '%s\n' "$CA_CUSTOM"; fi
+  fi
   return 0
 }
 
@@ -177,6 +182,7 @@ empreinte_config() {
 # Copie idempotente dans ${DEPLOY_DIR}/config-<empreinte> (rien n'est envoyé si elle existe déjà) :
 # extraction dans un .tmp puis renommage ; propriétaire root, lecture seule pour les autres (grafana,
 # loki ne tournent pas en root), clé privée en 600 (traefik tourne en root), DEPLOY_DIR en 700.
+# certs/ca/ toujours créé : monté par gitlab-runner en TLS_MODE=custom, CA fournie ou non.
 copier_config() {
   local chemins resultat
   mapfile -t chemins < <(config_montee)
@@ -190,6 +196,7 @@ copier_config() {
         rm -rf "$d.tmp"
         mkdir "$d.tmp"
         tar -xo -f - -C "$d.tmp"
+        mkdir -p "$d.tmp/certs/ca"
         chown -R 0:0 "$d.tmp"
         chmod -R u=rwX,go=rX "$d.tmp"
         if [ -f "$d.tmp/certs/key.pem" ]; then chmod 600 "$d.tmp/certs/key.pem"; fi
@@ -246,6 +253,9 @@ if [[ -n "$deploy_ssh" ]]; then
 else
   # Variable interne : en local, les montages lisent config/ du repo
   unset PLATFORM_CONFIG_DIR
+  # Répertoire de la CA facultative, monté par gitlab-runner en TLS_MODE=custom (versionné vide ;
+  # recréé s'il a disparu, sinon `up` échouerait : « bind source path does not exist »)
+  if [[ "$(env_valeur "$env_file" TLS_MODE)" == custom ]]; then mkdir -p config/certs/ca; fi
 fi
 config="$("${compose[@]}" config)"
 projet="$(sed -n 's/^name: //p' <<<"$config" | head -n1)"
