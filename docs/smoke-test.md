@@ -50,7 +50,9 @@ d'exemple ne dit rien de l'instance. Seule compte la présence de l'analyse.
 | Suppression du projet GitLab (`NETTOYER=1`) | 5 min |
 
 Un pipeline en attente d'un runner depuis plus de 3 minutes le signale. En échec, le smoke test
-affiche l'état de chaque job et la fin du journal des jobs en échec.
+affiche l'état de chaque job et la fin du journal des jobs en échec. Un job en échec
+`runner_external_dependency_failure` (image non téléchargeable, typiquement l'image auxiliaire depuis un
+hôte sans accès à `registry.gitlab.com`) renvoie à `GITLAB_RUNNER_HELPER_IMAGE`.
 
 ## Données de test
 

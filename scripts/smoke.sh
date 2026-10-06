@@ -315,10 +315,18 @@ if [[ -n "${statut_final:-}" ]]; then
     next unless j["status"] == "failed"
     _, trace = api("get", "/projects/#{id}/jobs/#{j["id"]}/trace")
     puts "    --- fin du journal de #{j["name"]} ---"
-    puts trace.to_s.lines.last(25).map { |l| "    | #{l}" }.join
+    puts trace.to_s.gsub(/\e\[[0-9;]*[A-Za-z]/, "").lines.last(25).map { |l| "    | #{l}" }.join
   end
   '
-  gitlab_api "$code_jobs" "$projet_id" "$pipeline" >&2 || true
+  rapport="$(gitlab_api "$code_jobs" "$projet_id" "$pipeline" || true)"
+  echo "$rapport" >&2
+  if [[ "$rapport" == *runner_external_dependency_failure* ]]; then
+    {
+      echo "Indice : image d'un job (auxiliaire du runner ou image du job) non téléchargeable depuis l'hôte."
+      echo "  Sans accès à registry.gitlab.com : GITLAB_RUNNER_HELPER_IMAGE puis make bootstrap ENV=$env"
+      echo "  (docs/bootstrap.md, « Image auxiliaire des jobs »)."
+    } >&2
+  fi
   erreur "pipeline $pipeline : $statut_final ($pipeline_url)"
 fi
 
