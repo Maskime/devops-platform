@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap-legacy
+.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-legacy
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -117,8 +117,11 @@ reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_
 	@# Certificats déjà contrôlés par check-env ; recréation de Traefik par scripts/instance.sh
 	@FORCER="$(FORCER)" scripts/instance.sh reload-certs "$(ENV)"
 
+bootstrap: check-env ## [ENV] Configure l'instance déployée : jeton d'administration GitLab, runner d'instance
+	@FORCER="$(FORCER)" scripts/instance.sh bootstrap "$(ENV)"
+
 # Temporaire : scripts repris de Software Factory, qui créent des données de test (projet
-# factory-test, analyse SonarQube). Remplacé par `make bootstrap` (épopée 5).
+# factory-test, analyse SonarQube). Remplacé par `make bootstrap` et le smoke test (épopée 5).
 bootstrap-legacy: check-env ## [ENV] [Temporaire] Bootstrap repris de la factory (crée des données de test) ; FORCER=1 hors local
 	@if [[ "$(ENV)" != "local" && "$(FORCER)" != "1" ]]; then \
 	  echo "bootstrap-legacy crée des données de test : réservé à ENV=local (FORCER=1 pour passer outre)." >&2; exit 1; \
