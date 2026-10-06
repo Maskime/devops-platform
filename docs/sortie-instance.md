@@ -72,8 +72,10 @@ docker compose --env-file outputs/<env>.env config   # interpolation Compose
 docker run --env-file outputs/<env>.env …            # variables d'un conteneur
 ```
 
-Pour un projet GitLab, déclarer `SONAR_HOST_URL` et `SONAR_TOKEN` (masquée) comme variables CI, au
-niveau du projet, du groupe ou de l'instance.
+Un projet hébergé sur l'instance n'a rien à déclarer : `make bootstrap` pose `SONAR_HOST_URL` et
+`SONAR_TOKEN` en variables CI d'instance ([Analyse SonarQube depuis la CI](analyse-sonarqube.md)). Pour
+un projet hébergé sur un autre GitLab, les déclarer comme variables CI de ce projet (`SONAR_TOKEN`
+masquée).
 
 ## Limites
 
