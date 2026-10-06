@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pilote une instance, locale ou distante : make deploy, down, status, reload-certs.
+# Pilote une instance, locale ou distante : make deploy, down, status, reload-certs, bootstrap.
 #   - DEPLOY_SSH vide ou absente de envs/<env>.env : moteur Docker courant du poste (comme avant) ;
 #   - DEPLOY_SSH=ssh://[user@]hôte[:port] : contexte Docker SSH devops-platform-<env> (créé ou mis à
 #     jour), fichiers de config montés par les services copiés sur l'hôte dans
@@ -7,7 +7,7 @@
 # DEPLOY_SSH et DEPLOY_DIR sont lues dans le fichier uniquement (jamais depuis le shell) : la cible
 # d'une commande ne dépend que du fichier de l'instance. Documentation : docs/deploiement.md.
 #
-# Usage : scripts/instance.sh <deploy|down|status|reload-certs> <env>
+# Usage : scripts/instance.sh <deploy|down|status|reload-certs|bootstrap> <env>
 #         scripts/instance.sh compose <env> <arguments docker compose…>   (commande manuelle)
 # Garde-fous de configuration (make check-env) : appliqués par le Makefile avant deploy et reload-certs.
 set -euo pipefail
@@ -31,7 +31,7 @@ readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.p
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
 usage() {
-  echo "Usage : $0 <deploy|down|status|reload-certs> <env>" >&2
+  echo "Usage : $0 <deploy|down|status|reload-certs|bootstrap> <env>" >&2
   echo "        $0 compose <env> <arguments docker compose…>" >&2
   exit 1
 }
@@ -40,7 +40,7 @@ usage() {
 action="$1" env="$2"
 shift 2
 case "$action" in
-  deploy | down | status | reload-certs) (($# == 0)) || usage ;;
+  deploy | down | status | reload-certs | bootstrap) (($# == 0)) || usage ;;
   compose) (($#)) || usage ;;
   *) usage ;;
 esac
@@ -282,6 +282,13 @@ case "$action" in
     if [[ -n "$deploy_ssh" ]]; then verifier_instance 1; copier_config; fi
     (set -x; "${compose[@]}" up -d --wait --force-recreate traefik)
     if [[ -n "$deploy_ssh" ]]; then nettoyer_config; fi
+    ;;
+  bootstrap)
+    # Configuration de l'instance déployée (docs/bootstrap.md) : la cible Docker (contexte SSH d'une
+    # instance distante) est héritée par les scripts de scripts/bootstrap/
+    afficher_cible
+    if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
+    scripts/bootstrap/gitlab.sh "$env_file"
     ;;
   compose)
     # Commande manuelle (exec, logs, restart…) avec la cible et les montages de l'instance

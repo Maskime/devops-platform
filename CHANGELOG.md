@@ -19,6 +19,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - `GITLAB_EXTERNAL_URL` devient optionnelle : commenter la ligne de chaque `envs/<env>.env` existant
   pour adopter l'URL dérivée (`https://<GITLAB_HOSTNAME>` en `letsencrypt` et `custom`,
   `http://<GITLAB_HOSTNAME>` en `none`). Une valeur explicite reste contrôlée (même hôte, schéma du mode).
+- Runner enregistré par `make bootstrap-legacy` (`factory-runner`) : le premier `make bootstrap` le
+  supprime et enregistre à sa place le runner d'instance `devops-platform-runner`.
 - Runner déjà enregistré par `make bootstrap-legacy` : la relance réaligne son `url` et son
   `clone_url` (`config.toml`) sur l'URL publique.
 - Traefik est désormais configuré par variables `TRAEFIK_*` (`environment`) et non plus par `command`,
@@ -32,6 +34,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Bootstrap GitLab : `make bootstrap ENV=<env>` (instance locale ou distante) attend GitLab, renouvelle
+  le jeton d'administration root `devops-platform-bootstrap` (révocation des précédents, expiration
+  au lendemain) et enregistre un runner d'instance ; `gitlab-runner verify --delete` avant tout
+  ré-enregistrement, aucun runner orphelin, aucune donnée de test, idempotent. Variables optionnelles
+  `GITLAB_RUNNER_DESCRIPTION` et `GITLAB_RUNNER_NETWORK`. Voir `docs/bootstrap.md`.
 - Bootstrap SonarQube : `make bootstrap-sonarqube ENV=<env>` (`scripts/bootstrap-sonarqube.sh`),
   instance locale ou distante. Vérifie `vm.max_map_count` sur l'hôte cible et la présence du plugin
   community branch, remplace le mot de passe par défaut du compte `admin` par
