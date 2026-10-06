@@ -78,7 +78,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Préparation d'un serveur](docs/serveur.md) | `scripts/host-prereqs.sh` : Docker, `vm.max_map_count`, `daemon.json`, pare-feu, nettoyage Docker planifié |
 | [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
-| [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance), idempotence |
+| [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance, image auxiliaire), idempotence |
 | [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | Étape SonarQube : `vm.max_map_count`, compte admin, token d'analyse, mot de passe admin inconnu |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
