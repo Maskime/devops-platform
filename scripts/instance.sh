@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pilote une instance, locale ou distante : make deploy, down, status, reload-certs, bootstrap
-# (qui régénère aussi le fichier de sortie outputs/<env>.env).
+# (qui régénère aussi le fichier de sortie outputs/<env>.env), smoke (scripts/smoke.sh).
 #   - DEPLOY_SSH vide ou absente de envs/<env>.env : moteur Docker courant du poste (comme avant) ;
 #   - DEPLOY_SSH=ssh://[user@]hôte[:port] : contexte Docker SSH devops-platform-<env> (créé ou mis à
 #     jour), fichiers de config montés par les services copiés sur l'hôte dans
@@ -8,7 +8,7 @@
 # DEPLOY_SSH et DEPLOY_DIR sont lues dans le fichier uniquement (jamais depuis le shell) : la cible
 # d'une commande ne dépend que du fichier de l'instance. Documentation : docs/deploiement.md.
 #
-# Usage : scripts/instance.sh <deploy|down|status|reload-certs> <env>
+# Usage : scripts/instance.sh <deploy|down|status|reload-certs|smoke> <env>
 #         scripts/instance.sh bootstrap <env> [sonarqube] [gitlab]   (défaut : toutes les étapes)
 #         scripts/instance.sh compose <env> <arguments docker compose…>   (commande manuelle)
 # Garde-fous de configuration (make check-env) : appliqués par le Makefile avant deploy et reload-certs.
@@ -40,7 +40,7 @@ readonly CA_CUSTOM=certs/ca/ca.pem
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
 usage() {
-  echo "Usage : $0 <deploy|down|status|reload-certs> <env>" >&2
+  echo "Usage : $0 <deploy|down|status|reload-certs|smoke> <env>" >&2
   echo "        $0 bootstrap <env> $(printf '[%s] ' "${ETAPES_BOOTSTRAP[@]}")" >&2
   echo "        $0 compose <env> <arguments docker compose…>" >&2
   exit 1
@@ -50,7 +50,7 @@ usage() {
 action="$1" env="$2"
 shift 2
 case "$action" in
-  deploy | down | status | reload-certs) (($# == 0)) || usage ;;
+  deploy | down | status | reload-certs | smoke) (($# == 0)) || usage ;;
   bootstrap)
     # Étapes demandées (toutes par défaut), dédoublonnées et remises dans l'ordre d'exécution
     demandees=" ${*:-${ETAPES_BOOTSTRAP[*]}} "
@@ -330,6 +330,13 @@ case "$action" in
       SORTIE_ETAPES="${SORTIE_ETAPES:+$SORTIE_ETAPES }$etape"
       scripts/bootstrap/outputs.sh "$env_file"
     done
+    ;;
+  smoke)
+    # Smoke test (docs/smoke-test.md) : cible préparée comme pour bootstrap, garde-fou en lecture seule ;
+    # NETTOYER transmis par l'environnement
+    afficher_cible
+    if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
+    scripts/smoke.sh "$env_file"
     ;;
   compose)
     # Commande manuelle (exec, logs, restart…) avec la cible et les montages de l'instance
