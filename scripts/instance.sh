@@ -67,9 +67,10 @@ preparer_contexte_distant() {
     unset DOCKER_HOST
   fi
 
-  # Pré-test non interactif : une clé d'hôte inconnue ou une clé SSH absente échoue au lieu de bloquer
+  # Pré-test non interactif : une clé d'hôte inconnue ou une clé SSH absente échoue au lieu de bloquer.
+  # -n : l'entrée standard reste à la commande appelée (compose exec -T alimenté par un pipe).
   local version
-  if ! version="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$deploy_ssh" \
+  if ! version="$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$deploy_ssh" \
       "docker version --format '{{.Server.Version}}'" 2>&1)"; then
     echo "$version" >&2
     echo "Connexion à $deploy_ssh impossible ou Docker inaccessible (voir ci-dessus). Vérifier :" >&2

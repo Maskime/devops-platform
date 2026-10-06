@@ -206,6 +206,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Corrigé
 
+- `scripts/instance.sh` : en distant (`DEPLOY_SSH`), le pré-test SSH consommait l'entrée standard
+  destinée à `scripts/instance.sh compose <env> exec -T …` (`ssh -n`).
 - GitLab : la concurrence Sidekiq était réglée par `sidekiq['max_concurrency']`, supprimé en GitLab
   17.0 et ignoré (Sidekiq tournait à 20). Elle passe par `sidekiq['concurrency']` : 10 avec le
   profil `medium`. Le profil `medium` porte aussi `max_connections` du PostgreSQL embarqué de 100 à 150.
