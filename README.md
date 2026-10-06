@@ -18,8 +18,7 @@ profil de dimensionnement, versions et secrets.
 ```bash
 make init ENV=local                   # génère envs/local.env (Entrée pour garder chaque défaut)
 make deploy ENV=local                 # démarre tous les services et attend qu'ils soient healthy
-make bootstrap ENV=local              # GitLab : jeton d'administration, runner d'instance
-make bootstrap-sonarqube ENV=local    # sécurise le compte admin SonarQube, génère le token d'analyse
+make bootstrap ENV=local              # SonarQube (compte admin, token d'analyse) puis GitLab (runner)
 ```
 
 | Service | URL locale par défaut |
@@ -62,8 +61,8 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make deploy ENV=<env>` | Démarre l'instance, locale ou distante, et attend que tous les services soient healthy |
 | `make status ENV=<env>` | État des services et URLs de l'instance |
 | `make down ENV=<env>` | Arrête l'instance (volumes conservés) |
-| `make bootstrap ENV=<env>` | Configure GitLab : jeton d'administration, runner d'instance (idempotent) |
-| `make bootstrap-sonarqube ENV=<env>` | Configure SonarQube : `vm.max_map_count`, mot de passe admin, plugin, token d'analyse (idempotent) |
+| `make bootstrap ENV=<env>` | Configure SonarQube puis GitLab : compte admin, token d'analyse, runner d'instance (idempotent) |
+| `make bootstrap-sonarqube ENV=<env>` / `bootstrap-gitlab` | Une seule étape de `make bootstrap` |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
 | `make verify` | Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis) |
 | `make check-secrets` | Recherche de secrets dans le dépôt |
@@ -78,9 +77,9 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 |---|---|
 | [Préparation d'un serveur](docs/serveur.md) | `scripts/host-prereqs.sh` : Docker, `vm.max_map_count`, `daemon.json`, pare-feu, nettoyage Docker planifié |
 | [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
-| [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | `make bootstrap-sonarqube` : étapes, token d'analyse, mot de passe admin inconnu |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
-| [Bootstrap GitLab](docs/bootstrap.md) | `make bootstrap` : attente de GitLab, jeton d'administration, runner d'instance, idempotence |
+| [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance), idempotence |
+| [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | Étape SonarQube : `vm.max_map_count`, compte admin, token d'analyse, mot de passe admin inconnu |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
 | [Let's Encrypt](docs/letsencrypt.md) | `TLS_MODE=letsencrypt` : prérequis, challenge, stockage, renouvellement |

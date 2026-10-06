@@ -1,8 +1,10 @@
-# Bootstrap SonarQube (`make bootstrap-sonarqube`)
+# Bootstrap SonarQube
 
-`make bootstrap-sonarqube ENV=<env>` configure le SonarQube d'une instance déployée (`make deploy`),
-locale ou distante (`DEPLOY_SSH`). Il ne crée aucune donnée (ni projet, ni analyse) et peut être
-relancé à volonté : chaque étape ne modifie que ce qui n'est pas déjà en place.
+Première étape de [`make bootstrap ENV=<env>`](bootstrap.md), avant GitLab ; `make bootstrap-sonarqube
+ENV=<env>` la lance seule (rotation du token, relance rapide). Elle configure le SonarQube d'une
+instance déployée (`make deploy`), locale ou distante (`DEPLOY_SSH`), ne crée aucune donnée (ni projet,
+ni analyse) et peut être relancée à volonté : chaque contrôle ne modifie que ce qui n'est pas déjà en
+place.
 
 | Étape | Contrôle ou action | Relance |
 |---|---|---|
@@ -14,8 +16,9 @@ relancé à volonté : chaque étape ne modifie que ce qui n'est pas déjà en p
 
 ## Fonctionnement
 
-- **Cible.** Les commandes passent par `scripts/instance.sh compose` : même hôte, même contexte
-  Docker et mêmes garde-fous que `make deploy` (voir [Déploiement](deploiement.md)). L'API est
+- **Cible.** `scripts/bootstrap/sonarqube.sh` hérite de la cible préparée par `make bootstrap`
+  (même hôte et même contexte Docker que `make deploy`, voir [Déploiement](deploiement.md)) et appelle
+  `docker compose` directement ; lancé seul sur une instance distante, il refuse de s'exécuter. L'API est
   appelée depuis le conteneur `sonarqube` (`http://localhost:9000`) : ni DNS ni certificat public
   requis sur le poste, ni `python3`.
 - **Secrets.** `SONARQUBE_ADMIN_PASSWORD` est lu dans `envs/<env>.env` uniquement : une variable du
@@ -41,10 +44,11 @@ sans aucun droit d'administration. Sans date d'expiration.
 - **Relance.** Le token du fichier est conservé s'il est encore valide et toujours présent dans
   SonarQube. Sinon (fichier absent ou invalide, instance réinstallée), le token du même nom est
   révoqué et remplacé.
-- **Rotation.** Supprimer le fichier puis relancer `make bootstrap-sonarqube` : l'ancien token est
+- **Rotation.** Supprimer le fichier puis lancer `make bootstrap-sonarqube` : l'ancien token est
   révoqué. Tout ce qui l'utilise (variables CI, projets consommateurs) est à mettre à jour.
 - **Plusieurs postes.** Le fichier n'existe que sur le poste qui a lancé le bootstrap. Lancé depuis un
-  autre poste, le bootstrap révoque et remplace le token, avec un avertissement.
+  autre poste, `make bootstrap` révoque et remplace le token, avec un avertissement : le lancer depuis
+  le poste qui détient `outputs/`, ou `make bootstrap-gitlab` pour ne configurer que GitLab.
 
 ## Mot de passe admin inconnu
 
@@ -54,8 +58,9 @@ instance déjà bootstrappée, ou à la main dans l'interface.
 
 1. Si l'ancienne valeur est connue (sauvegarde `envs/<env>.env.bak.<date>`), la remettre dans
    `envs/<env>.env`.
-2. Sinon, remettre le mot de passe par défaut `admin` en base, puis relancer le bootstrap, qui le
-   remplace aussitôt par `SONARQUBE_ADMIN_PASSWORD` :
+2. Sinon, remettre le mot de passe par défaut `admin` en base (commande manuelle unique, par la
+   passerelle `scripts/instance.sh compose`), puis relancer le bootstrap, qui le remplace aussitôt par
+   `SONARQUBE_ADMIN_PASSWORD` :
 
    ```bash
    scripts/instance.sh compose <env> exec -T sonarqube-db psql -U sonar -d sonar -c \

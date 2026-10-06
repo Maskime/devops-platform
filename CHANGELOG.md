@@ -34,12 +34,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Bootstrap commun : `make bootstrap ENV=<env>` enchaîne SonarQube puis GitLab sur une cible Docker
+  préparée une seule fois (contexte SSH, garde-fou d'instance en lecture seule) ; une étape dont le
+  service est absent de l'instance est ignorée. `make bootstrap-sonarqube` et `make bootstrap-gitlab`
+  lancent une seule étape. Voir `docs/bootstrap.md`.
 - Bootstrap GitLab : `make bootstrap ENV=<env>` (instance locale ou distante) attend GitLab, renouvelle
   le jeton d'administration root `devops-platform-bootstrap` (révocation des précédents, expiration
   au lendemain) et enregistre un runner d'instance ; `gitlab-runner verify --delete` avant tout
   ré-enregistrement, aucun runner orphelin, aucune donnée de test, idempotent. Variables optionnelles
   `GITLAB_RUNNER_DESCRIPTION` et `GITLAB_RUNNER_NETWORK`. Voir `docs/bootstrap.md`.
-- Bootstrap SonarQube : `make bootstrap-sonarqube ENV=<env>` (`scripts/bootstrap-sonarqube.sh`),
+- Bootstrap SonarQube : étape de `make bootstrap` (`scripts/bootstrap/sonarqube.sh`),
   instance locale ou distante. Vérifie `vm.max_map_count` sur l'hôte cible et la présence du plugin
   community branch, remplace le mot de passe par défaut du compte `admin` par
   `SONARQUBE_ADMIN_PASSWORD` et génère un token d'analyse (`GLOBAL_ANALYSIS_TOKEN`) dans
