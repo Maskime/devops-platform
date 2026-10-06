@@ -6,7 +6,7 @@ les projets : un projet hébergé lance `sonar-scanner` sans aucune configuratio
 | Variable | Valeur | Masquée | Protégée |
 |---|---|---|---|
 | `SONAR_HOST_URL` | URL de SonarQube joignable depuis les jobs (ci-dessous) | non | non |
-| `SONAR_TOKEN` | Token d'analyse de l'instance (`outputs/<env>.sonarqube-token`) | oui | non |
+| `SONAR_TOKEN` | Token d'analyse de l'instance ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)) | oui | non |
 
 Les deux variables sont de type « variable », non développées (`raw`) et décrites « Géré par
 devops-platform (make bootstrap) ». Non protégées, elles sont aussi disponibles dans les pipelines des
@@ -29,12 +29,13 @@ notifications) restent sur `SONARQUBE_EXTERNAL_URL`.
 L'étape GitLab de `make bootstrap` crée les variables absentes et met à jour celles qui diffèrent ; une
 relance sur une instance à jour ne les modifie pas. Elle passe avant l'enregistrement du runner.
 
-- **Token.** Lu dans `outputs/<env>.sonarqube-token`, transmis à GitLab par l'entrée standard, jamais
-  affiché. Avant écriture, il est validé auprès de SonarQube : un token absent, illisible ou refusé
-  (révoqué depuis un autre poste) laisse `SONAR_TOKEN` telle quelle, avec un avertissement, pour ne pas
-  remplacer un token valide par un token révoqué.
-- **Rotation.** Supprimer `outputs/<env>.sonarqube-token`, puis `make bootstrap ENV=<env>` : l'étape
-  SonarQube révoque et remplace le token, l'étape GitLab met `SONAR_TOKEN` à jour. Avec
+- **Token.** Lu dans la copie locale `outputs/<env>.sonarqube-token`, que l'étape SonarQube récupère
+  du stockage de l'instance ; transmis à GitLab par l'entrée standard, jamais affiché. Avant écriture,
+  il est validé auprès de SonarQube : un token absent, illisible ou refusé (copie périmée) laisse
+  `SONAR_TOKEN` telle quelle, avec un avertissement, pour ne pas remplacer un token valide par un token
+  révoqué.
+- **Rotation.** `make bootstrap ENV=<env> ROTATION=1` : l'étape SonarQube révoque et remplace le token,
+  l'étape GitLab met `SONAR_TOKEN` à jour. Avec
   `make bootstrap-sonarqube` seul, les pipelines utilisent l'ancien token, révoqué, jusqu'au prochain
   `make bootstrap-gitlab`.
 - **Changement de hostname ou de `TLS_MODE`.** `make deploy` puis `make bootstrap` : `SONAR_HOST_URL`
@@ -91,6 +92,7 @@ sonarqube:
   (une variable de projet ou de groupe prime sur la variable d'instance).
 - **Réseau des jobs.** `SONAR_HOST_URL` n'est joignable que sur le réseau de la plateforme : un
   `GITLAB_RUNNER_NETWORK` différent doit le permettre ([bootstrap](bootstrap.md#limites)).
-- **Plusieurs postes.** Le token n'existe que sur le poste qui a lancé l'étape SonarQube
-  ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)). Depuis un autre poste, `make bootstrap`
-  remplace le token et met `SONAR_TOKEN` à jour ; `make bootstrap-gitlab` seul n'y touche pas.
+- **Plusieurs postes.** Depuis un poste qui n'a jamais lancé l'étape SonarQube, `make bootstrap`
+  récupère le token de l'instance et `SONAR_TOKEN` reste inchangée ; `make bootstrap-gitlab` seul,
+  sans copie locale, laisse la variable telle quelle avec un avertissement
+  ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)).

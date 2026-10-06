@@ -12,7 +12,7 @@ place.
 | Attente | `api/system/status` à `UP`, 10 minutes au plus | — |
 | Compte admin | Mot de passe par défaut `admin` remplacé par `SONARQUBE_ADMIN_PASSWORD` | rien à faire si déjà positionné |
 | Plugin | `communityBranchPlugin` installé, sinon arrêt | — |
-| Token d'analyse | Token `devops-platform-analyse` écrit dans `outputs/<env>.sonarqube-token` | conservé tant qu'il reste valide |
+| Token d'analyse | Token `devops-platform-analyse` stocké sur l'instance, copié dans `outputs/<env>.sonarqube-token` | conservé tant qu'il reste valide, depuis tout poste |
 
 ## Fonctionnement
 
@@ -39,23 +39,55 @@ place.
 Token de type `GLOBAL_ANALYSIS_TOKEN` du compte `admin` : il permet d'analyser n'importe quel projet,
 sans aucun droit d'administration. Sans date d'expiration.
 
-- **Fichier.** `outputs/<env>.sonarqube-token` (une ligne), permissions `600` dans `outputs/` en
-  `700`, non versionné. SonarQube ne restitue jamais un token : ce fichier est la référence
-  du bootstrap. Le [fichier de sortie](sortie-instance.md) `outputs/<env>.env` en reprend une copie,
-  régénérée à chaque passage.
-- **Relance.** Le token du fichier est conservé s'il est encore valide et toujours présent dans
-  SonarQube. Sinon (fichier absent ou invalide, instance réinstallée), le token du même nom est
-  révoqué et remplacé.
+SonarQube ne restitue jamais un token : le bootstrap le conserve à deux endroits.
+
+| Emplacement | Rôle | Permissions |
+|---|---|---|
+| `/opt/sonarqube/data/devops-platform/analyse-token`, conteneur `sonarqube` (volume `sonarqube_data`, sur l'hôte de l'instance) | Référence, lisible depuis tout poste qui pilote l'instance | répertoire `700`, fichier `600` (utilisateur `sonarqube`) |
+| `outputs/<env>.sonarqube-token` sur le poste | Copie locale, rafraîchie à chaque passage | `outputs/` en `700`, fichier `600`, non versionné |
+
+- **Accès.** Lecture et écriture par `docker compose exec -T sonarqube`, avec la cible de `make
+  bootstrap` : même mécanisme pour une instance locale et distante (`DEPLOY_SSH`). Le token passe par
+  l'entrée standard, jamais en argument ni dans les journaux.
+- **Relance.** Le token du stockage de l'instance est conservé s'il est encore valide et toujours
+  présent dans SonarQube ; la copie locale est alors mise à jour si elle diffère. Depuis un autre poste,
+  le bootstrap récupère donc le même token : variable CI et consommateurs restent valides.
+- **Remplacement.** Token du stockage invalide (révoqué à la main, base restaurée) ou absent de
+  SonarQube (instance réinstallée) : le token du même nom est révoqué et remplacé, écrit dans le
+  stockage de l'instance puis dans la copie locale. Un échec d'écriture arrête l'étape ; la relance le
+  répare.
 - **Variable CI.** L'étape GitLab de `make bootstrap` pose ce token en variable CI d'instance
-  `SONAR_TOKEN` ([Analyse SonarQube depuis la CI](analyse-sonarqube.md)).
-- **Rotation.** Supprimer le fichier puis lancer `make bootstrap` : l'ancien token est révoqué, la
-  variable CI `SONAR_TOKEN` mise à jour et `outputs/<env>.env` régénéré. Avec `make bootstrap-sonarqube`
-  seul, `outputs/<env>.env` est régénéré mais la variable CI garde l'ancien token jusqu'au prochain
-  `make bootstrap-gitlab`. Tout autre utilisateur du token (projets consommateurs) est à mettre à jour.
-- **Plusieurs postes.** Le fichier n'existe que sur le poste qui a lancé le bootstrap. Lancé depuis un
-  autre poste, `make bootstrap` révoque et remplace le token (variable CI comprise), avec un
-  avertissement : le lancer depuis le poste qui détient `outputs/`, ou `make bootstrap-gitlab` pour ne
-  configurer que GitLab (la variable CI `SONAR_TOKEN` est alors laissée telle quelle).
+  `SONAR_TOKEN` ([Analyse SonarQube depuis la CI](analyse-sonarqube.md)). Le [fichier de
+  sortie](sortie-instance.md) `outputs/<env>.env` en reprend une copie, régénérée à chaque passage.
+- **Rotation.** `make bootstrap ENV=<env> ROTATION=1` révoque et remplace le token, met à jour la
+  variable CI `SONAR_TOKEN` et régénère `outputs/<env>.env`. Avec `make bootstrap-sonarqube` seul, la
+  variable CI garde l'ancien token jusqu'au prochain `make bootstrap-gitlab`. Tout autre utilisateur du
+  token (projets consommateurs) est à mettre à jour ; les autres postes récupèrent le nouveau token à
+  leur prochain bootstrap. Supprimer la copie locale ne provoque plus de rotation.
+- **Garde-fou.** Token `devops-platform-analyse` présent dans SonarQube, mais ni dans le stockage de
+  l'instance ni dans la copie locale : le bootstrap refuse de le révoquer (il a été généré depuis un
+  autre poste, avant le stockage de l'instance). Voir la migration ci-dessous ; si la copie est
+  perdue, `ROTATION=1`.
+
+### Migration d'une instance existante
+
+Une instance bootstrappée avant le stockage de l'instance n'a son token que dans
+`outputs/<env>.sonarqube-token`, sur un seul poste. Lancer d'abord `make bootstrap-sonarqube ENV=<env>`
+depuis ce poste : le token y est validé puis recopié dans le stockage de l'instance, sans rotation.
+Depuis un autre poste, le garde-fou ci-dessus s'applique tant que cette migration n'est pas faite.
+
+### Limites
+
+- **Secret dans le volume.** `sonarqube_data` contient désormais le token : une sauvegarde de ce volume
+  le contient aussi, et quiconque accède au moteur Docker de l'hôte peut le lire (accès équivalent à
+  root, comme pour la base). Ne jamais supprimer ce volume pour reconstruire les index
+  ([montée de version](montee-de-version.md)) : le token serait remplacé au bootstrap suivant.
+- **Validation.** `api/authentication/validate` accepte tout token valide : un autre token déposé à la
+  main dans le stockage serait conservé. Un token d'analyse globale ne permet pas de vérifier son nom.
+- **Exécutions simultanées.** L'étape SonarQube n'est pas verrouillée (#122) : deux rotations
+  simultanées peuvent laisser un token révoqué dans le stockage ; un `make bootstrap` relancé seul
+  remet l'instance en ordre.
+- **Trace.** `bash -x scripts/bootstrap/sonarqube.sh` afficherait le token : ne pas tracer ce script.
 
 ## Mot de passe admin inconnu
 

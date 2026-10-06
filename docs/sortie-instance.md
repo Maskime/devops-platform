@@ -25,7 +25,7 @@ passage : il suit un changement de hostname, de `TLS_MODE` ou de token.
 Des commentaires signalent les cas particuliers :
 
 - **Service absent** de l'instance (brique retirée de `compose.yml`) : ses variables sont omises.
-- **Token absent** du poste (`outputs/<env>.sonarqube-token`, voir [plusieurs postes](#limites)) :
+- **Token absent** du poste (copie locale `outputs/<env>.sonarqube-token`, voir [plusieurs postes](#limites)) :
   la ligne `SONAR_TOKEN` est **omise**, plutôt que laissée vide, pour ne pas écraser la variable d'un
   consommateur. Un avertissement s'affiche.
 - **Token non revérifié** : `make bootstrap-gitlab` seul ne contrôle pas le token ; il est recopié tel
@@ -79,7 +79,8 @@ masquée).
 
 ## Limites
 
-- **Plusieurs postes** : le fichier n'existe que sur le poste qui a lancé le bootstrap, comme le token
-  d'analyse. Depuis un autre poste, `make bootstrap` renouvelle le token : le fichier de l'ancien poste
-  devient faux.
+- **Plusieurs postes** : le fichier n'existe que sur le poste qui a lancé le bootstrap. Depuis un autre
+  poste, `make bootstrap` récupère le même token d'analyse ([token
+  d'analyse](bootstrap-sonarqube.md#token-danalyse)) : les fichiers des deux postes restent valides.
+  Après une rotation (`ROTATION=1`), celui des autres postes reste faux jusqu'à leur prochain bootstrap.
 - **Instance distante** : le fichier est écrit sur le poste, pas sur le serveur.
