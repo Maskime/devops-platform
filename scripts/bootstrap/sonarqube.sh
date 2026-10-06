@@ -4,7 +4,8 @@
 #   2. attend que SonarQube soit prêt (statut UP) ;
 #   3. remplace le mot de passe par défaut du compte admin par SONARQUBE_ADMIN_PASSWORD ;
 #   4. vérifie la présence du plugin community branch ;
-#   5. génère le token d'analyse (outputs/<env>.sonarqube-token), conservé tant qu'il reste valide.
+#   5. génère le token d'analyse (outputs/<env>.sonarqube-token), conservé tant qu'il reste valide ;
+#      l'étape GitLab (scripts/bootstrap/gitlab.sh) le pose en variable CI d'instance SONAR_TOKEN.
 # Lancé par `make bootstrap ENV=<env>` (ou seul : `make bootstrap-sonarqube`) via scripts/instance.sh
 # bootstrap, qui positionne une seule fois la cible Docker (contexte SSH d'une instance distante) : les
 # commandes appellent ensuite docker compose directement. L'API est appelée depuis le conteneur
@@ -167,7 +168,8 @@ else
       echo "    Token de $token_fichier invalide : remplacé."
     else
       echo "Attention : token $TOKEN_NOM présent dans SonarQube mais absent de $token_fichier (autre poste," >&2
-      echo "  fichier supprimé) : il est révoqué et remplacé ; ses utilisateurs (CI) sont à reconfigurer." >&2
+      echo "  fichier supprimé) : il est révoqué et remplacé. La variable CI SONAR_TOKEN suit à l'étape" >&2
+      echo "  GitLab de make bootstrap ; ses autres utilisateurs sont à reconfigurer." >&2
     fi
     api POST /api/user_tokens/revoke "$admin" "name=$TOKEN_NOM" || erreur "révocation du token impossible"
     [[ "$CODE" == 204 ]] || erreur "HTTP $CODE inattendu à la révocation du token : $CORPS"
@@ -188,7 +190,7 @@ else
   printf '%s\n' "$token" >"$tmp"
   mv -f "$tmp" "$token_fichier"
   trap - EXIT
-  echo "    Token généré : $token_fichier."
+  echo "    Token généré : $token_fichier (variable CI SONAR_TOKEN mise à jour par l'étape GitLab)."
 fi
 
 # --- Récapitulatif -------------------------------------------------------------------------------

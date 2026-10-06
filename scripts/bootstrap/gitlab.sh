@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap GitLab d'une instance déployée : attente de GitLab, jeton d'accès personnel (PAT)
-# d'administration renouvelé, runner d'instance enregistré. Aucune donnée de test créée ; idempotent.
+# d'administration renouvelé, variables CI d'instance SonarQube (SONAR_HOST_URL, SONAR_TOKEN), runner
+# d'instance enregistré. Aucune donnée de test créée ; idempotent.
 # Lancé par `make bootstrap ENV=<env>` (scripts/instance.sh bootstrap), qui positionne la cible Docker
 # (contexte SSH d'une instance distante). Documentation : docs/bootstrap.md.
 #
@@ -30,6 +31,9 @@ readonly PAT_NOM="devops-platform-bootstrap"
 # il permet de retrouver et supprimer les anciens runners après un changement de description
 readonly MARQUEUR="Géré par devops-platform (make bootstrap) : ne pas modifier."
 readonly CONFIG_RUNNER=/etc/gitlab-runner/config.toml
+# URL de SonarQube pour les jobs quand l'URL publique n'est pas utilisable : nom de service Docker sur
+# le réseau de la plateforme (port interne de compose/sonarqube.yml)
+readonly SONAR_URL_INTERNE="http://sonarqube:9000"
 # CA privée de TLS_MODE=custom dans le conteneur gitlab-runner : montage de compose/tls/gitlab/custom.yml
 # (config/certs/ca/ca.pem), à garder identiques
 readonly CA_CONTENEUR=/etc/devops-platform/ca/ca.pem
@@ -94,6 +98,15 @@ url="${url%/}"
 # Clone des jobs : URL publique (alias réseau de Traefik), sauf *.localhost, que libcurl (donc git)
 # résout toujours vers 127.0.0.1 : nom de service Docker (docs/gitlab-proxy.md)
 if est_hostname_local "$hostname"; then clone_url="http://gitlab"; else clone_url="$url"; fi
+
+# SonarQube : URL publique, même règle que sonar.core.serverBaseURL (compose/sonarqube.yml), et token
+# d'analyse écrit par l'étape SonarQube (scripts/bootstrap/sonarqube.sh)
+sonar_hostname="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
+sonar_hostname="${sonar_hostname:-sonarqube.localhost}"
+sonar_url="$(env_valeur "$env_file" SONARQUBE_EXTERNAL_URL)"
+sonar_url="${sonar_url:-http://$sonar_hostname}"
+sonar_url="${sonar_url%/}"
+sonar_token_fichier="outputs/$env.sonarqube-token"
 
 # --- Verrou -----------------------------------------------------------------------------------------
 
@@ -227,11 +240,13 @@ def api!(methode, chemin, attendus, params = nil)
 end
 '
 
-# Exécute du code Ruby (après RUBY_API) dans le conteneur gitlab : <code> [arguments…]
+# Exécute du code Ruby (après RUBY_API) dans le conteneur gitlab : <code> [arguments…]. Les lignes de
+# stdin_extra (secrets) suivent le PAT sur l'entrée standard, où le code Ruby les lit (STDIN.gets)
+stdin_extra=()
 gitlab_api() {
   local code="$1"
   shift
-  printf '%s\n' "$pat" | dc exec -T gitlab "$RUBY" -e "$RUBY_API$code" -- "$@"
+  printf '%s\n' "$pat" "${stdin_extra[@]}" | dc exec -T gitlab "$RUBY" -e "$RUBY_API$code" -- "$@"
 }
 
 # Blocs [[runners]] de config.toml, une ligne par bloc, champs séparés par \037 :
@@ -312,8 +327,9 @@ docker network inspect "$reseau" > /dev/null 2>&1 \
 if [[ "$reseau" != "$reseau_plateforme" ]]; then
   {
     echo "Attention : réseau des jobs ($reseau) différent du réseau de la plateforme ($reseau_plateforme)."
-    echo "  Les jobs clonent par $clone_url, joignable seulement sur le réseau de la plateforme :"
-    echo "  le réseau $reseau doit le permettre, sinon tous les jobs échoueront (docs/bootstrap.md)."
+    echo "  Les jobs clonent par $clone_url et joignent SonarQube par SONAR_HOST_URL, joignables seulement"
+    echo "  sur le réseau de la plateforme : le réseau $reseau doit le permettre, sinon tous les jobs"
+    echo "  échoueront (docs/bootstrap.md)."
   } >&2
 fi
 attendre "GitLab" "$ATTENTE_GITLAB" gitlab_pret \
@@ -358,7 +374,107 @@ expiration="$(sed -n 's/^EXPIRATION=//p' <<<"$sortie_pat" | tail -n1)"
 revoques="$(grep -c '^REVOQUE=' <<<"$sortie_pat" || true)"
 echo "    Jeton créé (expire le $expiration) ; $revoques ancien(s) jeton(s) révoqué(s)."
 
-# --- 3. Runner d'instance ------------------------------------------------------------------------------
+# --- 3. Variables CI d'instance SonarQube ---------------------------------------------------------------
+
+etape "Variables CI d'instance SonarQube (SONAR_HOST_URL, SONAR_TOKEN)"
+# Création ou mise à jour d'une variable d'instance : <clé> <masquée 0|1> <description>, valeur en
+# dernière ligne de l'entrée standard (jamais en argument). La réponse du GET contient la valeur : seuls
+# des marqueurs sont affichés, jamais un corps de réponse.
+# shellcheck disable=SC2016 # code Ruby
+code_variable='
+cle, masquee, description = ARGV[0], ARGV[1] == "1", ARGV[2]
+valeur = STDIN.gets.to_s.chomp
+attendu = { "value" => valeur, "masked" => masquee, "protected" => false, "raw" => true,
+            "variable_type" => "env_var", "description" => description }
+params = attendu.transform_values(&:to_s)
+def motif(corps) = corps.is_a?(Hash) ? " : #{corps["message"]}" : ""
+code, actuel = api("get", "/admin/ci/variables/#{cle}")
+case code
+when 404
+  c, corps = api("post", "/admin/ci/variables", params.merge("key" => cle))
+  abort("Création de la variable #{cle} : HTTP #{c}#{motif(corps)}") unless c == 201
+  puts "CREEE"
+when 200
+  if attendu.all? { |k, v| actuel[k] == v }
+    puts "INCHANGEE"
+  else
+    c, corps = api("put", "/admin/ci/variables/#{cle}", params)
+    abort("Mise à jour de la variable #{cle} : HTTP #{c}#{motif(corps)}") unless c == 200
+    puts "MAJ"
+  end
+else
+  abort("Lecture de la variable #{cle} : HTTP #{code}")
+end
+'
+definir_variable() { # <clé> <masquée 0|1> <valeur>
+  local sortie
+  stdin_extra=("$3")
+  sortie="$(gitlab_api "$code_variable" "$1" "$2" "$MARQUEUR")" || sortie=""
+  stdin_extra=()
+  case "$sortie" in
+    CREEE) echo "    $1 créée." ;;
+    MAJ) echo "    $1 mise à jour." ;;
+    INCHANGEE) echo "    $1 déjà à jour : rien à faire." ;;
+    *) erreur "variable CI d'instance $1 : écriture impossible (voir ci-dessus)" ;;
+  esac
+}
+
+# Token valide pour SonarQube : api/authentication/validate depuis le conteneur sonarqube, token dans la
+# configuration curl lue sur l'entrée standard (jamais en argument). Format déjà contrôlé : sans " ni \.
+token_sonar_valide() { # <token>
+  local reponse
+  reponse="$(printf 'url = "http://localhost:9000/api/authentication/validate"\nuser = "%s:"\n' "$1" \
+    | dc exec -T sonarqube curl -sS -K - 2> /dev/null)" || return 1
+  [[ "$reponse" == *'"valid":true'* ]]
+}
+
+etat_sonar_url="non posée" etat_sonar_token="non posée"
+if [[ " $(dc config --services | paste -sd ' ' -) " != *" sonarqube "* ]]; then
+  echo "    Service sonarqube absent de l'instance : étape ignorée."
+  etat_sonar_url="non posée (service sonarqube absent)" etat_sonar_token="$etat_sonar_url"
+else
+  verrou_tenu
+  # URL des jobs : publique (alias réseau de Traefik), sauf hostname *.localhost (que libcurl résout vers
+  # 127.0.0.1) et CA privée montée dans le runner (que la JVM du scanner n'utilise pas) : nom de service
+  if est_hostname_local "$sonar_hostname"; then
+    sonar_host_url="$SONAR_URL_INTERNE" raison="interne : hostname local"
+  elif [[ -n "$ca_runner" ]]; then
+    sonar_host_url="$SONAR_URL_INTERNE" raison="interne : CA privée"
+  else
+    sonar_host_url="$sonar_url" raison="URL publique"
+  fi
+  definir_variable SONAR_HOST_URL 0 "$sonar_host_url"
+  etat_sonar_url="$sonar_host_url ($raison)"
+
+  # Token : celui du fichier, s'il est valide. Un token révoqué (bootstrap lancé depuis un autre poste)
+  # remplacerait le token courant de GitLab : la variable est alors laissée telle quelle.
+  token_sonar=""
+  if [[ -f "$sonar_token_fichier" ]]; then IFS= read -r token_sonar < "$sonar_token_fichier" || true; fi
+  if [[ -z "$token_sonar" ]]; then
+    {
+      echo "Attention : $sonar_token_fichier absent ou vide : SONAR_TOKEN non mise à jour."
+      echo "  Lancer make bootstrap ENV=$env depuis ce poste (docs/analyse-sonarqube.md)."
+    } >&2
+    etat_sonar_token="non mise à jour (token local absent)"
+  # Règle de masquage de GitLab : 8 caractères au moins, alphabet Base64 (les tokens SonarQube s'y tiennent)
+  elif [[ ! "$token_sonar" =~ ^[A-Za-z0-9_]{8,}$ ]]; then
+    echo "Attention : $sonar_token_fichier ne contient pas un token SonarQube : SONAR_TOKEN non mise à jour." >&2
+    etat_sonar_token="non mise à jour (token local illisible)"
+  elif ! token_sonar_valide "$token_sonar"; then
+    {
+      echo "Attention : token de $sonar_token_fichier refusé par SonarQube (révoqué depuis un autre poste ?)"
+      echo "  ou SonarQube injoignable : SONAR_TOKEN non mise à jour. Lancer make bootstrap ENV=$env"
+      echo "  (docs/analyse-sonarqube.md)."
+    } >&2
+    etat_sonar_token="non mise à jour (token local refusé par SonarQube)"
+  else
+    definir_variable SONAR_TOKEN 1 "$token_sonar"
+    etat_sonar_token="masquée, token de $sonar_token_fichier (valeur non affichée)"
+  fi
+  unset token_sonar
+fi
+
+# --- 4. Runner d'instance ------------------------------------------------------------------------------
 
 etape "Runner d'instance « $description » (réseau des jobs : $reseau)"
 verrou_tenu
@@ -484,5 +600,7 @@ echo "  Runner     : id=$courant, « $description », jobs sur le réseau $resea
 echo "  Helper     : ${helper_image:-image standard de GitLab (registry.gitlab.com)}"
 echo "  URL        : $url (clone des jobs : $clone_url)"
 echo "  CA         : ${ca_runner:-aucune (magasin système)}"
+echo "  CI SonarQube : SONAR_HOST_URL $etat_sonar_url"
+echo "                 SONAR_TOKEN $etat_sonar_token"
 echo "  Jeton root : $PAT_NOM, scopes api et admin_mode, expire le $expiration (valeur non affichée)"
 echo "  Runners    : $url/admin/runners"
