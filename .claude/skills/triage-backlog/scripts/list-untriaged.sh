@@ -21,14 +21,14 @@ echo "## Issues à catégoriser"
 page=1
 while :; do
   json="$("$API" GET "/issues?labels=backlog&state=open&per_page=100&page=$page")"
-  count="$(python3 -c 'import json, sys; print(len(json.loads(sys.argv[1])))' "$json")"
+  count="$(python3 -c 'import json, sys; print(len(json.load(sys.stdin)))' <<<"$json")"
   [[ "$count" -gt 0 ]] || break
   python3 -c '
 import json, sys
-for i in json.loads(sys.argv[1]):
+for i in json.load(sys.stdin):
     if "pull_request" in i or [l["name"] for l in i["labels"]] != ["backlog"]:
         continue
     print("\n### #{} {}\n{}\n\n{}".format(i["number"], i["title"], i["html_url"], (i["body"] or "").strip()))
-' "$json"
+' <<<"$json"
   page=$((page + 1))
 done
