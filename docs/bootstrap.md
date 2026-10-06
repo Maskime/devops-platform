@@ -23,6 +23,9 @@ GitLab. Une
 seule. Une étape dont le service est absent de l'instance (brique retirée de `compose.yml`) est
 ignorée, avec un message.
 
+Pour valider l'instance de bout en bout (pipeline et analyse SonarQube), lancer ensuite le
+[smoke test](smoke-test.md) : `make smoke ENV=<env>`.
+
 Après chaque étape réussie, le [fichier de sortie](sortie-instance.md) `outputs/<env>.env` (URLs
 publiques, API GitLab, token d'analyse) est régénéré pour les projets consommateurs.
 

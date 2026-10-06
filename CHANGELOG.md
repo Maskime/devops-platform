@@ -37,6 +37,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Smoke test `make smoke ENV=<env>` : projet de test `root/devops-platform-smoke` dans GitLab, pipeline
+  poussé avec un job simple et un job `sonar-scanner` (variables CI d'instance), vérification du
+  pipeline au vert et de l'analyse du commit dans SonarQube ; `NETTOYER=1` supprime les projets de test
+  après un succès. Appels aux API GitLab et SonarQube du bootstrap regroupés dans `scripts/lib/gitlab.sh`
+  et `scripts/lib/sonarqube.sh`. Documentation : `docs/smoke-test.md`.
 - Variables CI d'instance SonarQube : l'étape GitLab de `make bootstrap` crée ou met à jour
   `SONAR_HOST_URL` (URL publique, ou `http://sonarqube:9000` en `*.localhost` et avec une CA privée) et
   `SONAR_TOKEN` (masquée, token d'analyse validé auprès de SonarQube avant écriture). Exemple de job

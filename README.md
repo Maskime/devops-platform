@@ -19,6 +19,7 @@ profil de dimensionnement, versions et secrets.
 make init ENV=local                   # génère envs/local.env (Entrée pour garder chaque défaut)
 make deploy ENV=local                 # démarre tous les services et attend qu'ils soient healthy
 make bootstrap ENV=local              # SonarQube (compte admin, token d'analyse) puis GitLab (runner)
+make smoke ENV=local                  # projet de test, pipeline et analyse SonarQube de bout en bout
 ```
 
 | Service | URL locale par défaut |
@@ -63,6 +64,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make down ENV=<env>` | Arrête l'instance (volumes conservés) |
 | `make bootstrap ENV=<env>` | Configure SonarQube puis GitLab : compte admin, token d'analyse, runner d'instance (idempotent) |
 | `make bootstrap-sonarqube ENV=<env>` / `bootstrap-gitlab` | Une seule étape de `make bootstrap` |
+| `make smoke ENV=<env>` | Smoke test de bout en bout : projet de test, pipeline, analyse SonarQube ; `NETTOYER=1` le supprime |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
 | `make verify` | Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis) |
 | `make check-secrets` | Recherche de secrets dans le dépôt |
@@ -80,6 +82,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
 | [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance, image auxiliaire), idempotence |
 | [Analyse SonarQube depuis la CI](docs/analyse-sonarqube.md) | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN`, exemple de job `sonar-scanner` |
+| [Smoke test](docs/smoke-test.md) | `make smoke` : vérifications, données de test, nettoyage (`NETTOYER=1`), délais |
 | [Fichier de sortie](docs/sortie-instance.md) | `outputs/<env>.env` pour les projets consommateurs : URLs, API GitLab, token d'analyse |
 | [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | Étape SonarQube : `vm.max_map_count`, compte admin, token d'analyse, mot de passe admin inconnu |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
@@ -94,8 +97,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 
 ## Avancement
 
-Le smoke test est en cours de développement : voir les
-[milestones](https://github.com/Maskime/devops-platform/milestones) et le
+Voir les [milestones](https://github.com/Maskime/devops-platform/milestones) et le
 [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Arborescence

@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab bootstrap-legacy
+.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke bootstrap-legacy
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -126,6 +126,14 @@ bootstrap-sonarqube: check-env ## [ENV] Étape SonarQube seule de make bootstrap
 
 bootstrap-gitlab: check-env ## [ENV] Étape GitLab seule de make bootstrap
 	@FORCER="$(FORCER)" scripts/instance.sh bootstrap "$(ENV)" gitlab
+
+# Projet de test GitLab + pipeline + analyse SonarQube (docs/smoke-test.md). NETTOYER supprime des
+# données : accepté seulement sur la ligne de commande, comme FORCE
+smoke: check-env ## [ENV] Smoke test : projet de test, pipeline avec analyse SonarQube ; NETTOYER=1 le supprime ensuite
+	@if [[ "$(origin NETTOYER)" == "environment" ]]; then \
+	  echo "NETTOYER hérité du shell refusé : le passer explicitement, make smoke ENV=$(ENV) NETTOYER=1" >&2; exit 1; \
+	fi
+	@FORCER="$(FORCER)" NETTOYER="$(NETTOYER)" scripts/instance.sh smoke "$(ENV)"
 
 # Temporaire : scripts repris de Software Factory, qui créent des données de test (projet
 # factory-test, analyse SonarQube). Remplacé par `make bootstrap` et le smoke test (épopée 5).
