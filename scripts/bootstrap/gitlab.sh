@@ -9,6 +9,8 @@
 # Les appels à l'API GitLab partent du conteneur gitlab (http://localhost) : ils ne dépendent ni du
 # DNS, ni du TLS, ni de l'emplacement du poste. Le JSON est traité par le Ruby embarqué de l'image
 # GitLab : rien à installer sur le poste. Les jetons ne passent jamais en argument de processus.
+# Seuls l'URL publique, l'enregistrement et les jobs passent par Traefik et son certificat : en
+# TLS_MODE=custom, la CA privée facultative montée dans le runner les vérifie (docs/certificats.md).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -27,6 +29,9 @@ readonly PAT_NOM="devops-platform-bootstrap"
 # il permet de retrouver et supprimer les anciens runners après un changement de description
 readonly MARQUEUR="Géré par devops-platform (make bootstrap) : ne pas modifier."
 readonly CONFIG_RUNNER=/etc/gitlab-runner/config.toml
+# CA privée de TLS_MODE=custom dans le conteneur gitlab-runner : montage de compose/tls/gitlab/custom.yml
+# (config/certs/ca/ca.pem), à garder identiques
+readonly CA_CONTENEUR=/etc/devops-platform/ca/ca.pem
 readonly RUBY=/opt/gitlab/embedded/bin/ruby
 readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 PAS=10
 
@@ -65,7 +70,9 @@ reseau="${reseau:-$reseau_plateforme}"
 hostname="$(env_valeur "$env_file" GITLAB_HOSTNAME)"
 hostname="${hostname:-gitlab.localhost}"
 url="$(env_valeur "$env_file" GITLAB_EXTERNAL_URL)"
-url="${url:-$(url_derivee "$hostname" "$(env_valeur "$env_file" TLS_MODE)")}"
+tls_mode="$(env_valeur "$env_file" TLS_MODE)"
+tls_mode="${tls_mode:-none}"
+url="${url:-$(url_derivee "$hostname" "$tls_mode")}"
 url="${url%/}"
 # Clone des jobs : URL publique (alias réseau de Traefik), sauf *.localhost, que libcurl (donc git)
 # résout toujours vers 127.0.0.1 : nom de service Docker (docs/gitlab-proxy.md)
@@ -88,17 +95,21 @@ gitlab_pret() { dc exec -T gitlab curl -sf -o /dev/null http://localhost/-/readi
 
 # URL publique joignable depuis le runner (alias Traefik, certificat) : 200 ou 401 sur /api/v4/version.
 # Nom résolu par le DNS du conteneur, comme le fait le runner, puis imposé à curl (--resolve) : curl
-# résoudrait de lui-même tout *.localhost vers 127.0.0.1.
+# résoudrait de lui-même tout *.localhost vers 127.0.0.1. Certificat vérifié avec la CA du runner
+# (ca_runner) si elle est définie, sinon avec le magasin système ; jamais sans vérification.
 derniere_erreur=""
 url_publique_joignable() {
   local sortie port=80
   [[ "$url" == https://* ]] && port=443
   # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
   sortie="$(dc exec -T gitlab-runner sh -c '
-    ip="$(getent ahostsv4 "$1" | awk "{ print \$1; exit }")"
-    [ -n "$ip" ] || { echo "résolution de $1 impossible"; exit 1; }
-    exec curl -sS -o /dev/null -w "%{http_code}" --resolve "$1:$2:$ip" "$3/api/v4/version"' \
-    sh "$hostname" "$port" "$url" 2>&1)" || true
+    h="$1" p="$2" u="$3" ca="$4"
+    ip="$(getent ahostsv4 "$h" | awk "{ print \$1; exit }")"
+    [ -n "$ip" ] || { echo "résolution de $h impossible"; exit 1; }
+    set --
+    if [ -n "$ca" ]; then set -- --cacert "$ca"; fi
+    exec curl -sS "$@" -o /dev/null -w "%{http_code}" --resolve "$h:$p:$ip" "$u/api/v4/version"' \
+    sh "$hostname" "$port" "$url" "$ca_runner" 2>&1)" || true
   derniere_erreur="$sortie"
   [[ "$sortie" =~ (200|401)$ ]]
 }
@@ -134,12 +145,13 @@ gitlab_api() {
 }
 
 # Blocs [[runners]] de config.toml, une ligne par bloc, champs séparés par \037 :
-# id, name, url, clone_url, executor, image, network_mode. Les jetons ne sont jamais extraits.
+# id, name, url, clone_url, executor, image, network_mode, tls-ca-file. Les jetons ne sont jamais
+# extraits.
 # shellcheck disable=SC2016 # programme awk
 readonly AWK_BLOCS='
-function sortir() { if (dans) printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n", id, nom, url, clone, exe, image, reseau }
+function sortir() { if (dans) printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", id, nom, url, clone, exe, image, reseau, ca }
 function val(l) { sub(/^[^=]*= */, "", l); gsub(/^"|"$/, "", l); return l }
-/^\[\[runners\]\]/ { sortir(); dans = 1; id = nom = url = clone = exe = image = reseau = ""; next }
+/^\[\[runners\]\]/ { sortir(); dans = 1; id = nom = url = clone = exe = image = reseau = ca = ""; next }
 /^\[/ { sortir(); dans = 0; next }
 dans && /^[ \t]*id[ \t]*=/ { id = val($0) }
 dans && /^[ \t]*name[ \t]*=/ { nom = val($0) }
@@ -148,6 +160,7 @@ dans && /^[ \t]*clone_url[ \t]*=/ { clone = val($0) }
 dans && /^[ \t]*executor[ \t]*=/ { exe = val($0) }
 dans && /^[ \t]*image[ \t]*=/ { image = val($0) }
 dans && /^[ \t]*network_mode[ \t]*=/ { reseau = val($0) }
+dans && /^[ \t]*tls-ca-file[ \t]*=/ { ca = val($0) }
 END { sortir() }
 '
 
@@ -186,6 +199,20 @@ for service in gitlab gitlab-runner; do
   [[ -n "$(dc ps -q --status running "$service")" ]] \
     || erreur "service $service arrêté : démarrer l'instance (make deploy ENV=$env)"
 done
+# CA privée : utilisée seulement en TLS_MODE=custom, URL en https et ca.pem monté dans le runner ; sinon
+# magasin système (comportement de letsencrypt et none)
+ca_runner=""
+if [[ "$tls_mode" == custom && "$url" == https://* ]]; then
+  if dc exec -T gitlab-runner test -s "$CA_CONTENEUR"; then
+    ca_runner="$CA_CONTENEUR"
+    echo "    CA privée du runner : $CA_CONTENEUR (config/certs/ca/ca.pem)."
+  elif [[ -f config/certs/ca/ca.pem ]]; then
+    {
+      echo "Attention : config/certs/ca/ca.pem présente sur le poste mais pas dans gitlab-runner :"
+      echo "  make deploy ENV=$env pour la monter, puis relancer make bootstrap ENV=$env."
+    } >&2
+  fi
+fi
 docker network inspect "$reseau" > /dev/null 2>&1 \
   || erreur "réseau Docker $reseau introuvable sur la cible (GITLAB_RUNNER_NETWORK, PLATFORM_NETWORK)"
 if [[ "$reseau" != "$reseau_plateforme" ]]; then
@@ -243,10 +270,11 @@ echo "    Jeton créé (expire le $expiration) ; $revoques ancien(s) jeton(s) r�
 etape "Runner d'instance « $description » (réseau des jobs : $reseau)"
 # Blocs de config.toml : candidats conformes à la configuration attendue, et tous les ids présents
 candidats=() ids_config=()
-while IFS=$'\037' read -r b_id b_nom b_url b_clone b_exe b_image b_reseau; do
+while IFS=$'\037' read -r b_id b_nom b_url b_clone b_exe b_image b_reseau b_ca; do
   [[ -n "$b_id" ]] && ids_config+=("$b_id")
   if [[ -n "$b_id" && "$b_nom" == "$description" && "$b_url" == "$url" && "$b_clone" == "$clone_url" \
-    && "$b_exe" == docker && "$b_image" == "$RUNNER_IMAGE" && "$b_reseau" == "$reseau" ]]; then
+    && "$b_exe" == docker && "$b_image" == "$RUNNER_IMAGE" && "$b_reseau" == "$reseau" \
+    && "$b_ca" == "$ca_runner" ]]; then
     candidats+=("$b_id")
   fi
 done < <(blocs_runner)
@@ -312,6 +340,10 @@ puts "JETON=#{d["token"]}"
   courant="$(sed -n 's/^ID=//p' <<<"$sortie_creation")"
   jeton_runner="$(sed -n 's/^JETON=//p' <<<"$sortie_creation")"
   [[ -n "$courant" && -n "$jeton_runner" ]] || erreur "réponse inattendue de POST /user/runners"
+  # CA privée : écrite dans config.toml (tls-ca-file), utilisée par register, verify et les requêtes
+  # de jobs, transmise aux jobs (CI_SERVER_TLS_CA_FILE) et au clone du helper
+  options_ca=()
+  [[ -n "$ca_runner" ]] && options_ca=(--tls-ca-file "$ca_runner")
   # Jeton transmis par l'environnement (-e sans valeur) : absent des arguments de processus
   CI_SERVER_TOKEN="$jeton_runner" dc exec -T -e CI_SERVER_TOKEN gitlab-runner gitlab-runner register \
     --non-interactive \
@@ -320,7 +352,8 @@ puts "JETON=#{d["token"]}"
     --executor docker \
     --docker-image "$RUNNER_IMAGE" \
     --docker-network-mode "$reseau" \
-    --description "$description"
+    --description "$description" \
+    "${options_ca[@]}"
   unset jeton_runner sortie_creation
   echo "    Runner enregistré (id=$courant)."
 fi
@@ -336,5 +369,6 @@ echo
 echo "Bootstrap GitLab terminé ($env) :"
 echo "  Runner     : id=$courant, « $description », jobs sur le réseau $reseau (image $RUNNER_IMAGE)"
 echo "  URL        : $url (clone des jobs : $clone_url)"
+echo "  CA         : ${ca_runner:-aucune (magasin système)}"
 echo "  Jeton root : $PAT_NOM, scopes api et admin_mode, expire le $expiration (valeur non affichée)"
 echo "  Runners    : $url/admin/runners"
