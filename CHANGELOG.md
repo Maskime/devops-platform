@@ -54,6 +54,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   `/etc/gitlab-runner/.bootstrap.lock`, dans le volume du runner, valable quel que soit le poste) ; une
   seconde exécution s'arrête sans modifier GitLab en indiquant le détenteur. Libéré en fin de script,
   y compris en échec ou sur interruption. L'étape SonarQube n'est pas couverte.
+- Image auxiliaire du runner : `GITLAB_RUNNER_HELPER_IMAGE` (dépôt sans tag, vide par défaut) remplace
+  `registry.gitlab.com` pour le helper des jobs, qui démarrent alors sans accès à gitlab.com (par
+  exemple `gitlab/gitlab-runner-helper` sur Docker Hub). Tag `v${CI_RUNNER_VERSION}` développé par le
+  runner : multi-arch, aligné sur la version du runner. Voir `docs/bootstrap.md`.
 - Bootstrap SonarQube : étape de `make bootstrap` (`scripts/bootstrap/sonarqube.sh`),
   instance locale ou distante. Vérifie `vm.max_map_count` sur l'hôte cible et la présence du plugin
   community branch, remplace le mot de passe par défaut du compte `admin` par

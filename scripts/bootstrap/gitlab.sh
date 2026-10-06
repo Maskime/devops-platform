@@ -69,6 +69,20 @@ reseau="${reseau:-$reseau_plateforme}"
 [[ "$reseau" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] \
   || erreur "GITLAB_RUNNER_NETWORK invalide : $reseau (nom de réseau Docker attendu)"
 
+# Image auxiliaire (helper) des jobs : dépôt sans tag. Le tag v${CI_RUNNER_VERSION} est enregistré tel
+# quel et développé par le runner à chaque job : le helper suit la version du binaire, quelle que soit
+# l'architecture (tag multi-arch), sans ré-enregistrement après une montée de version. Vide : image
+# standard de GitLab (registry.gitlab.com). Voir docs/bootstrap.md.
+helper_depot="$(env_valeur "$env_file" GITLAB_RUNNER_HELPER_IMAGE)"
+helper_image=""
+if [[ -n "$helper_depot" ]]; then
+  composant='[a-z0-9]([a-z0-9._-]*[a-z0-9])?'
+  motif_depot="^(${composant}(:[0-9]+)?/)?${composant}(/${composant})*\$"
+  [[ "$helper_depot" =~ $motif_depot ]] \
+    || erreur "GITLAB_RUNNER_HELPER_IMAGE invalide : $helper_depot (dépôt sans tag ni digest attendu, ex. gitlab/gitlab-runner-helper : le tag est calculé, voir docs/bootstrap.md)"
+  helper_image="$helper_depot:v\${CI_RUNNER_VERSION}"
+fi
+
 # URL publique : même règle que l'external_url de GitLab (compose/gitlab.yml, url_derivee)
 hostname="$(env_valeur "$env_file" GITLAB_HOSTNAME)"
 hostname="${hostname:-gitlab.localhost}"
@@ -221,13 +235,13 @@ gitlab_api() {
 }
 
 # Blocs [[runners]] de config.toml, une ligne par bloc, champs séparés par \037 :
-# id, name, url, clone_url, executor, image, network_mode, tls-ca-file. Les jetons ne sont jamais
-# extraits.
+# id, name, url, clone_url, executor, image, network_mode, tls-ca-file, helper_image. Les jetons ne sont
+# jamais extraits.
 # shellcheck disable=SC2016 # programme awk
 readonly AWK_BLOCS='
-function sortir() { if (dans) printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", id, nom, url, clone, exe, image, reseau, ca }
+function sortir() { if (dans) printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", id, nom, url, clone, exe, image, reseau, ca, helper }
 function val(l) { sub(/^[^=]*= */, "", l); gsub(/^"|"$/, "", l); return l }
-/^\[\[runners\]\]/ { sortir(); dans = 1; id = nom = url = clone = exe = image = reseau = ca = ""; next }
+/^\[\[runners\]\]/ { sortir(); dans = 1; id = nom = url = clone = exe = image = reseau = ca = helper = ""; next }
 /^\[/ { sortir(); dans = 0; next }
 dans && /^[ \t]*id[ \t]*=/ { id = val($0) }
 dans && /^[ \t]*name[ \t]*=/ { nom = val($0) }
@@ -237,6 +251,7 @@ dans && /^[ \t]*executor[ \t]*=/ { exe = val($0) }
 dans && /^[ \t]*image[ \t]*=/ { image = val($0) }
 dans && /^[ \t]*network_mode[ \t]*=/ { reseau = val($0) }
 dans && /^[ \t]*tls-ca-file[ \t]*=/ { ca = val($0) }
+dans && /^[ \t]*helper_image[ \t]*=/ { helper = val($0) }
 END { sortir() }
 '
 
@@ -349,14 +364,30 @@ etape "Runner d'instance « $description » (réseau des jobs : $reseau)"
 verrou_tenu
 # Blocs de config.toml : candidats conformes à la configuration attendue, et tous les ids présents
 candidats=() ids_config=()
-while IFS=$'\037' read -r b_id b_nom b_url b_clone b_exe b_image b_reseau b_ca; do
+while IFS=$'\037' read -r b_id b_nom b_url b_clone b_exe b_image b_reseau b_ca b_helper; do
   [[ -n "$b_id" ]] && ids_config+=("$b_id")
   if [[ -n "$b_id" && "$b_nom" == "$description" && "$b_url" == "$url" && "$b_clone" == "$clone_url" \
     && "$b_exe" == docker && "$b_image" == "$RUNNER_IMAGE" && "$b_reseau" == "$reseau" \
-    && "$b_ca" == "$ca_runner" ]]; then
+    && "$b_ca" == "$ca_runner" && "$b_helper" == "$helper_image" ]]; then
     candidats+=("$b_id")
   fi
 done < <(blocs_runner)
+
+# Image auxiliaire tirée sur la cible (même moteur Docker que le runner) : erreur claire avant tout
+# ré-enregistrement ; simple avertissement si un runner conforme existe déjà (relance idempotente)
+if [[ -n "$helper_image" ]]; then
+  version_runner="$(dc exec -T gitlab-runner gitlab-runner --version | awk '$1 == "Version:" { print $2; exit }')"
+  [[ "$version_runner" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || erreur "version du runner illisible (« $version_runner ») : image de développement sans helper publié ?"
+  image_helper_courante="$helper_depot:v$version_runner"
+  if docker pull -q "$image_helper_courante" > /dev/null; then
+    echo "    Image auxiliaire $image_helper_courante disponible sur la cible."
+  elif ((${#candidats[@]} > 0)); then
+    echo "Attention : image auxiliaire $image_helper_courante non téléchargeable (GITLAB_RUNNER_HELPER_IMAGE) ; les jobs échoueront." >&2
+  else
+    erreur "image auxiliaire $image_helper_courante non téléchargeable sur la cible (GITLAB_RUNNER_HELPER_IMAGE, docs/bootstrap.md)"
+  fi
+fi
 
 # Runner courant = premier candidat existant côté serveur. Suppression côté serveur des autres runners
 # de config.toml et des runners d'instance portant le marqueur : aucun orphelin, même après perte du
@@ -420,6 +451,8 @@ puts "JETON=#{d["token"]}"
   courant="$(sed -n 's/^ID=//p' <<<"$sortie_creation")"
   jeton_runner="$(sed -n 's/^JETON=//p' <<<"$sortie_creation")"
   [[ -n "$courant" && -n "$jeton_runner" ]] || erreur "réponse inattendue de POST /user/runners"
+  options_docker=(--docker-image "$RUNNER_IMAGE" --docker-network-mode "$reseau")
+  if [[ -n "$helper_image" ]]; then options_docker+=(--docker-helper-image "$helper_image"); fi
   # CA privée : écrite dans config.toml (tls-ca-file), utilisée par register, verify et les requêtes
   # de jobs, transmise aux jobs (CI_SERVER_TLS_CA_FILE) et au clone du helper
   options_ca=()
@@ -430,8 +463,7 @@ puts "JETON=#{d["token"]}"
     --url "$url" \
     --clone-url "$clone_url" \
     --executor docker \
-    --docker-image "$RUNNER_IMAGE" \
-    --docker-network-mode "$reseau" \
+    "${options_docker[@]}" \
     --description "$description" \
     "${options_ca[@]}"
   unset jeton_runner sortie_creation
@@ -449,6 +481,7 @@ verrou_tenu
 echo
 echo "Bootstrap GitLab terminé ($env) :"
 echo "  Runner     : id=$courant, « $description », jobs sur le réseau $reseau (image $RUNNER_IMAGE)"
+echo "  Helper     : ${helper_image:-image standard de GitLab (registry.gitlab.com)}"
 echo "  URL        : $url (clone des jobs : $clone_url)"
 echo "  CA         : ${ca_runner:-aucune (magasin système)}"
 echo "  Jeton root : $PAT_NOM, scopes api et admin_mode, expire le $expiration (valeur non affichée)"

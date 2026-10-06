@@ -60,6 +60,7 @@ processus : elle ne sert qu'à la durée du bootstrap.
 |---|---|---|
 | `GITLAB_RUNNER_DESCRIPTION` | Description du runner (nom dans `config.toml`) | `devops-platform-runner` |
 | `GITLAB_RUNNER_NETWORK` | Réseau Docker des conteneurs de jobs | `PLATFORM_NETWORK` |
+| `GITLAB_RUNNER_HELPER_IMAGE` | Dépôt de l'image auxiliaire (helper) des jobs, sans tag | vide : image standard de GitLab |
 
 Le runner est enregistré avec l'exécuteur `docker`, l'image par défaut `alpine` (version épinglée
 dans `scripts/bootstrap/gitlab.sh`), l'URL publique de GitLab et l'URL de clone décrite dans
@@ -71,7 +72,7 @@ runners du bootstrap.
 La plateforme considère `config.toml` du conteneur `gitlab-runner` comme le sien. À chaque passage :
 
 1. Le runner courant est celui de `config.toml` dont la configuration (description, URL, URL de clone,
-   exécuteur, image, réseau, CA) est celle attendue et qui existe dans GitLab.
+   exécuteur, image, réseau, CA, image auxiliaire) est celle attendue et qui existe dans GitLab.
 2. Sont supprimés de GitLab : les autres runners de `config.toml` (ancienne description, ancienne
    URL, runner de `make bootstrap-legacy`…) et les runners d'instance portant la note de maintenance
    (orphelins, par exemple après perte du volume du runner).
@@ -80,9 +81,26 @@ La plateforme considère `config.toml` du conteneur `gitlab-runner` comme le sie
 4. Sans runner courant, un runner d'instance est créé (`POST /user/runners`) puis enregistré
    (`gitlab-runner register`).
 
-Changer la description, le réseau, le hostname, le `TLS_MODE`, ou ajouter ou retirer la CA privée,
-conduit donc à un ré-enregistrement, sans runner orphelin. Les runners enregistrés à la main (hors `config.toml` de la plateforme, sans la
-note de maintenance) ne sont pas touchés.
+Changer la description, le réseau, l'image auxiliaire, le hostname, le `TLS_MODE`, ou ajouter ou
+retirer la CA privée, conduit donc à un ré-enregistrement, sans runner orphelin. Les runners enregistrés
+à la main (hors `config.toml` de la plateforme, sans la note de maintenance) ne sont pas touchés.
+
+## Image auxiliaire des jobs
+
+Chaque job démarre aussi un conteneur auxiliaire (helper : clone, cache, artefacts). Par défaut, le
+runner le tire de `registry.gitlab.com`, dont l'authentification passe par `gitlab.com` : sur un serveur
+qui ne joint pas gitlab.com, tous les jobs échouent (`runner_external_dependency_failure`).
+
+`GITLAB_RUNNER_HELPER_IMAGE` désigne un autre **dépôt**, sans tag ni digest (refusés) :
+`gitlab/gitlab-runner-helper` (Docker Hub), ou un miroir (`registre.example.com:5000/gitlab-runner-helper`).
+Le runner est enregistré avec `--docker-helper-image <dépôt>:v${CI_RUNNER_VERSION}` : le runner remplace
+la variable à chaque job par sa propre version, donc le helper suit `GITLAB_RUNNER_VERSION` après une
+montée de version, sans relancer le bootstrap. Le tag `v<version>` est un index multi-architecture :
+aucune architecture n'est figée. Un miroir doit donc publier ce tag (et pas seulement
+`x86_64-v<version>`).
+
+Avant tout ré-enregistrement, le bootstrap tire `<dépôt>:v<version du runner déployé>` sur la cible :
+erreur si l'image est introuvable, simple avertissement si le runner est déjà conforme.
 
 ## Exécutions simultanées
 
@@ -118,6 +136,11 @@ et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
   prennent pas le verrou (#107) ; lancés pendant un bootstrap, leur runner peut être supprimé.
 - **Connexion SSH inactive** : en distant, la connexion qui tient le verrou reste sans trafic pendant
   l'attente de GitLab ; un pare-feu ou un NAT qui la coupe fait échouer le bootstrap, à relancer (#108).
+- **Image auxiliaire** : le dépôt doit être lisible anonymement, le runner n'a pas d'identifiants de
+  registre. Le pré-téléchargement du bootstrap utilise ceux du poste (contexte Docker) : il peut réussir
+  là où le runner échouera. Le runner tire le helper à chaque job (`pull_policy` `always`) : avec Docker
+  Hub, chaque job consomme le quota de téléchargements anonymes de l'adresse IP du serveur ; un miroir
+  (ou cache de proxy) l'évite.
 - **Étape SonarQube non verrouillée** : deux `make bootstrap` en parallèle sur la même instance
   peuvent régénérer deux fois le token d'analyse SonarQube, le verrou ne couvrant que l'étape
   GitLab. Relancer `make bootstrap` seul remet l'instance en ordre.
