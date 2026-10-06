@@ -7,7 +7,7 @@
 #
 # Usage : scripts/bootstrap/gitlab.sh envs/<env>.env
 #
-# Les appels à l'API GitLab partent du conteneur gitlab (http://localhost) : ils ne dépendent ni du
+# Les appels à l'API GitLab (scripts/lib/gitlab.sh) partent du conteneur gitlab : ils ne dépendent ni du
 # DNS, ni du TLS, ni de l'emplacement du poste. Le JSON est traité par le Ruby embarqué de l'image
 # GitLab : rien à installer sur le poste. Les jetons ne passent jamais en argument de processus.
 # Seuls l'URL publique, l'enregistrement et les jobs passent par Traefik et son certificat : en
@@ -21,6 +21,8 @@ cd "$ROOT"
 source "$ROOT/scripts/lib/env.sh"
 # shellcheck source=scripts/lib/tls.sh
 source "$ROOT/scripts/lib/tls.sh"
+# shellcheck source=scripts/lib/gitlab.sh
+source "$ROOT/scripts/lib/gitlab.sh"
 
 # Image par défaut des jobs CI (dernière stable, épinglée)
 readonly RUNNER_IMAGE="alpine:3.24.2"
@@ -39,8 +41,7 @@ readonly SONAR_URL_INTERNE="http://sonarqube:9000"
 readonly CA_CONTENEUR=/etc/devops-platform/ca/ca.pem
 # Verrou de l'instance : dans le volume du runner, donc sur l'hôte de l'instance quel que soit le poste
 readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
-readonly RUBY=/opt/gitlab/embedded/bin/ruby
-readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 ATTENTE_VERROU=60 PAS=10
+readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 ATTENTE_VERROU=60
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -116,11 +117,10 @@ sonar_token_fichier="outputs/$env.sonarqube-token"
 # entrée fermée, verrou libéré par le noyau. Dans toutes ses branches, le détenteur attend la fin de
 # son entrée avant de sortir, pour que ses réponses restent lisibles. Son entrée n'est ouverte que par
 # le script (descripteur du coprocessus, fermé au lancement des commandes) : seule sa fin la ferme.
-verrou_pid="" verrou_in="" verrou_out="" erreurs_rails=""
+verrou_pid="" verrou_in="" verrou_out=""
 
 nettoyer() {
   local code=$? i
-  if [[ -n "$erreurs_rails" ]]; then rm -f "$erreurs_rails"; fi
   if [[ -n "$verrou_pid" ]]; then
     exec {verrou_in}>&-
     # Attente bornée : la fin de l'entrée se propage au conteneur (par SSH pour une instance distante)
@@ -183,17 +183,6 @@ verrou_tenu() {
 
 # --- Fonctions ------------------------------------------------------------------------------------
 
-# Attend qu'une commande réussisse : <libellé> <délai en s> <commande…>
-attendre() {
-  local libelle="$1" delai="$2" debut=$SECONDS
-  shift 2
-  until "$@"; do
-    ((SECONDS - debut < delai)) || return 1
-    echo "    $libelle : pas encore, nouvel essai dans $PAS s ($((SECONDS - debut)) s écoulées)..."
-    sleep "$PAS"
-  done
-}
-
 gitlab_pret() { dc exec -T gitlab curl -sf -o /dev/null http://localhost/-/readiness 2>/dev/null; }
 
 # URL publique joignable depuis le runner (alias Traefik, certificat) : 200 ou 401 sur /api/v4/version.
@@ -215,38 +204,6 @@ url_publique_joignable() {
     sh "$hostname" "$port" "$url" "$ca_runner" 2>&1)" || true
   derniere_erreur="$sortie"
   [[ "$sortie" =~ (200|401)$ ]]
-}
-
-# Fonctions Ruby communes : appel de l'API GitLab depuis le conteneur gitlab, jeton lu sur l'entrée
-# standard (jamais en argument), réponse JSON décodée
-# shellcheck disable=SC2016 # code Ruby
-readonly RUBY_API='
-require "json"
-require "net/http"
-JETON = STDIN.gets.to_s.chomp
-def api(methode, chemin, params = nil)
-  uri = URI("http://localhost/api/v4#{chemin}")
-  req = Net::HTTP.const_get(methode.capitalize).new(uri)
-  req["PRIVATE-TOKEN"] = JETON
-  req.set_form_data(params) if params
-  rep = Net::HTTP.start(uri.host, uri.port) { |h| h.request(req) }
-  corps = rep.body.to_s
-  [rep.code.to_i, corps.empty? ? nil : (JSON.parse(corps) rescue corps)]
-end
-def api!(methode, chemin, attendus, params = nil)
-  code, corps = api(methode, chemin, params)
-  abort("API GitLab #{methode.upcase} #{chemin} : HTTP #{code} : #{corps}") unless Array(attendus).include?(code)
-  corps
-end
-'
-
-# Exécute du code Ruby (après RUBY_API) dans le conteneur gitlab : <code> [arguments…]. Les lignes de
-# stdin_extra (secrets) suivent le PAT sur l'entrée standard, où le code Ruby les lit (STDIN.gets)
-stdin_extra=()
-gitlab_api() {
-  local code="$1"
-  shift
-  printf '%s\n' "$pat" "${stdin_extra[@]}" | dc exec -T gitlab "$RUBY" -e "$RUBY_API$code" -- "$@"
 }
 
 # Blocs [[runners]] de config.toml, une ligne par bloc, champs séparés par \037 :
@@ -344,35 +301,9 @@ echo "    $url joignable depuis le runner."
 # --- 2. Jeton d'accès personnel d'administration ----------------------------------------------------
 
 etape "Jeton d'accès personnel root ($PAT_NOM)"
-# shellcheck disable=SC2016 # code Ruby
-code_pat='
-root = User.find_by_username("root") or abort("Compte root introuvable.")
-nom = ENV.fetch("BOOTSTRAP_PAT_NOM")
-root.personal_access_tokens.active.where(name: nom).find_each do |t|
-  r = PersonalAccessTokens::RevokeService.new(root, token: t).execute
-  abort("Révocation du jeton #{t.id} impossible : #{r.message}") unless r.success?
-  puts "REVOQUE=#{t.id}"
-end
-r = PersonalAccessTokens::CreateService.new(
-  current_user: root, target_user: root,
-  organization_id: Organizations::Organization.default_organization.id,
-  params: { name: nom, scopes: %w[api admin_mode], expires_at: Date.today + 1 }
-).execute
-abort("Création du jeton impossible : #{r.message}") unless r.success?
-t = r.payload[:personal_access_token]
-puts "EXPIRATION=#{t.expires_at}"
-puts "PAT=#{t.token}"
-'
-erreurs_rails="$(mktemp)"
-if ! sortie_pat="$(dc exec -T -e BOOTSTRAP_PAT_NOM="$PAT_NOM" gitlab gitlab-rails runner "$code_pat" 2> "$erreurs_rails")"; then
-  cat "$erreurs_rails" >&2
-  erreur "création du jeton d'accès personnel impossible (voir ci-dessus)"
-fi
-pat="$(sed -n 's/^PAT=//p' <<<"$sortie_pat" | tail -n1)"
-[[ -n "$pat" ]] || { cat "$erreurs_rails" >&2; erreur "jeton d'accès personnel absent de la sortie de gitlab-rails"; }
-expiration="$(sed -n 's/^EXPIRATION=//p' <<<"$sortie_pat" | tail -n1)"
-revoques="$(grep -c '^REVOQUE=' <<<"$sortie_pat" || true)"
-echo "    Jeton créé (expire le $expiration) ; $revoques ancien(s) jeton(s) révoqué(s)."
+creer_pat_root "$PAT_NOM"
+expiration="$pat_expiration"
+echo "    Jeton créé (expire le $expiration) ; $pat_revoques ancien(s) jeton(s) révoqué(s)."
 
 # --- 3. Variables CI d'instance SonarQube ---------------------------------------------------------------
 

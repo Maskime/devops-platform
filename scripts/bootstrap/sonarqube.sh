@@ -19,6 +19,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 # shellcheck source=scripts/lib/env.sh
 source "$ROOT/scripts/lib/env.sh"
+# shellcheck source=scripts/lib/sonarqube.sh
+source "$ROOT/scripts/lib/sonarqube.sh"
 
 # Même seuil que scripts/host-prereqs.sh
 readonly MAX_MAP_COUNT_MIN=524288
@@ -26,7 +28,6 @@ readonly ATTENTE_ESSAIS=60
 readonly ATTENTE_PAUSE=10
 readonly TOKEN_NOM=devops-platform-analyse # nom du token, pas sa valeur (check-secrets: ignore)
 readonly PLUGIN_CLE=communityBranchPlugin
-readonly API=http://localhost:9000
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
@@ -52,34 +53,6 @@ if [[ -z "$admin_mdp" || "$admin_mdp" == change_me* ]]; then
 fi
 [[ "$admin_mdp" =~ [[:cntrl:]] ]] && erreur "SONARQUBE_ADMIN_PASSWORD contient un caractère de contrôle ($env_file)"
 
-# Chaîne entre guillemets pour un fichier de config curl (\ et " échappés)
-cfg() { local v="${1//\\/\\\\}"; printf '"%s"' "${v//\"/\\\"}"; }
-
-# api <GET|POST> <chemin> <utilisateur:secret | ""> [paramètre=valeur…]
-# Positionne CODE (code HTTP, 000 si SonarQube injoignable) et CORPS. Retour non nul si l'exec échoue
-# (conteneur arrêté). Paramètres POST encodés (data-urlencode) : un mot de passe contenant + & % reste
-# intact.
-CODE='' CORPS=''
-api() {
-  local methode="$1" chemin="$2" identite="$3" config sortie p
-  shift 3
-  config="url = $(cfg "$API$chemin")"$'\n'
-  [[ -n "$identite" ]] && config+="user = $(cfg "$identite")"$'\n'
-  [[ "$methode" == POST ]] && config+='request = "POST"'$'\n'
-  for p in "$@"; do config+="data-urlencode = $(cfg "$p")"$'\n'; done
-  CODE='' CORPS=''
-  sortie="$(dc exec -T sonarqube curl -sS -K - -w '\n%{http_code}' <<<"$config" 2>/dev/null)" || {
-    # curl injoignable (SonarQube en démarrage) : code 000 en dernière ligne, exec réussi pour nous
-    [[ "$sortie" =~ (^|$'\n')000$ ]] || return 1
-  }
-  CODE="${sortie##*$'\n'}"
-  CORPS="${sortie%"$CODE"}"
-  CORPS="${CORPS%$'\n'}"
-}
-
-# Champ booléen "valid" de api/authentication/validate (toujours HTTP 200)
-identite_valide() { api GET /api/authentication/validate "$1" && [[ "$CORPS" == *'"valid":true'* ]]; }
-
 # --- 1. vm.max_map_count -------------------------------------------------------------------------
 # sysctl non namespacé : la base (qui démarre même quand SonarQube échoue faute de ce réglage) lit
 # la valeur du noyau de l'hôte cible.
@@ -99,7 +72,7 @@ echo "    $max_map_count (≥ $MAX_MAP_COUNT_MIN) : OK."
 echo "==> Attente de SonarQube..."
 for ((i = 1; ; i++)); do
   statut=''
-  if api GET /api/system/status ''; then
+  if sonar_api GET /api/system/status ''; then
     statut="$(sed -n 's/.*"status":"\([A-Z_]*\)".*/\1/p' <<<"$CORPS")"
   fi
   [[ "$statut" == UP ]] && { echo "    SonarQube prêt."; break; }
@@ -116,7 +89,7 @@ echo "==> Compte admin..."
 if identite_valide "admin:$admin_mdp"; then
   echo "    Mot de passe déjà positionné : rien à faire."
 elif identite_valide "admin:admin"; then
-  api POST /api/users/change_password "admin:admin" \
+  sonar_api POST /api/users/change_password "admin:admin" \
     login=admin previousPassword=admin "password=$admin_mdp" \
     || erreur "changement du mot de passe admin impossible (service sonarqube injoignable)"
   case "$CODE" in
@@ -139,7 +112,7 @@ admin="admin:$admin_mdp"
 
 # --- 4. Plugin community branch ------------------------------------------------------------------
 echo "==> Plugin community branch..."
-api GET /api/plugins/installed "$admin" || erreur "liste des plugins inaccessible (service sonarqube injoignable)"
+sonar_api GET /api/plugins/installed "$admin" || erreur "liste des plugins inaccessible (service sonarqube injoignable)"
 [[ "$CODE" == 200 ]] || erreur "HTTP $CODE inattendu sur api/plugins/installed : $CORPS"
 if [[ "$CORPS" != *"\"key\":\"$PLUGIN_CLE\""* ]]; then
   echo "Erreur : plugin $PLUGIN_CLE absent de SonarQube." >&2
@@ -153,7 +126,7 @@ echo "    $PLUGIN_CLE installé : OK."
 # SonarQube ne restitue jamais un token : celui du fichier est conservé tant qu'il reste valide,
 # sinon le token du même nom est révoqué et remplacé.
 echo "==> Token d'analyse ($TOKEN_NOM)..."
-api GET /api/user_tokens/search "$admin" || erreur "liste des tokens inaccessible (service sonarqube injoignable)"
+sonar_api GET /api/user_tokens/search "$admin" || erreur "liste des tokens inaccessible (service sonarqube injoignable)"
 [[ "$CODE" == 200 ]] || erreur "HTTP $CODE inattendu sur api/user_tokens/search : $CORPS"
 token_existe=0
 [[ "$CORPS" == *"\"name\":\"$TOKEN_NOM\""* ]] && token_existe=1
@@ -171,10 +144,10 @@ else
       echo "  fichier supprimé) : il est révoqué et remplacé. La variable CI SONAR_TOKEN suit à l'étape" >&2
       echo "  GitLab de make bootstrap ; ses autres utilisateurs sont à reconfigurer." >&2
     fi
-    api POST /api/user_tokens/revoke "$admin" "name=$TOKEN_NOM" || erreur "révocation du token impossible"
+    sonar_api POST /api/user_tokens/revoke "$admin" "name=$TOKEN_NOM" || erreur "révocation du token impossible"
     [[ "$CODE" == 204 ]] || erreur "HTTP $CODE inattendu à la révocation du token : $CORPS"
   fi
-  api POST /api/user_tokens/generate "$admin" "name=$TOKEN_NOM" type=GLOBAL_ANALYSIS_TOKEN \
+  sonar_api POST /api/user_tokens/generate "$admin" "name=$TOKEN_NOM" type=GLOBAL_ANALYSIS_TOKEN \
     || erreur "génération du token impossible (service sonarqube injoignable)"
   [[ "$CODE" == 200 ]] || erreur "HTTP $CODE inattendu à la génération du token : $CORPS"
   token="$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' <<<"$CORPS")"
