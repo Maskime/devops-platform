@@ -117,7 +117,7 @@ change (même chemin), le runner garde la CA chargée à son démarrage : le red
 
 **Clients non couverts** :
 
-- **Scripts lancés depuis l'hôte** (`make bootstrap-legacy`, `curl`) : ajouter la CA au magasin de
+- **Outils lancés depuis l'hôte** (`curl`, `git`…) : ajouter la CA au magasin de
   l'hôte (Debian/Ubuntu : copier `ca.crt` dans `/usr/local/share/ca-certificates/`, puis
   `update-ca-certificates`), ou passer `CURL_CA_BUNDLE=/chemin/ca.pem` dans l'environnement.
 - **Appels de SonarQube vers GitLab** (JVM) : ils ne connaissent pas la CA interne (#110).

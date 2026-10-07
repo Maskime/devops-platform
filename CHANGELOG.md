@@ -19,10 +19,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - `GITLAB_EXTERNAL_URL` devient optionnelle : commenter la ligne de chaque `envs/<env>.env` existant
   pour adopter l'URL dérivée (`https://<GITLAB_HOSTNAME>` en `letsencrypt` et `custom`,
   `http://<GITLAB_HOSTNAME>` en `none`). Une valeur explicite reste contrôlée (même hôte, schéma du mode).
-- Runner enregistré par `make bootstrap-legacy` (`factory-runner`) : le premier `make bootstrap` le
+- Runner enregistré par l'ancien bootstrap (`factory-runner`) : le premier `make bootstrap` le
   supprime et enregistre à sa place le runner d'instance `devops-platform-runner`.
-- Runner déjà enregistré par `make bootstrap-legacy` : la relance réaligne son `url` et son
-  `clone_url` (`config.toml`) sur l'URL publique.
+- L'ancien bootstrap laisse sur l'instance des données de test et des jetons actifs que rien ne
+  retire : projets GitLab et SonarQube `factory-test`, jeton d'accès personnel GitLab `setup-token` de
+  `root` (droit `api`, valable 365 jours), jeton SonarQube `factory-scanner` de `admin`. Révoquer ces
+  jetons (GitLab : jetons d'accès du profil de `root` ; SonarQube : *My Account > Security* de
+  `admin`) et supprimer les projets à la main.
 - Traefik est désormais configuré par variables `TRAEFIK_*` (`environment`) et non plus par `command`,
   et ce qui dépend du mode TLS vit dans `compose/tls/<mode>.yml` (fusionné avec `compose/proxy.yml`).
   Les labels `traefik.http.routers.<service>.entrypoints` ont disparu : les routeurs suivent les
@@ -131,7 +134,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   des clients (`X-Forwarded-For`). `make check-env` valide `GITLAB_SSH_PORT` (affiché dans les URLs de
   clone SSH). **Le conteneur `gitlab` est recréé au prochain `make deploy`** (configuration Omnibus
   modifiée : quelques minutes d'indisponibilité). Détails : `docs/gitlab-proxy.md`.
-- Traefik porte les `*_HOSTNAME` en alias réseau : le runner (bootstrap legacy) s'enregistre et clone
+- Traefik porte les `*_HOSTNAME` en alias réseau : le runner s'enregistre et clone
   par l'URL publique de GitLab, via Traefik ; clone par `http://gitlab` pour un hostname `*.localhost`
   (libcurl le résout toujours vers `127.0.0.1`).
 
@@ -145,7 +148,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   point d'entrée web, sur le port 80, routant GitLab, SonarQube, Grafana, Portainer et PlantUML selon
   leur `*_HOSTNAME`. Provider Docker limité aux conteneurs du projet, API et dashboard désactivés,
   logs d'accès collectés par promtail. HTTP seul : TLS à venir (US 3-2 à 3-4).
-- `make check-env` (donc `deploy` et `bootstrap-legacy`) refuse une `*_EXTERNAL_URL` dont l'hôte
+- `make check-env` (donc `deploy`) refuse une `*_EXTERNAL_URL` dont l'hôte
   diffère du `*_HOSTNAME` du service ou qui porte un port (`scripts/check-env-urls.sh`).
 - `make verify` contrôle les ports publiés : seuls Traefik (80, et 443 pour le TLS à venir) et le SSH
   GitLab sont autorisés, en comparant port publié et port du conteneur ; tout `network_mode` `host`,
@@ -227,7 +230,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - **Services web derrière Traefik** : GitLab, SonarQube, Grafana, Portainer et PlantUML ne publient
   plus de port sur l'hôte ; ils sont servis sur `http://<hostname>` (défaut `<service>.localhost`).
   Portainer est servi en HTTP (port interne 9000) au lieu de HTTPS auto-signé sur 9443.
-  URLs publiques par défaut (modèle, `make init`, scripts legacy) : `http://<hostname>`.
+  URLs publiques par défaut (modèle, `make init`) : `http://<hostname>`.
   **Migration d'une instance existante** : corriger dans `envs/<env>.env` les URLs générées avant
   le proxy (`GITLAB_EXTERNAL_URL=http://localhost`, `SONARQUBE_EXTERNAL_URL=http://localhost:9000`,
   `GRAFANA_EXTERNAL_URL=http://localhost:3100`) en `http://<hostname du service>` — `make deploy`
@@ -245,7 +248,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   réseau (quelques minutes d'indisponibilité de GitLab, volumes conservés) : `make deploy` détecte
   le changement de réseau et force la recréation, faute de quoi Compose se contente de reconnecter
   les conteneurs, qui ne redémarrent plus (`network factory-network not found`). Le réseau des jobs CI du
-  runner déjà enregistré est réaligné par `make bootstrap-legacy`, ou à la main (`network_mode` dans
+  runner déjà enregistré est réaligné par `make bootstrap`, ou à la main (`network_mode` dans
   `/etc/gitlab-runner/config.toml`). L'ancien réseau peut ensuite être supprimé :
   `docker network rm factory-network`.
 - Conteneurs nommés par Compose (`devops-platform-<service>-1`) : plus de `container_name` fixe,
@@ -270,6 +273,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   Edge déjà enrôlés ne peuvent plus joindre l'instance.
 - Variables de port web `GITLAB_HTTP_PORT`, `SONARQUBE_PORT`, `GRAFANA_PORT`, `PORTAINER_PORT` et
   `PLANTUML_PORT` (ignorées si encore présentes dans un `envs/<env>.env`).
+- `make bootstrap-legacy` et ses scripts repris de Software Factory, qui créaient des données de test :
+  remplacés par `make bootstrap` et `make smoke`. Variables `GITLAB_TEST_PROJECT_NAME` et
+  `SONARQUBE_TEST_PROJECT_KEY` (ignorées si encore présentes).
 
 ### Corrigé
 
@@ -279,6 +285,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   17.0 et ignoré (Sidekiq tournait à 20). Elle passe par `sidekiq['concurrency']` : 10 avec le
   profil `medium`. Le profil `medium` porte aussi `max_connections` du PostgreSQL embarqué de 100 à 150.
   Au prochain `make deploy`, `gitlab` et `sonarqube` sont recréés (volumes conservés).
+
+### Sécurité
+
+- Plus aucun secret en argument de processus dans les scripts (visible par `ps` ou `docker inspect`) :
+  identifiants et jetons passent par l'entrée standard (`curl -K -`, API GitLab) ou par une variable
+  d'environnement héritée (`CI_SERVER_TOKEN` de `gitlab-runner register`).
 
 ## [0.1.0] - 2026-10-05
 

@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke bootstrap-legacy
+.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -51,8 +51,8 @@ init: check-env-name ## [ENV] Génère envs/ENV.env (questions, secrets aléatoi
 	done
 	@FORCE="$(FORCE)" NOUVEAUX_MDP="$(NOUVEAUX_MDP)" scripts/init-env.sh "$(ENV)"
 
-# Fichier de l'instance présent ; FORCER (remplacement d'une instance sur un hôte, bootstrap-legacy hors
-# local) et ROTATION (token d'analyse SonarQube remplacé) acceptés seulement sur la ligne de commande
+# Fichier de l'instance présent ; FORCER (remplacement d'une instance sur un hôte) et ROTATION (token
+# d'analyse SonarQube remplacé) acceptés seulement sur la ligne de commande
 check-env-file: check-env-name
 	@[[ -f "$(ENV_FILE)" ]] || { echo "Fichier introuvable : $(ENV_FILE) (le générer : make init ENV=$(ENV))" >&2; exit 1; }
 	@for v in "FORCER:$(origin FORCER)" "ROTATION:$(origin ROTATION)"; do \
@@ -136,15 +136,3 @@ smoke: check-env ## [ENV] Smoke test : projet de test, pipeline avec analyse Son
 	  echo "NETTOYER hérité du shell refusé : le passer explicitement, make smoke ENV=$(ENV) NETTOYER=1" >&2; exit 1; \
 	fi
 	@FORCER="$(FORCER)" NETTOYER="$(NETTOYER)" scripts/instance.sh smoke "$(ENV)"
-
-# Temporaire : scripts repris de Software Factory, qui créent des données de test (projet
-# factory-test, analyse SonarQube). Remplacé par `make bootstrap` et le smoke test (épopée 5).
-bootstrap-legacy: check-env ## [ENV] [Temporaire] Bootstrap repris de la factory (crée des données de test) ; FORCER=1 hors local
-	@if [[ "$(ENV)" != "local" && "$(FORCER)" != "1" ]]; then \
-	  echo "bootstrap-legacy crée des données de test : réservé à ENV=local (FORCER=1 pour passer outre)." >&2; exit 1; \
-	fi
-	@# Scripts repris tels quels : moteur Docker local uniquement
-	@source scripts/lib/env.sh; if [[ -n "$$(env_valeur_fichier "$(ENV_FILE)" DEPLOY_SSH)" ]]; then \
-	  echo "bootstrap-legacy : instance distante (DEPLOY_SSH dans $(ENV_FILE)) non gérée." >&2; exit 1; \
-	fi
-	ENV=$(ENV) scripts/legacy/setup-all.sh

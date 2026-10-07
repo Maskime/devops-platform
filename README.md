@@ -33,10 +33,6 @@ make smoke ENV=local                  # projet de test, pipeline et analyse Sona
 Les mots de passe générés par `make init` se lisent dans `envs/local.env`. Si git ou wget ne résolvent
 pas `*.localhost`, `make init` indique la ligne à ajouter à `/etc/hosts`.
 
-> ⚠️ `make bootstrap-legacy ENV=local` est **temporaire** : repris de Software Factory, il crée des **données de
-> test** (projet `factory-test`, pipeline, analyse SonarQube) et n'est accepté qu'en `ENV=local`
-> (`FORCER=1` pour passer outre). Il requiert `curl`, `python3` et `vm.max_map_count` ≥ 524288.
-
 ## Configuration d'une instance
 
 Toute la configuration tient dans `envs/<env>.env`, généré par `make init` ; chaque variable est
@@ -69,7 +65,6 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make verify` | Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis) |
 | `make check-secrets` | Recherche de secrets dans le dépôt |
 | `make install-hooks` | Active le hook pre-commit optionnel de recherche de secrets |
-| `make bootstrap-legacy ENV=local` | Bootstrap temporaire repris de Software Factory |
 
 `make help` fait foi pour la liste des cibles disponibles.
 
