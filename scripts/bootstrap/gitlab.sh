@@ -12,7 +12,7 @@
 # GitLab : rien à installer sur le poste. Les jetons ne passent jamais en argument de processus.
 # Seuls l'URL publique, l'enregistrement et les jobs passent par Traefik et son certificat : en
 # TLS_MODE=custom, la CA privée facultative montée dans le runner les vérifie (docs/certificats.md).
-# Un seul bootstrap à la fois par instance : verrou flock dans le volume du runner (voir « Verrou »).
+# Une seule opération à la fois par instance : verrou flock dans le volume du runner (voir « Verrou »).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -23,6 +23,10 @@ source "$ROOT/scripts/lib/env.sh"
 source "$ROOT/scripts/lib/tls.sh"
 # shellcheck source=scripts/lib/gitlab.sh
 source "$ROOT/scripts/lib/gitlab.sh"
+# shellcheck source=scripts/lib/sonarqube.sh
+source "$ROOT/scripts/lib/sonarqube.sh"
+# shellcheck source=scripts/lib/verrou.sh
+source "$ROOT/scripts/lib/verrou.sh"
 
 # Image par défaut des jobs CI (dernière stable, épinglée)
 readonly RUNNER_IMAGE="alpine:3.24.2"
@@ -40,8 +44,9 @@ readonly SONAR_URL_INTERNE="http://sonarqube:9000"
 # (config/certs/ca/ca.pem), à garder identiques
 readonly CA_CONTENEUR=/etc/devops-platform/ca/ca.pem
 # Verrou de l'instance : dans le volume du runner, donc sur l'hôte de l'instance quel que soit le poste
+# (même fichier dans scripts/instance.sh et scripts/smoke.sh)
 readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
-readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 ATTENTE_VERROU=60
+readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -111,75 +116,9 @@ sonar_token_fichier="outputs/$env.sonarqube-token"
 
 # --- Verrou -----------------------------------------------------------------------------------------
 
-# Les commandes du bootstrap sont des docker compose exec séparés : le verrou est tenu, pendant tout le
-# script, par un détenteur lancé en coprocessus. C'est un sh du conteneur gitlab-runner qui garde le
-# verrou (fd 9) jusqu'à la fin de son entrée standard. Script terminé, en échec, interrompu ou tué :
-# entrée fermée, verrou libéré par le noyau. Dans toutes ses branches, le détenteur attend la fin de
-# son entrée avant de sortir, pour que ses réponses restent lisibles. Son entrée n'est ouverte que par
-# le script (descripteur du coprocessus, fermé au lancement des commandes) : seule sa fin la ferme.
-verrou_pid="" verrou_in="" verrou_out=""
-
-nettoyer() {
-  local code=$? i
-  if [[ -n "$verrou_pid" ]]; then
-    exec {verrou_in}>&-
-    # Attente bornée : la fin de l'entrée se propage au conteneur (par SSH pour une instance distante)
-    for ((i = 0; i < 20; i++)); do
-      kill -0 "$verrou_pid" 2> /dev/null || break
-      sleep 0.5
-    done
-    if kill -0 "$verrou_pid" 2> /dev/null; then
-      echo "Attention : le détenteur du verrou ne s'est pas arrêté, interrompu (verrou libéré à la fin de sa connexion)." >&2
-      kill "$verrou_pid" 2> /dev/null || true
-    fi
-    wait "$verrou_pid" 2> /dev/null || true
-  fi
-  exit "$code"
-}
-trap nettoyer EXIT
-
-prendre_verrou() {
-  local detenteur reponse ligne lignes=()
-  detenteur="$(id -un)@${HOSTNAME:-$(uname -n)} (pid $$), depuis le $(date '+%F %T %z')"
-  # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
-  coproc verrou_detenteur {
-    exec docker compose --env-file "$env_file" exec -T gitlab-runner sh -c '
-      if ! (: >> "$1") 2> /dev/null; then echo "ECHEC $1 inaccessible en écriture"; exec cat > /dev/null; fi
-      exec 9>> "$1"
-      if ! flock -w "$3" 9; then echo OCCUPE; cat "$1"; echo FIN; exec cat > /dev/null; fi
-      printf "%s\n" "$2" > "$1"
-      echo PRIS
-      exec cat > /dev/null' sh "$FICHIER_VERROU" "$detenteur" 5
-  }
-  # shellcheck disable=SC2154 # variables créées par coproc
-  verrou_pid="$verrou_detenteur_PID" verrou_in="${verrou_detenteur[1]}"
-  # Copie de la sortie du détenteur : bash ferme les descripteurs du coprocessus dès qu'il s'arrête
-  exec {verrou_out}<&"${verrou_detenteur[0]}"
-  if ! IFS= read -r -t "$ATTENTE_VERROU" -u "$verrou_out" reponse; then
-    erreur "verrou $FICHIER_VERROU : pas de réponse du conteneur gitlab-runner en $ATTENTE_VERROU s (voir ci-dessus)"
-  fi
-  case "$reponse" in
-    PRIS) ;;
-    OCCUPE)
-      while IFS= read -r -t 10 -u "$verrou_out" ligne && [[ "$ligne" != FIN ]]; do lignes+=("$ligne"); done
-      {
-        echo "Erreur : un autre make bootstrap est en cours sur l'instance $env (verrou $FICHIER_VERROU du conteneur gitlab-runner)."
-        echo "  Dernier détenteur connu : ${lignes[*]:-inconnu}"
-        echo "  Aucune modification faite. Attendre la fin de cette exécution, puis relancer make bootstrap ENV=$env."
-      } >&2
-      exit 1
-      ;;
-    *) erreur "verrou $FICHIER_VERROU : réponse inattendue du conteneur gitlab-runner : $reponse" ;;
-  esac
-  exec {verrou_out}<&-
-}
-
-# Détenteur toujours actif : sinon (conteneur gitlab-runner redémarré, connexion SSH coupée), le verrou
-# est perdu et une autre exécution a pu le prendre
-verrou_tenu() {
-  kill -0 "$verrou_pid" 2> /dev/null \
-    || erreur "verrou $FICHIER_VERROU perdu (conteneur gitlab-runner redémarré, connexion SSH coupée ?) : relancer make bootstrap ENV=$env"
-}
+# Verrou de l'instance (scripts/lib/verrou.sh) : tenu par scripts/instance.sh pour tout make bootstrap
+# (VERROU_PID_HERITE), sinon pris ici. Libéré en fin de script, quelle qu'en soit l'issue.
+trap verrou_liberer EXIT
 
 # --- Fonctions ------------------------------------------------------------------------------------
 
@@ -262,8 +201,13 @@ for service in gitlab gitlab-runner; do
   [[ -n "$(dc ps -q --status running "$service")" ]] \
     || erreur "service $service arrêté : démarrer l'instance (make deploy ENV=$env)"
 done
-prendre_verrou
-echo "    Verrou de l'instance pris ($FICHIER_VERROU, conteneur gitlab-runner)."
+if [[ -n "${VERROU_PID_HERITE:-}" ]]; then
+  verrou_heriter "$VERROU_PID_HERITE" gitlab-runner "$FICHIER_VERROU" "make bootstrap ENV=$env"
+  echo "    Verrou de l'instance tenu par make bootstrap ($FICHIER_VERROU, conteneur gitlab-runner)."
+else
+  verrou_prendre gitlab-runner "$FICHIER_VERROU" "make bootstrap ENV=$env"
+  echo "    Verrou de l'instance pris ($FICHIER_VERROU, conteneur gitlab-runner)."
+fi
 
 # CA privée : utilisée seulement en TLS_MODE=custom, URL en https et ca.pem monté dans le runner ; sinon
 # magasin système (comportement de letsencrypt et none)
@@ -350,15 +294,6 @@ definir_variable() { # <clé> <masquée 0|1> <valeur>
   esac
 }
 
-# Token valide pour SonarQube : api/authentication/validate depuis le conteneur sonarqube, token dans la
-# configuration curl lue sur l'entrée standard (jamais en argument). Format déjà contrôlé : sans " ni \.
-token_sonar_valide() { # <token>
-  local reponse
-  reponse="$(printf 'url = "http://localhost:9000/api/authentication/validate"\nuser = "%s:"\n' "$1" \
-    | dc exec -T sonarqube curl -sS -K - 2> /dev/null)" || return 1
-  [[ "$reponse" == *'"valid":true'* ]]
-}
-
 etat_sonar_url="non posée" etat_sonar_token="non posée"
 if [[ " $(dc config --services | paste -sd ' ' -) " != *" sonarqube "* ]]; then
   echo "    Service sonarqube absent de l'instance : étape ignorée."
@@ -388,11 +323,12 @@ else
       echo "  make bootstrap ENV=$env la récupère du stockage de l'instance (docs/analyse-sonarqube.md)."
     } >&2
     etat_sonar_token="non mise à jour (token local absent)"
-  # Règle de masquage de GitLab : 8 caractères au moins, alphabet Base64 (les tokens SonarQube s'y tiennent)
-  elif [[ ! "$token_sonar" =~ ^[A-Za-z0-9_]{8,}$ ]]; then
+  # Format d'un token d'analyse (scripts/lib/sonarqube.sh)
+  elif [[ ! "$token_sonar" =~ $MOTIF_TOKEN_SONAR ]]; then
     echo "Attention : $sonar_token_fichier ne contient pas un token SonarQube : SONAR_TOKEN non mise à jour." >&2
     etat_sonar_token="non mise à jour (token local illisible)"
-  elif ! token_sonar_valide "$token_sonar"; then
+  # Token valide pour SonarQube (api/authentication/validate, token sur l'entrée standard de curl)
+  elif ! identite_valide "$token_sonar:"; then
     {
       echo "Attention : token de $sonar_token_fichier refusé par SonarQube (copie périmée, rotation depuis un"
       echo "  autre poste ?) ou SonarQube injoignable : SONAR_TOKEN non mise à jour. make bootstrap ENV=$env"
