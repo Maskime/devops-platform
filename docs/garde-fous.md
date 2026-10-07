@@ -35,8 +35,8 @@ depuis la racine du repo, **sans `-p` ni `-f`**. Pour valider un seul module :
   `down`…) peuvent se passer du modèle et restent possibles : elles servent au nettoyage.
 - `make deploy` lance en plus `scripts/check-doublons.sh` : refus si un volume de l'instance est monté
   par un conteneur d'un autre projet Compose (ou hors Compose), ou si le réseau de l'instance porte un
-  conteneur d'un autre projet Compose. Les conteneurs sans label Compose sur le réseau (jobs CI du
-  runner, `docker run --network`) sont légitimes et ignorés. Contrôle en lecture seule.
+  conteneur d'un autre projet Compose. Les conteneurs sans label Compose sur le réseau
+  (`docker run --network`) sont légitimes et ignorés ; les jobs CI ont leur propre réseau. Contrôle en lecture seule.
 - `make verify` vérifie que le garde-fou refuse bien chaque module seul et un autre nom de projet.
 
 **Limites** : ce qui reste possible en contournant les cibles `make`, délibérément.

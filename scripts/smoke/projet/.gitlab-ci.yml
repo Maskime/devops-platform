@@ -1,6 +1,7 @@
 # Pipeline du projet de test de make smoke (scripts/smoke.sh), poussé tel quel dans GitLab.
-# Un job simple (runner, image par défaut, clone) et une analyse SonarQube avec les variables CI
-# d'instance SONAR_HOST_URL et SONAR_TOKEN posées par make bootstrap (docs/smoke-test.md).
+# Un job simple (runner, image par défaut, clone), un contrôle de l'isolation réseau des jobs et une
+# analyse SonarQube avec les variables CI d'instance SONAR_HOST_URL et SONAR_TOKEN posées par
+# make bootstrap (docs/smoke-test.md).
 stages:
   - test
 
@@ -9,6 +10,36 @@ simple:
   script:
     - echo "Runner opérationnel sur $(uname -m) (pipeline $CI_PIPELINE_ID, commit $CI_COMMIT_SHORT_SHA)"
     - test -f src/exemple.py
+
+isolation-reseau:
+  stage: test
+  script:
+    # Contrôle positif, avec le même outil : Traefik joignable par l'hôte de CI_REPOSITORY_URL (URL
+    # publique, alias de Traefik sur le réseau des jobs ; jeton de l'URL non affiché). Sans lui, un nc
+    # inutilisable ferait passer les contrôles ci-dessous.
+    - |
+      cible="${CI_REPOSITORY_URL#*://}"; cible="${cible#*@}"; cible="${cible%%/*}"
+      case "$cible" in
+        *:*) hote="${cible%:*}"; port="${cible##*:}" ;;
+        *) hote="$cible"; case "$CI_REPOSITORY_URL" in https:*) port=443 ;; *) port=80 ;; esac ;;
+      esac
+      nc -z -w 5 "$hote" "$port" || { echo "Contrôle positif en échec : $hote:$port (Traefik) injoignable par nc"; exit 1; }
+      echo "Traefik joignable : $hote:$port"
+    # Services de la plateforme injoignables, par nom et par IP : isolation-cibles.txt (« service port
+    # ip… »), généré par make smoke avec les IP courantes
+    - |
+      test -s isolation-cibles.txt || { echo "isolation-cibles.txt absent ou vide"; exit 1; }
+      echec=0
+      while read -r service port ips; do
+        for cible in $service $ips; do
+          if nc -z -w 3 "$cible" "$port" 2> /dev/null; then
+            echo "JOIGNABLE : $cible:$port ($service)"; echec=1
+          else
+            echo "Injoignable : $cible:$port ($service)"
+          fi
+        done
+      done < isolation-cibles.txt
+      test "$echec" = 0 || { echo "Isolation réseau des jobs en défaut (docs/gitlab-proxy.md)"; exit 1; }
 
 sonar-scanner:
   stage: test

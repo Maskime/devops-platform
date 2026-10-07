@@ -34,7 +34,7 @@ Les deux services passent donc par un **proxy de socket filtrant**, `socket-prox
   recréé, qui change d'IP, reste autorisé.
 - **Réseau dédié et interne.** Le proxy n'est que sur le réseau `devops-platform_socket-proxy`
   (`internal: true` : aucun accès sortant, aucun port publié), partagé avec ses seuls clients. Les jobs
-  CI, lancés sur le réseau de la plateforme (`PLATFORM_NETWORK`), ne le voient pas : le nom
+  CI, lancés sur leur propre réseau (`GITLAB_RUNNER_NETWORK`), ne le voient pas : le nom
   `socket-proxy` n'y est même pas résolu. Le réseau interne n'ayant pas de passerelle, ports publiés et
   accès sortant de Traefik (ACME) et de Promtail passent toujours par le réseau de la plateforme.
 - **Durcissement du conteneur.** Système de fichiers en lecture seule, aucune capacité Linux,

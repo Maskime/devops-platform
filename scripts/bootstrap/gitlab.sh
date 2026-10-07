@@ -37,9 +37,11 @@ readonly PAT_NOM="devops-platform-bootstrap"
 # il permet de retrouver et supprimer les anciens runners après un changement de description
 readonly MARQUEUR="Géré par devops-platform (make bootstrap) : ne pas modifier."
 readonly CONFIG_RUNNER=/etc/gitlab-runner/config.toml
-# URL de SonarQube pour les jobs quand l'URL publique n'est pas utilisable : nom de service Docker sur
-# le réseau de la plateforme (port interne de compose/sonarqube.yml)
-readonly SONAR_URL_INTERNE="http://sonarqube:9000"
+# URLs des jobs quand l'URL publique n'est pas utilisable : noms internes servis par l'entrypoint
+# `interne` de Traefik sur le réseau des jobs (alias et port de compose/proxy.yml, routeurs
+# <service>-interne de compose/gitlab.yml et compose/sonarqube.yml : à garder identiques)
+readonly URL_INTERNE_GITLAB="http://gitlab.devops-platform.internal:8000"
+readonly URL_INTERNE_SONAR="http://sonarqube.devops-platform.internal:8000"
 # CA privée de TLS_MODE=custom dans le conteneur gitlab-runner : montage de compose/tls/gitlab/custom.yml
 # (config/certs/ca/ca.pem), à garder identiques
 readonly CA_CONTENEUR=/etc/devops-platform/ca/ca.pem
@@ -72,12 +74,9 @@ motif_description='^[A-Za-z0-9 ._-]{1,100}$'
 [[ "$description" =~ $motif_description ]] \
   || erreur "GITLAB_RUNNER_DESCRIPTION invalide : $description (1 à 100 caractères parmi lettres sans accent, chiffres, espace, . _ -)"
 
-reseau_plateforme="$(env_valeur "$env_file" PLATFORM_NETWORK)"
-reseau_plateforme="${reseau_plateforme:-devops-platform}"
-reseau="$(env_valeur "$env_file" GITLAB_RUNNER_NETWORK)"
-reseau="${reseau:-$reseau_plateforme}"
-[[ "$reseau" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] \
-  || erreur "GITLAB_RUNNER_NETWORK invalide : $reseau (nom de réseau Docker attendu)"
+# Réseau des jobs : dédié, créé par Compose (compose/proxy.yml), jamais un réseau de la plateforme
+# (même contrôle que make check-env, scripts/lib/env.sh)
+reseau="$(reseau_jobs "$env_file")" || exit 1
 
 # Image auxiliaire (helper) des jobs : dépôt sans tag. Le tag v${CI_RUNNER_VERSION} est enregistré tel
 # quel et développé par le runner à chaque job : le helper suit la version du binaire, quelle que soit
@@ -102,8 +101,8 @@ tls_mode="${tls_mode:-none}"
 url="${url:-$(url_derivee "$hostname" "$tls_mode")}"
 url="${url%/}"
 # Clone des jobs : URL publique (alias réseau de Traefik), sauf *.localhost, que libcurl (donc git)
-# résout toujours vers 127.0.0.1 : nom de service Docker (docs/gitlab-proxy.md)
-if est_hostname_local "$hostname"; then clone_url="http://gitlab"; else clone_url="$url"; fi
+# résout toujours vers 127.0.0.1 : nom interne de Traefik (docs/gitlab-proxy.md)
+if est_hostname_local "$hostname"; then clone_url="$URL_INTERNE_GITLAB"; else clone_url="$url"; fi
 
 # SonarQube : URL publique, même règle que sonar.core.serverBaseURL (compose/sonarqube.yml), et token
 # d'analyse écrit par l'étape SonarQube (scripts/bootstrap/sonarqube.sh)
@@ -223,16 +222,9 @@ if [[ "$tls_mode" == custom && "$url" == https://* ]]; then
     } >&2
   fi
 fi
+# Créé par make deploy avec Traefik, son seul membre permanent
 docker network inspect "$reseau" > /dev/null 2>&1 \
-  || erreur "réseau Docker $reseau introuvable sur la cible (GITLAB_RUNNER_NETWORK, PLATFORM_NETWORK)"
-if [[ "$reseau" != "$reseau_plateforme" ]]; then
-  {
-    echo "Attention : réseau des jobs ($reseau) différent du réseau de la plateforme ($reseau_plateforme)."
-    echo "  Les jobs clonent par $clone_url et joignent SonarQube par SONAR_HOST_URL, joignables seulement"
-    echo "  sur le réseau de la plateforme : le réseau $reseau doit le permettre, sinon tous les jobs"
-    echo "  échoueront (docs/bootstrap.md)."
-  } >&2
-fi
+  || erreur "réseau des jobs $reseau introuvable sur la cible (GITLAB_RUNNER_NETWORK) : make deploy ENV=$env"
 attendre "GitLab" "$ATTENTE_GITLAB" gitlab_pret \
   || erreur "GitLab n'est pas prêt après $((ATTENTE_GITLAB / 60)) min (docker compose logs gitlab)"
 echo "    GitLab est prêt."
@@ -301,11 +293,12 @@ if [[ " $(dc config --services | paste -sd ' ' -) " != *" sonarqube "* ]]; then
 else
   verrou_tenu
   # URL des jobs : publique (alias réseau de Traefik), sauf hostname *.localhost (que libcurl résout vers
-  # 127.0.0.1) et CA privée montée dans le runner (que la JVM du scanner n'utilise pas) : nom de service
+  # 127.0.0.1) et CA privée montée dans le runner (que la JVM du scanner n'utilise pas, #144) : nom
+  # interne de Traefik
   if est_hostname_local "$sonar_hostname"; then
-    sonar_host_url="$SONAR_URL_INTERNE" raison="interne : hostname local"
+    sonar_host_url="$URL_INTERNE_SONAR" raison="interne : hostname local"
   elif [[ -n "$ca_runner" ]]; then
-    sonar_host_url="$SONAR_URL_INTERNE" raison="interne : CA privée"
+    sonar_host_url="$URL_INTERNE_SONAR" raison="interne : CA privée"
   else
     sonar_host_url="$sonar_url" raison="URL publique"
   fi

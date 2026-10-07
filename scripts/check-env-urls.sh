@@ -13,6 +13,8 @@
 #   - TLS_MODE=letsencrypt : hostnames publics (ni local, ni IP), ACME_EMAIL valide, ACME_CHALLENGE
 #     connu (verifier_letsencrypt, scripts/lib/tls.sh).
 #   - GITLAB_SSH_PORT : entier de 1 à 65535, hors 80 et 443 (ports de Traefik) ; 22 signalé.
+#   - GITLAB_RUNNER_NETWORK : nom Docker distinct des réseaux de la plateforme (isolation des jobs CI) ;
+#     GITLAB_PROXY_SUBNET : CIDR IPv4 de /16 à /29.
 #
 # Usage : scripts/check-env-urls.sh <fichier env>
 # Valeur effective, comme Compose : variable du shell prioritaire, sinon dernière affectation du
@@ -89,6 +91,10 @@ if [[ ! "$port_ssh" =~ ^[1-9][0-9]{0,4}$ ]] || ((port_ssh > 65535)) || ((port_ss
 elif ((port_ssh == 22)); then
   echo "Attention : GITLAB_SSH_PORT=22 entre en conflit avec le sshd de l'hôte s'il écoute sur ce port." >&2
 fi
+
+# Réseaux : jobs CI sur un réseau dédié, sous-réseau du lien Traefik → GitLab (scripts/lib/env.sh)
+reseau_jobs "$fichier" > /dev/null || erreurs=1
+sous_reseau_gitlab_proxy_valide "$fichier" || erreurs=1
 
 if ((erreurs)); then
   echo "Exposition incohérente dans $fichier (voir ci-dessus)." >&2

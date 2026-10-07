@@ -24,14 +24,20 @@ non satisfaite, avec la cause et la commande à lancer.
 | 2 | Jeton d'accès personnel root éphémère créé | — |
 | 3 | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN` présentes, `SONAR_TOKEN` accepté par SonarQube, au moins un runner d'instance en ligne | `make bootstrap` non lancé, token révoqué |
 | 4 | Projet GitLab `root/devops-platform-smoke` et projet SonarQube `devops-platform-smoke` créés, ou réutilisés | — |
-| 5 | Fichiers de `scripts/smoke/projet/` poussés sur `main` (un commit) | — |
-| 6 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs |
+| 5 | Fichiers de `scripts/smoke/projet/` et liste des cibles d'isolation poussés sur `main` (un commit) | — |
+| 6 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs, service de la plateforme joignable depuis un job |
 | 7 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
 | 8 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
 
-Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte deux jobs :
+Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
 
 - **`simple`** : image par défaut du runner ; valide l'exécution d'un job et le clone du dépôt ;
+- **`isolation-reseau`** : image par défaut ; vérifie d'abord qu'il joint Traefik par l'hôte de
+  `CI_REPOSITORY_URL` (contrôle positif de l'outil, `nc -z`), puis que `gitlab:80`, `sonarqube-db:5432` et `loki:3100` sont
+  **injoignables**, par nom et par leurs IP sur les réseaux de la plateforme
+  ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)). Les IP sont relevées par `make smoke` et
+  poussées dans le fichier `isolation-cibles.txt` du projet de test ; Loki, facultatif, n'est testé
+  que par son nom s'il ne tourne pas ;
 - **`sonar-scanner`** : `sonarsource/sonar-scanner-cli` (version épinglée, celle de
   [l'exemple de job](analyse-sonarqube.md#exemple-de-job)), qui n'utilise que les variables CI
   d'instance : il valide `SONAR_HOST_URL` et `SONAR_TOKEN` tels que les reçoit tout projet hébergé.

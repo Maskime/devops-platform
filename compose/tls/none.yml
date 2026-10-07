@@ -1,10 +1,13 @@
 # =============================================================================
 # Overlay du proxy pour TLS_MODE=none : HTTP simple sur le port 80, sans certificat
 # Fusionné avec compose/proxy.yml par l'include de compose.yml (compose/tls/${TLS_MODE}.yml) ; ne
-# se lance pas seul. Rien à ajouter : l'entrypoint web (:80) de compose/proxy.yml suffit.
+# se lance pas seul. L'entrypoint web (:80) de compose/proxy.yml suffit ; il est seulement marqué par
+# défaut, pour que les routeurs publics ne soient pas aussi servis par l'entrypoint interne des jobs.
 # =============================================================================
 # Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
 x-garde-fou-tls-none: "${PLATFORM_GARDE_FOU:?compose/tls/none.yml est un overlay du proxy de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
 
 services:
-  traefik: {}
+  traefik:
+    environment:
+      TRAEFIK_ENTRYPOINTS_WEB_ASDEFAULT: "true"
