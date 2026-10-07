@@ -43,7 +43,6 @@ consommateurs reste à fournir
 Le fichier est réécrit **après chaque étape réussie** de `make bootstrap`, `make bootstrap-sonarqube`
 et `make bootstrap-gitlab`. Il reflète l'état du poste après la dernière étape terminée : si l'étape
 GitLab échoue après une rotation du token SonarQube, le fichier contient déjà le nouveau token.
-`make bootstrap-legacy` ne le génère pas.
 
 Lancement manuel, sans toucher à l'instance (lecture de fichiers locaux seulement) :
 
