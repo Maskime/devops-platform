@@ -85,7 +85,7 @@ La plateforme considère `config.toml` du conteneur `gitlab-runner` comme le sie
 1. Le runner courant est celui de `config.toml` dont la configuration (description, URL, URL de clone,
    exécuteur, image, réseau, CA, image auxiliaire) est celle attendue et qui existe dans GitLab.
 2. Sont supprimés de GitLab : les autres runners de `config.toml` (ancienne description, ancienne
-   URL, runner de `make bootstrap-legacy`…) et les runners d'instance portant la note de maintenance
+   URL, runner `factory-runner` de l'ancien bootstrap…) et les runners d'instance portant la note de maintenance
    (orphelins, par exemple après perte du volume du runner).
 3. `gitlab-runner verify --delete` retire de `config.toml` les runners supprimés ; un bloc que
    `verify` ne peut pas vérifier (URL qui ne résout plus) est retiré directement.
@@ -143,8 +143,8 @@ et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
   permettre ; le bootstrap avertit mais ne le vérifie pas.
 - **`--docker-extra-hosts host.docker.internal:host-gateway`** de l'ancien bootstrap n'est plus posé :
   les jobs n'ont pas d'accès dédié à l'hôte.
-- **Verrou contourné** : `make bootstrap-legacy` et un `gitlab-runner register` lancé à la main ne
-  prennent pas le verrou (#107) ; lancés pendant un bootstrap, leur runner peut être supprimé.
+- **Verrou contourné** : un `gitlab-runner register` lancé à la main ne prend pas le verrou (#107) ;
+  lancé pendant un bootstrap, son runner peut être supprimé.
 - **Connexion SSH inactive** : en distant, la connexion qui tient le verrou reste sans trafic pendant
   l'attente de GitLab ; un pare-feu ou un NAT qui la coupe fait échouer le bootstrap, à relancer (#108).
 - **Image auxiliaire** : le dépôt doit être lisible anonymement, le runner n'a pas d'identifiants de

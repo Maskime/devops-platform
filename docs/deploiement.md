@@ -136,8 +136,6 @@ scripts/instance.sh compose <env> exec gitlab gitlab-rake gitlab:check
 
 `make bootstrap` (SonarQube puis GitLab) vise la même cible que `make deploy`, locale ou distante,
 préparée une seule fois pour toutes ses étapes ([bootstrap](bootstrap.md)).
-`make bootstrap-legacy` (temporaire) ne gère que le moteur local : il refuse un fichier d'env qui
-définit `DEPLOY_SSH`.
 
 ## Récapitulatif des URLs
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Règles TLS partagées par scripts/check-env-urls.sh (make check-env, make deploy),
-# scripts/init-env.sh (make init) et scripts/legacy/lib.sh (bootstrap). Fichier à sourcer : ne
-# modifie pas les options du shell appelant.
+# scripts/init-env.sh (make init), scripts/bootstrap/ (make bootstrap) et scripts/smoke.sh (make smoke).
+# Fichier à sourcer : ne modifie pas les options du shell appelant.
 
 # Hostname local : localhost ou *.localhost (RFC 6761, résolus vers la boucle locale). Une IP n'est pas
 # un hostname valable : Traefik route par Host() et une IP ne peut pas désigner plusieurs services.
