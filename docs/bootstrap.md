@@ -70,7 +70,7 @@ processus : elle ne sert qu'à la durée du bootstrap.
 | Variable (`envs/<env>.env`) | Rôle | Défaut |
 |---|---|---|
 | `GITLAB_RUNNER_DESCRIPTION` | Description du runner (nom dans `config.toml`) | `devops-platform-runner` |
-| `GITLAB_RUNNER_NETWORK` | Réseau Docker des conteneurs de jobs | `PLATFORM_NETWORK` |
+| `GITLAB_RUNNER_NETWORK` | Réseau Docker dédié des conteneurs de jobs, créé par `make deploy` ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)) | `devops-platform_ci` |
 | `GITLAB_RUNNER_HELPER_IMAGE` | Dépôt de l'image auxiliaire (helper) des jobs, sans tag | vide : image standard de GitLab |
 
 Le runner est enregistré avec l'exécuteur `docker`, l'image par défaut `alpine` (version épinglée
@@ -138,9 +138,8 @@ et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
 
 ## Limites
 
-- **Réseau des jobs** : les jobs clonent par Traefik (ou par le service `gitlab` en `*.localhost`) et
-  joignent SonarQube par `SONAR_HOST_URL`, joignables seulement sur le réseau de la plateforme. Un `GITLAB_RUNNER_NETWORK` différent doit le
-  permettre ; le bootstrap avertit mais ne le vérifie pas.
+- **Réseau des jobs** : il doit avoir été créé par `make deploy` (avec Traefik, son seul autre membre) ;
+  un réseau de la plateforme est refusé ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)).
 - **`--docker-extra-hosts host.docker.internal:host-gateway`** de l'ancien bootstrap n'est plus posé :
   les jobs n'ont pas d'accès dédié à l'hôte.
 - **Verrou contourné** : `make bootstrap-legacy` et un `gitlab-runner register` lancé à la main ne

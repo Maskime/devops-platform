@@ -106,7 +106,8 @@ fichier (certificat d'une CA publique), rien ne change.
   le runner avec `--tls-ca-file` : `config.toml` porte `tls-ca-file`, que le runner utilise pour
   `register`, `verify` et la récupération des jobs.
 - Les jobs reçoivent la CA dans `CI_SERVER_TLS_CA_FILE`, et le helper l'utilise pour cloner par l'URL
-  publique en `https://` (hors hostnames `*.localhost`, clonés par `http://gitlab`).
+  publique en `https://` (hors hostnames `*.localhost`, clonés par l'entrypoint interne de Traefik :
+  [réseau des jobs](gitlab-proxy.md#réseau-des-jobs)).
 - En déploiement distant, seul `ca.pem` est copié sur le serveur ([déploiement](deploiement.md)).
 
 **Ajout, retrait ou changement de CA** : `make deploy ENV=<env>`, puis `make bootstrap ENV=<env>`. Le

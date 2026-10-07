@@ -20,4 +20,5 @@ par défaut**. Sans rétention, le volume `loki_data` croîtrait sans limite.
   `loki -verify-config` (`scripts/check-loki-config.sh`).
 
 L'API de suppression à la demande (`/loki/api/v1/delete`) est désactivée (`deletion_mode: disabled`) :
-Loki n'a pas d'authentification sur le réseau de la plateforme.
+Loki n'a pas d'authentification sur le réseau de la plateforme (injoignable depuis les jobs CI, qui ont
+leur propre réseau).

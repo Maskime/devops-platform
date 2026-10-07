@@ -17,11 +17,12 @@ branches non protégées et des merge requests. Visibles dans **Admin > Paramèt
 | Cas | `SONAR_HOST_URL` | Raison |
 |---|---|---|
 | Cas général | URL publique : `SONARQUBE_EXTERNAL_URL`, sinon `http://<SONARQUBE_HOSTNAME>` | servie par Traefik, joint par son alias réseau ([GitLab derrière le proxy](gitlab-proxy.md#runner-et-jobs-ci)) |
-| `SONARQUBE_HOSTNAME` en `*.localhost` | `http://sonarqube:9000` | libcurl résout tout `*.localhost` vers `127.0.0.1` |
-| `TLS_MODE=custom` avec [CA privée](certificats.md#ca-privée) | `http://sonarqube:9000` | la JVM du scanner n'utilise pas la CA fournie aux jobs (`CI_SERVER_TLS_CA_FILE`) |
+| `SONARQUBE_HOSTNAME` en `*.localhost` | `http://sonarqube.devops-platform.internal:8000` | libcurl résout tout `*.localhost` vers `127.0.0.1` |
+| `TLS_MODE=custom` avec [CA privée](certificats.md#ca-privée) | `http://sonarqube.devops-platform.internal:8000` | la JVM du scanner n'utilise pas la CA fournie aux jobs (`CI_SERVER_TLS_CA_FILE`, #144) |
 
-`http://sonarqube:9000` est le nom du service sur le réseau de la plateforme : le trafic d'analyse ne
-passe alors ni par Traefik ni par TLS. Les liens affichés par SonarQube (décoration des merge requests,
+`http://sonarqube.devops-platform.internal:8000` est un nom interne de Traefik, servi seulement sur le
+réseau des jobs par un entrypoint HTTP non publié ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)) :
+le trafic d'analyse passe alors par Traefik, mais sans TLS. Les liens affichés par SonarQube (décoration des merge requests,
 notifications) restent sur `SONARQUBE_EXTERNAL_URL`.
 
 ## Mise à jour et rotation
@@ -88,10 +89,10 @@ sonarqube:
   tous les projets de l'instance. Le masquage ne cache la valeur que des logs : tout projet peut la lire
   dans un job, puis analyser, donc créer ou écraser, n'importe quel projet SonarQube (#116).
 - **Runners hors plateforme.** Un runner de projet ou de groupe installé ailleurs ne joint pas
-  `http://sonarqube:9000`, ni l'alias Traefik : le projet ou le groupe y surcharge `SONAR_HOST_URL`
+  les noms internes ni les alias de Traefik : le projet ou le groupe y surcharge `SONAR_HOST_URL`
   (une variable de projet ou de groupe prime sur la variable d'instance).
-- **Réseau des jobs.** `SONAR_HOST_URL` n'est joignable que sur le réseau de la plateforme : un
-  `GITLAB_RUNNER_NETWORK` différent doit le permettre ([bootstrap](bootstrap.md#limites)).
+- **Réseau des jobs.** `SONAR_HOST_URL` est joignable sur le réseau des jobs (`GITLAB_RUNNER_NETWORK`)
+  et sur celui de la plateforme ; un conteneur lancé sur un autre réseau ne le joint pas.
 - **Plusieurs postes.** Depuis un poste qui n'a jamais lancé l'étape SonarQube, `make bootstrap`
   récupère le token de l'instance et `SONAR_TOKEN` reste inchangée ; `make bootstrap-gitlab` seul,
   sans copie locale, laisse la variable telle quelle avec un avertissement

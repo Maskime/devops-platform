@@ -9,6 +9,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Isolation réseau des jobs CI : `GITLAB_RUNNER_NETWORK` désigne désormais un réseau **dédié**, créé
+  par Compose (défaut `devops-platform_ci`), et non plus un réseau existant ; une valeur égale à
+  `PLATFORM_NETWORK` (ancien défaut) ou à un autre réseau de la plateforme est refusée par
+  `make check-env` : commenter la ligne. Le prochain `make deploy` recrée Traefik et GitLab (coupure de
+  GitLab de quelques minutes, volumes conservés) ; lancer ensuite `make bootstrap`, qui ré-enregistre le
+  runner sur le nouveau réseau (avant cela, les jobs restent sur le réseau de la plateforme). Si le
+  sous-réseau par défaut du lien Traefik → GitLab (`172.31.254.0/28`) chevauche un réseau de l'hôte,
+  fixer `GITLAB_PROXY_SUBNET` avant le déploiement.
 - Les montages de configuration de Loki, Promtail et Grafana passent en syntaxe longue
   (`create_host_path: false`, source `${PLATFORM_CONFIG_DIR:-../config}`) : ces trois services sont
   recréés au prochain `make deploy` (volumes conservés).
@@ -41,6 +49,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Isolation réseau des jobs CI : les conteneurs de jobs tournent sur un réseau dédié
+  (`GITLAB_RUNNER_NETWORK`) où seul Traefik est joignable (ni bases, ni Loki, ni nginx de GitLab) ; en
+  `*.localhost` et pour SonarQube avec une CA privée, ils passent par l'entrypoint interne de Traefik
+  (`*.devops-platform.internal:8000`). GitLab ne fait plus confiance à `X-Forwarded-For` que depuis le
+  sous-réseau fixé qui le relie à Traefik (`GITLAB_PROXY_SUBNET`), au lieu des plages RFC 1918.
+  `make smoke` vérifie l'isolation depuis un job. Voir `docs/gitlab-proxy.md`.
 - Smoke test `make smoke ENV=<env>` : projet de test `root/devops-platform-smoke` dans GitLab, pipeline
   poussé avec un job simple et un job `sonar-scanner` (variables CI d'instance), vérification du
   pipeline au vert et de l'analyse du commit dans SonarQube ; `NETTOYER=1` supprime les projets de test

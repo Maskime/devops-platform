@@ -57,8 +57,9 @@ Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, en `TLS_MOD
 
 - **Bases de données et services internes.** `sonarqube-db` (PostgreSQL) et Loki ne publient aucun
   port : ils ne sont joignables que depuis le réseau Docker de la plateforme. Le PostgreSQL et le Redis
-  embarqués de GitLab écoutent sur des sockets Unix internes au conteneur. Limite connue : le réseau
-  de la plateforme est partagé avec les jobs CI, qui peuvent donc les atteindre ([#71](https://github.com/Maskime/devops-platform/issues/71)).
+  embarqués de GitLab écoutent sur des sockets Unix internes au conteneur. Les jobs CI
+  tournent sur un réseau dédié où seul Traefik est joignable
+  ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)).
 - **API Docker.** Traefik et Promtail ne montent pas le socket Docker : ils lisent l'API, en lecture
   seule et sur une liste blanche d'endpoints, via le proxy filtrant `socket-proxy`, joignable
   uniquement sur un réseau interne dédié. Détails et limites : [accès à l'API Docker](acces-docker.md).
