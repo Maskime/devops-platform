@@ -25,6 +25,8 @@ services:
       PLATFORM_GITLAB_HOSTNAME: ${GITLAB_HOSTNAME:-gitlab.localhost}
       PLATFORM_GITLAB_EXTERNAL_URL: ${GITLAB_EXTERNAL_URL:-}
       PLATFORM_GITLAB_SSH_PORT: ${GITLAB_SSH_PORT:-2222}
+      # Sous-réseau du lien avec Traefik (réseau gitlab-proxy ci-dessous) : même défaut
+      PLATFORM_GITLAB_PROXY_SUBNET: ${GITLAB_PROXY_SUBNET:-172.31.254.0/28}
       GITLAB_OMNIBUS_CONFIG: |
         # URL publique : GITLAB_EXTERNAL_URL si renseignée, sinon dérivée du hostname et du TLS_MODE
         # (https en letsencrypt et custom, http sinon). Même règle que url_derivee
@@ -52,9 +54,10 @@ services:
           'X-Forwarded-Proto' => URI(plateforme_url).scheme,
           'X-Forwarded-Ssl' => URI(plateforme_url).scheme == 'https' ? 'on' : 'off'
         }
-        # IP réelle des clients, transmise par Traefik dans X-Forwarded-For. Sous-réseau Docker non
-        # fixé : plages privées (limite : #76)
-        plateforme_proxies = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+        # IP réelle des clients, transmise par Traefik dans X-Forwarded-For : crue seulement depuis le
+        # sous-réseau fixé du réseau gitlab-proxy, qui ne relie que Traefik et GitLab. Une requête
+        # directe depuis le réseau de la plateforme garde son IP source (en-tête ignoré).
+        plateforme_proxies = [ENV.fetch('PLATFORM_GITLAB_PROXY_SUBNET')]
         nginx['real_ip_trusted_addresses'] = plateforme_proxies
         nginx['real_ip_header'] = 'X-Forwarded-For'
         nginx['real_ip_recursive'] = 'on'
@@ -78,6 +81,13 @@ services:
       traefik.enable: "true"
       traefik.http.routers.gitlab.rule: Host(`${GITLAB_HOSTNAME:-gitlab.localhost}`)
       traefik.http.services.gitlab.loadbalancer.server.port: "80"
+      # Routeur interne des jobs CI (entrypoint `interne` de compose/proxy.yml, sans TLS) : clone des
+      # jobs quand le hostname public est en *.localhost (docs/gitlab-proxy.md)
+      traefik.http.routers.gitlab-interne.rule: Host(`gitlab.devops-platform.internal`)
+      traefik.http.routers.gitlab-interne.entrypoints: interne
+      traefik.http.routers.gitlab-interne.service: gitlab
+      # Traefik joint GitLab par le réseau gitlab-proxy (sous-réseau de confiance), pas par platform
+      traefik.docker.network: devops-platform_gitlab-proxy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost/-/health"]
       interval: 30s
@@ -88,8 +98,11 @@ services:
       - gitlab_config:/etc/gitlab
       - gitlab_logs:/var/log/gitlab
       - gitlab_data:/var/opt/gitlab
+    # platform : accès sortant et SSH publié ; gitlab-proxy : requêtes HTTP de Traefik. Pas sur le
+    # réseau des jobs CI : un job ne joint pas gitlab:80.
     networks:
       - platform
+      - gitlab-proxy
 
   # ---------------------------------------------------------------------------
   # GitLab Runner — exécuteur CI/CD
@@ -120,6 +133,13 @@ networks:
   platform:
     name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
+  gitlab-proxy:
+    name: devops-platform_gitlab-proxy
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${GITLAB_PROXY_SUBNET:-172.31.254.0/28}
 
 # Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
 # le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml, le filtre de

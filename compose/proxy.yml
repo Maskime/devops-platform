@@ -16,10 +16,13 @@ services:
   # source (fichier, arguments ou variables) et l'overlay du mode TLS (compose/tls/<mode>.yml, fusionné
   # par l'include de compose.yml) complète `environment`, `ports` et `volumes` ; `command` serait
   # remplacé en entier. Entrypoint web (:80, HTTP) commun à tous les modes.
-  # Routeurs : aucun label `entrypoints` sur les services ; ils suivent les entrypoints par défaut
-  # (tous sauf `traefik` ; en HTTPS, l'overlay marque `websecure` asDefault).
-  # Alias réseau : les hostnames publics désignent Traefik dans le réseau de la plateforme (runner,
-  # jobs CI) ; le runner et les jobs dépendent donc de Traefik pour joindre GitLab.
+  # Routeurs publics : aucun label `entrypoints` ; ils suivent l'entrypoint par défaut (`web` en none,
+  # `websecure` en HTTPS, marqué asDefault par l'overlay du mode TLS). Seuls les routeurs internes des
+  # jobs CI (gitlab-interne, sonarqube-interne) déclarent `entrypoints: interne`.
+  # Alias réseau : les hostnames publics désignent Traefik dans le réseau de la plateforme (runner) et
+  # dans le réseau des jobs CI ; le runner et les jobs dépendent donc de Traefik pour joindre GitLab.
+  # Réseau des jobs : seul Traefik y est rattaché ; un job ne joint aucun autre service de la
+  # plateforme (bases, Loki, nginx de GitLab) : docs/gitlab-proxy.md, « Runner et jobs CI ».
   # ---------------------------------------------------------------------------
   traefik:
     image: traefik:${TRAEFIK_VERSION:-v3.7.13}
@@ -31,6 +34,12 @@ services:
       # Supprime les en-têtes alias (X_Forwarded_For…) : nginx (GitLab) les lirait comme les en-têtes
       # posés par Traefik, ce qui permettrait à un client de les usurper
       TRAEFIK_ENTRYPOINTS_WEB_HTTP_ALIASHEADERSSTRATEGY: delete
+      # Entrypoint interne des jobs CI (HTTP, non publié, sans redirection quel que soit le TLS_MODE) :
+      # noms *.devops-platform.internal, quand l'URL publique est inutilisable depuis un job (hostname
+      # *.localhost, CA privée inconnue du scanner SonarQube). Port repris par scripts/bootstrap/gitlab.sh
+      # (URL_INTERNE_*) : à garder identiques.
+      TRAEFIK_ENTRYPOINTS_INTERNE_ADDRESS: ":8000"
+      TRAEFIK_ENTRYPOINTS_INTERNE_HTTP_ALIASHEADERSSTRATEGY: delete
       # API Docker lue via le proxy de socket filtrant (compose/socket-proxy.yml) : Traefik ne monte
       # pas le socket, une compromission ne donne pas la main sur l'hôte
       TRAEFIK_PROVIDERS_DOCKER_ENDPOINT: tcp://socket-proxy:2375
@@ -38,7 +47,7 @@ services:
       TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
       # Réseau par lequel joindre les services (requis dès qu'un conteneur en a plusieurs)
       TRAEFIK_PROVIDERS_DOCKER_NETWORK: ${PLATFORM_NETWORK:-devops-platform}
-      # Ignore les conteneurs hors projet (jobs CI lancés sur le même réseau). Nom de projet en dur :
+      # Ignore les conteneurs hors projet (jobs CI, conteneurs tiers). Nom de projet en dur :
       # le changer impose de modifier aussi `name:` dans compose.yml et compose/projet-autorise/.
       TRAEFIK_PROVIDERS_DOCKER_CONSTRAINTS: Label(`com.docker.compose.project`,`devops-platform`)
       # Sonde de santé sur l'entrypoint interne par défaut `traefik` (:8080, non publié) : ne pas
@@ -62,12 +71,12 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      # platform : seul réseau à passerelle (socket-proxy est interne), donc porteur des ports publiés
-      # et de l'accès sortant (ACME). Pas de gw_priority : il exigerait Compose 2.33 / Engine 28,
-      # au-delà des versions minimales de scripts/host-prereqs.sh.
+      # platform et ci : réseaux à passerelle (socket-proxy et gitlab-proxy sont internes), porteurs des
+      # ports publiés et de l'accès sortant (ACME). Pas de gw_priority : il exigerait Compose 2.33 /
+      # Engine 28, au-delà des versions minimales de scripts/host-prereqs.sh (#145).
       platform:
-        # Hostnames publics résolus vers Traefik dans le réseau de la plateforme : le runner, les jobs CI
-        # et les services joignent les URLs publiques par le même chemin (et le même certificat) que les
+        # Hostnames publics résolus vers Traefik dans le réseau de la plateforme : le runner et les
+        # services joignent les URLs publiques par le même chemin (et le même certificat) que les
         # clients externes, sans dépendre du DNS ni du hairpin NAT de l'hôte. Défauts identiques aux
         # labels traefik.http.routers.<service>.rule des modules.
         aliases:
@@ -76,6 +85,20 @@ services:
           - ${GRAFANA_HOSTNAME:-grafana.localhost}
           - ${PORTAINER_HOSTNAME:-portainer.localhost}
           - ${PLANTUML_HOSTNAME:-plantuml.localhost}
+      # Réseau des jobs CI : mêmes hostnames publics, plus les noms internes servis par l'entrypoint
+      # `interne` (labels traefik.http.routers.<service>-interne.rule des modules, URL_INTERNE_* de
+      # scripts/bootstrap/gitlab.sh : à garder identiques)
+      ci:
+        aliases:
+          - ${GITLAB_HOSTNAME:-gitlab.localhost}
+          - ${SONARQUBE_HOSTNAME:-sonarqube.localhost}
+          - ${GRAFANA_HOSTNAME:-grafana.localhost}
+          - ${PORTAINER_HOSTNAME:-portainer.localhost}
+          - ${PLANTUML_HOSTNAME:-plantuml.localhost}
+          - gitlab.devops-platform.internal
+          - sonarqube.devops-platform.internal
+      # Lien vers le nginx de GitLab, seul sous-réseau auquel GitLab fait confiance pour X-Forwarded-For
+      gitlab-proxy: {}
       # Accès à l'API Docker filtrée (compose/socket-proxy.yml)
       socket-proxy: {}
 
@@ -88,3 +111,17 @@ networks:
     name: devops-platform_socket-proxy
     driver: bridge
     internal: true
+  # Réseau des conteneurs de jobs CI (GITLAB_RUNNER_NETWORK, enregistré par make bootstrap), créé ici
+  # car Traefik est son seul membre permanent. Non interne : accès sortant des jobs.
+  ci:
+    name: ${GITLAB_RUNNER_NETWORK:-devops-platform_ci}
+    driver: bridge
+  # Lien Traefik → GitLab, sous-réseau fixé (confiance X-Forwarded-For de compose/gitlab.yml).
+  # Définition strictement identique dans compose/gitlab.yml.
+  gitlab-proxy:
+    name: devops-platform_gitlab-proxy
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${GITLAB_PROXY_SUBNET:-172.31.254.0/28}

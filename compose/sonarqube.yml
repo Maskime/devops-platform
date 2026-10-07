@@ -56,6 +56,11 @@ services:
       traefik.enable: "true"
       traefik.http.routers.sonarqube.rule: Host(`${SONARQUBE_HOSTNAME:-sonarqube.localhost}`)
       traefik.http.services.sonarqube.loadbalancer.server.port: "9000"
+      # Routeur interne des jobs CI (entrypoint `interne` de compose/proxy.yml, sans TLS) : SONAR_HOST_URL
+      # des jobs en hostname *.localhost ou avec une CA privée (docs/analyse-sonarqube.md)
+      traefik.http.routers.sonarqube-interne.rule: Host(`sonarqube.devops-platform.internal`)
+      traefik.http.routers.sonarqube-interne.entrypoints: interne
+      traefik.http.routers.sonarqube-interne.service: sonarqube
     ulimits:
       nofile:
         soft: 65536
