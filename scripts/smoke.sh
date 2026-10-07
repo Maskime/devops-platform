@@ -227,7 +227,7 @@ for cible in gitlab:80 sonarqube-db:5432 loki:3100; do
   cibles+="${cible%:*} ${cible#*:} ${ips% }"$'\n'
 done
 echo "    Cibles injoignables attendues depuis un job :"
-sed 's/^/      /' <<<"${cibles%$'\n'}"
+while IFS= read -r ligne; do echo "      $ligne"; done <<<"${cibles%$'\n'}"
 # Fichiers « chemin=contenu en base64 » en arguments (contenu versionné, non secret ; IP internes pour
 # ISOLATION_FICHIER). Commit des seuls fichiers absents ou différents ; tout identique : nouveau
 # pipeline sur la branche.
