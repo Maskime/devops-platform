@@ -14,8 +14,9 @@ simple:
 isolation-reseau:
   stage: test
   script:
-    # Contrôle positif, avec le même outil : Traefik joignable par l'URL de clone (sans afficher le
-    # jeton qu'elle contient). Sans lui, un nc inutilisable ferait passer les contrôles ci-dessous.
+    # Contrôle positif, avec le même outil : Traefik joignable par l'hôte de CI_REPOSITORY_URL (URL
+    # publique, alias de Traefik sur le réseau des jobs ; jeton de l'URL non affiché). Sans lui, un nc
+    # inutilisable ferait passer les contrôles ci-dessous.
     - |
       cible="${CI_REPOSITORY_URL#*://}"; cible="${cible#*@}"; cible="${cible%%/*}"
       case "$cible" in

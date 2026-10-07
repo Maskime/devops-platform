@@ -32,8 +32,8 @@ non satisfaite, avec la cause et la commande à lancer.
 Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
 
 - **`simple`** : image par défaut du runner ; valide l'exécution d'un job et le clone du dépôt ;
-- **`isolation-reseau`** : image par défaut ; vérifie d'abord qu'il joint Traefik par l'URL de clone
-  (contrôle positif de l'outil, `nc -z`), puis que `gitlab:80`, `sonarqube-db:5432` et `loki:3100` sont
+- **`isolation-reseau`** : image par défaut ; vérifie d'abord qu'il joint Traefik par l'hôte de
+  `CI_REPOSITORY_URL` (contrôle positif de l'outil, `nc -z`), puis que `gitlab:80`, `sonarqube-db:5432` et `loki:3100` sont
   **injoignables**, par nom et par leurs IP sur les réseaux de la plateforme
   ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)). Les IP sont relevées par `make smoke` et
   poussées dans le fichier `isolation-cibles.txt` du projet de test ; Loki, facultatif, n'est testé
