@@ -203,6 +203,19 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Modifié
 
+- **Verrous d'instance étendus** (`scripts/lib/verrou.sh`, détenteur `flock` factorisé) : `make bootstrap`
+  tient le verrou du conteneur `gitlab-runner` pendant toutes ses étapes, l'étape SonarQube prend en
+  plus un verrou dans le conteneur `sonarqube` (mot de passe admin, rotation du token), et `make smoke`
+  prend le verrou d'instance : deux smoke tests, ou un smoke test et un bootstrap, ne s'exécutent plus
+  en même temps sur une instance. Un battement toutes les 30 s garde active la connexion qui tient le
+  verrou (contexte SSH d'une instance distante). Documentation : `docs/bootstrap.md`.
+- `make smoke` valide `SONAR_TOKEN` auprès de SonarQube avant de lancer le pipeline (valeur jamais
+  affichée) : un token révoqué est signalé tout de suite.
+- Format du token d'analyse défini une seule fois (`MOTIF_TOKEN_SONAR`, `scripts/lib/sonarqube.sh`) :
+  `scripts/bootstrap/outputs.sh` exige désormais 8 caractères au moins, comme le bootstrap.
+- Un `make bootstrap` d'une version antérieure, refusé parce qu'un smoke test tient le verrou, annonce
+  « un autre make bootstrap » ; le détenteur affiché est exact.
+
 - **Token d'analyse SonarQube récupérable depuis tout poste** : référence dans le volume `sonarqube_data`
   de l'instance (`600`), `outputs/<env>.sonarqube-token` devient une copie locale rafraîchie à chaque
   bootstrap. Relancé depuis un autre poste, le bootstrap réutilise le token au lieu de le révoquer

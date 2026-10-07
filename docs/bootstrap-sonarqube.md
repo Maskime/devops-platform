@@ -84,9 +84,9 @@ Depuis un autre poste, le garde-fou ci-dessus s'applique tant que cette migratio
   ([montée de version](montee-de-version.md)) : le token serait remplacé au bootstrap suivant.
 - **Validation.** `api/authentication/validate` accepte tout token valide : un autre token déposé à la
   main dans le stockage serait conservé. Un token d'analyse globale ne permet pas de vérifier son nom.
-- **Exécutions simultanées.** L'étape SonarQube n'est pas verrouillée (#122) : deux rotations
-  simultanées peuvent laisser un token révoqué dans le stockage ; un `make bootstrap` relancé seul
-  remet l'instance en ordre.
+- **Exécutions simultanées.** L'étape est verrouillée dans le conteneur `sonarqube`
+  (`/opt/sonarqube/data/devops-platform/.bootstrap.lock`) une fois SonarQube prêt : une seconde
+  exécution s'arrête sans rien modifier ([exécutions simultanées](bootstrap.md#exécutions-simultanées)).
 - **Trace.** `bash -x scripts/bootstrap/sonarqube.sh` afficherait le token : ne pas tracer ce script.
 
 ## Mot de passe admin inconnu

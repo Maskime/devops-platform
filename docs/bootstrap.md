@@ -115,26 +115,43 @@ erreur si l'image est introuvable, simple avertissement si le runner est déjà 
 
 ## Exécutions simultanées
 
-Un verrou garantit qu'une seule étape GitLab de `make bootstrap` modifie une instance à la fois : sans
-lui, deux exécutions concurrentes (deux opérateurs, ou une relance pendant une exécution) révoqueraient le jeton
-l'une de l'autre et supprimeraient le runner l'une de l'autre, ou en laisseraient deux enregistrés.
+Des verrous garantissent qu'une seule opération modifie une instance à la fois. Sans eux, deux
+exécutions concurrentes (deux opérateurs, une relance pendant une exécution, un smoke test pendant un
+bootstrap) révoqueraient le jeton ou le token d'analyse l'une de l'autre, supprimeraient le runner
+l'une de l'autre, ou en laisseraient deux enregistrés.
+
+| Verrou | Fichier | Pris par |
+|---|---|---|
+| Instance | `/etc/gitlab-runner/.bootstrap.lock` du conteneur `gitlab-runner` (volume du runner) | `make bootstrap` (toutes les étapes), `make bootstrap-sonarqube`, `make bootstrap-gitlab`, `make smoke` |
+| Étape SonarQube | `/opt/sonarqube/data/devops-platform/.bootstrap.lock` du conteneur `sonarqube` (volume `sonarqube_data`) | étape SonarQube, de la fin de l'attente de SonarQube jusqu'à la fin (mot de passe admin, token d'analyse) |
 
 | Propriété | Valeur |
 |---|---|
-| Fichier | `/etc/gitlab-runner/.bootstrap.lock` du conteneur `gitlab-runner` (volume du runner) |
-| Mécanisme | `flock`, tenu par un `docker compose exec` qui dure toute l'étape GitLab |
-| Portée | étape GitLab, de la vérification des services jusqu'à la fin : jeton d'administration, variables CI et runner (l'étape SonarQube, lancée avant, n'est pas couverte) |
-| Second bootstrap | attend 5 s au plus, puis s'arrête sans modifier GitLab, avec le dernier détenteur connu (utilisateur@poste, pid, date) |
+| Mécanisme | `flock`, tenu par un `docker compose exec` qui dure toute l'opération (`scripts/lib/verrou.sh`) |
+| Seconde opération | attend 5 s au plus, puis s'arrête sans rien modifier, avec le dernier détenteur connu (commande, utilisateur@poste, pid, date) |
+| Battement | une ligne vide envoyée au détenteur toutes les 30 s : la connexion qui tient le verrou n'est jamais inactive |
 
-Le fichier vit sur l'hôte de l'instance : le verrou vaut pour tous les postes, que l'instance soit
-locale ou distante (`DEPLOY_SSH`). Il est libéré dès que le bootstrap se termine, y compris en échec,
-sur Ctrl-C ou si le poste est tué : la commande qui le tient perd son entrée standard et s'arrête, le
-noyau libère le verrou. Il n'y a jamais de déverrouillage manuel à faire ; le fichier, qui reste dans
-le volume, est sans effet hors d'un bootstrap.
+Le verrou d'instance est pris par `make bootstrap` avant la première étape et tenu jusqu'à la fin : un
+smoke test ne peut s'intercaler ni pendant une rotation du token d'analyse, ni entre cette rotation et
+la mise à jour de `SONAR_TOKEN` par l'étape GitLab. Si `gitlab-runner` est arrêté, il n'est pas pris
+(l'étape GitLab s'arrête alors d'elle-même) ; le verrou de l'étape SonarQube protège toujours le token.
+Le nom `.bootstrap.lock` est conservé pour rester compatible avec un bootstrap d'une version antérieure.
 
-Un redémarrage du conteneur `gitlab-runner` (`make deploy` concurrent) ou une coupure de la connexion
-SSH pendant le bootstrap fait perdre le verrou : le bootstrap le détecte avant de modifier les runners
-et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
+Les fichiers vivent sur l'hôte de l'instance : les verrous valent pour tous les postes, que l'instance
+soit locale ou distante (`DEPLOY_SSH`). Ils sont libérés dès que l'opération se termine, y compris en
+échec, sur Ctrl-C ou si le poste est tué : la commande qui tient le verrou perd son entrée standard et
+s'arrête, le noyau libère le verrou (au plus 5 s après un `kill -9`, le temps que le battement
+s'arrête). Il n'y a jamais de déverrouillage manuel à faire ; les fichiers, qui restent dans les
+volumes, sont sans effet hors d'une opération.
+
+En distant, le battement fait passer du trafic sur la connexion SSH du contexte Docker pendant les
+longues attentes (GitLab, pipeline du smoke test) : un pare-feu, un NAT ou le `ClientAliveInterval` de
+sshd ne la coupent pas pour inactivité. `ServerAliveInterval` dans `~/.ssh/config` (lu par la
+connexion du contexte) détecte en plus une connexion morte côté poste.
+
+Un redémarrage du conteneur qui tient le verrou (`make deploy` concurrent) ou une coupure de la
+connexion SSH pendant l'opération fait perdre le verrou : l'opération le détecte avant ses
+modifications et en fin d'exécution, et s'arrête. La relancer.
 
 ## Limites
 
@@ -145,16 +162,13 @@ et en fin d'exécution, et s'arrête. Relancer `make bootstrap`.
   les jobs n'ont pas d'accès dédié à l'hôte.
 - **Verrou contourné** : `make bootstrap-legacy` et un `gitlab-runner register` lancé à la main ne
   prennent pas le verrou (#107) ; lancés pendant un bootstrap, leur runner peut être supprimé.
-- **Connexion SSH inactive** : en distant, la connexion qui tient le verrou reste sans trafic pendant
-  l'attente de GitLab ; un pare-feu ou un NAT qui la coupe fait échouer le bootstrap, à relancer (#108).
+- **Ancienne version** : un `make bootstrap` d'une version antérieure, refusé parce qu'un smoke test
+  tient le verrou, annonce à tort « un autre make bootstrap » ; le détenteur affiché est exact.
 - **Image auxiliaire** : le dépôt doit être lisible anonymement, le runner n'a pas d'identifiants de
   registre. Le pré-téléchargement du bootstrap utilise ceux du poste (contexte Docker) : il peut réussir
   là où le runner échouera. Le runner tire le helper à chaque job (`pull_policy` `always`) : avec Docker
   Hub, chaque job consomme le quota de téléchargements anonymes de l'adresse IP du serveur ; un miroir
   (ou cache de proxy) l'évite.
-- **Étape SonarQube non verrouillée** : deux `make bootstrap` en parallèle sur la même instance
-  peuvent régénérer deux fois le token d'analyse SonarQube, le verrou ne couvrant que l'étape
-  GitLab (#122). Relancer `make bootstrap` seul remet l'instance en ordre.
 - **Plusieurs postes** : le token d'analyse SonarQube est stocké sur l'instance et récupéré depuis tout
   poste ; le fichier de sortie `outputs/<env>.env` n'existe que sur le poste qui l'a généré
   ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)).

@@ -20,9 +20,9 @@ non satisfaite, avec la cause et la commande à lancer.
 
 | Ordre | Vérification | Échec typique |
 |---|---|---|
-| 1 | Services `gitlab`, `gitlab-runner` et `sonarqube` présents et démarrés, GitLab prêt, SonarQube `UP`, mot de passe admin SonarQube accepté | instance non déployée ou non bootstrapée |
+| 1 | Services `gitlab`, `gitlab-runner` et `sonarqube` présents et démarrés, verrou de l'instance pris, GitLab prêt, SonarQube `UP`, mot de passe admin SonarQube accepté | instance non déployée ou non bootstrapée |
 | 2 | Jeton d'accès personnel root éphémère créé | — |
-| 3 | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN` présentes, au moins un runner d'instance en ligne | `make bootstrap` non lancé |
+| 3 | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN` présentes, `SONAR_TOKEN` accepté par SonarQube, au moins un runner d'instance en ligne | `make bootstrap` non lancé, token révoqué |
 | 4 | Projet GitLab `root/devops-platform-smoke` et projet SonarQube `devops-platform-smoke` créés, ou réutilisés | — |
 | 5 | Fichiers de `scripts/smoke/projet/` poussés sur `main` (un commit) | — |
 | 6 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs |
@@ -80,15 +80,22 @@ Comme celui du bootstrap ([jeton d'administration](bootstrap.md#jeton-dadministr
 n'est jamais affichée, écrite sur disque ni passée en argument de processus. Son nom diffère : un smoke
 test ne révoque pas le jeton d'un bootstrap en cours.
 
+## Exécutions simultanées
+
+Le smoke test prend le verrou d'instance de `make bootstrap`
+([exécutions simultanées](bootstrap.md#exécutions-simultanées)) et le tient jusqu'à la fin, révocation
+de son jeton comprise. Un second `make smoke`, ou un `make bootstrap`, lancé pendant ce temps sur la
+même instance s'arrête après 5 s sans rien modifier, en affichant le détenteur ; un smoke test lancé
+pendant un bootstrap fait de même.
+
+`SONAR_TOKEN` est validé auprès de SonarQube (`api/authentication/validate`) avant le pipeline : un
+token révoqué, par exemple par une rotation depuis un autre poste, est signalé tout de suite au lieu de
+faire échouer le job `sonar-scanner`. La valeur est lue par l'API GitLab dans une variable, jamais
+affichée ni passée en argument de processus. Une variable « masquée et cachée » (valeur illisible par
+l'API) n'est pas validée : le smoke test l'indique et continue.
+
 ## Limites
 
-- **Exécutions simultanées** : le smoke test ne prend pas le verrou du bootstrap
-  ([#120](https://github.com/Maskime/devops-platform/issues/120)). Deux `make smoke` simultanés sur la
-  même instance se révoquent leur jeton ; un `make bootstrap` concurrent peut ré-enregistrer le runner
-  pendant le pipeline.
-- **Token d'analyse** : `SONAR_TOKEN` est seulement vérifié présent ; un token révoqué se révèle dans
-  le journal du job `sonar-scanner`
-  ([#121](https://github.com/Maskime/devops-platform/issues/121)). Le corriger par `make bootstrap`.
 - **Service SonarQube absent** de l'instance : le smoke test refuse de s'exécuter.
 - **Réseau** : le pipeline télécharge l'image du scanner (Docker Hub) et, sauf
   `GITLAB_RUNNER_HELPER_IMAGE`, l'image auxiliaire du runner (`registry.gitlab.com`) : un serveur sans
