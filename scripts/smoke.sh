@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test d'une instance bootstrapée (make bootstrap) : crée (ou réutilise) le projet de test
 # root/devops-platform-smoke dans GitLab, y pousse scripts/smoke/projet/ (.gitlab-ci.yml avec un job
-# simple et un job sonar-scanner), attend que le pipeline passe au vert et que l'analyse du commit
+# simple, un job d'isolation réseau et un job sonar-scanner) et la liste des cibles injoignables depuis
+# un job (ISOLATION_FICHIER), attend que le pipeline passe au vert et que l'analyse du commit
 # apparaisse dans SonarQube. NETTOYER=1 : projets de test GitLab et SonarQube supprimés après un succès.
 # Lancé par `make smoke ENV=<env>` (scripts/instance.sh smoke), qui positionne la cible Docker (contexte
 # SSH d'une instance distante). Documentation : docs/smoke-test.md.
@@ -30,6 +31,9 @@ readonly PROJET=devops-platform-smoke
 readonly SONAR_CLE=devops-platform-smoke
 readonly BRANCHE=main
 readonly SOURCES=scripts/smoke/projet
+# Cibles qu'un job ne doit pas joindre (« service port ip… » par ligne), générées ici avec les IP
+# courantes et lues par le job isolation-reseau de scripts/smoke/projet/.gitlab-ci.yml
+readonly ISOLATION_FICHIER=isolation-cibles.txt
 # Nom du PAT root du smoke test, distinct de celui du bootstrap (qui révoque les jetons de son nom)
 readonly PAT_NOM=devops-platform-smoke
 # Premier pipeline : téléchargement de l'image du scanner compris
@@ -207,13 +211,31 @@ fi
 # --- 5. Envoi du .gitlab-ci.yml -------------------------------------------------------------------
 
 etape "Envoi de $SOURCES/ sur la branche $BRANCHE"
-# Fichiers « chemin=contenu en base64 » en arguments (contenu versionné, non secret). Commit des seuls
-# fichiers absents ou différents ; tout identique : nouveau pipeline sur la branche.
-fichiers=()
+# Cibles de l'isolation réseau : nom de service (sans point, qu'aucun domaine de recherche ne complète)
+# et IP sur les réseaux de la plateforme, pour vérifier aussi l'absence de route, pas seulement de nom.
+# Loki est facultatif (brique observability désactivable) : nom seul s'il ne tourne pas.
+ips_service() { # <service> : IP du conteneur sur chacun de ses réseaux
+  local id
+  id="$(dc ps -q --status running "$1")"
+  [[ -n "$id" ]] || return 0
+  docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$id"
+}
+cibles=""
+for cible in gitlab:80 sonarqube-db:5432 loki:3100; do
+  ips="$(ips_service "${cible%:*}")"
+  [[ -n "$ips" || "$cible" == loki:* ]] || erreur "IP du service ${cible%:*} introuvable"
+  cibles+="${cible%:*} ${cible#*:} ${ips% }"$'\n'
+done
+echo "    Cibles injoignables attendues depuis un job :"
+sed 's/^/      /' <<<"${cibles%$'\n'}"
+# Fichiers « chemin=contenu en base64 » en arguments (contenu versionné, non secret ; IP internes pour
+# ISOLATION_FICHIER). Commit des seuls fichiers absents ou différents ; tout identique : nouveau
+# pipeline sur la branche.
+fichiers=("$ISOLATION_FICHIER=$(printf '%s' "$cibles" | base64 | tr -d '\n')")
 while IFS= read -r f; do
   fichiers+=("$f=$(base64 < "$SOURCES/$f" | tr -d '\n')")
 done < <(cd "$SOURCES" && find . -type f | sed 's#^\./##' | LC_ALL=C sort)
-((${#fichiers[@]})) || erreur "aucun fichier dans $SOURCES"
+((${#fichiers[@]} > 1)) || erreur "aucun fichier dans $SOURCES"
 # shellcheck disable=SC2016 # code Ruby
 code_envoi='
 id, branche = ARGV[0], ARGV[1]
