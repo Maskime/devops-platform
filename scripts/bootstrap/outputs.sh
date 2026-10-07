@@ -17,11 +17,12 @@ cd "$ROOT"
 source "$ROOT/scripts/lib/env.sh"
 # shellcheck source=scripts/lib/tls.sh
 source "$ROOT/scripts/lib/tls.sh"
+# shellcheck source=scripts/lib/sonarqube.sh
+source "$ROOT/scripts/lib/sonarqube.sh" # MOTIF_TOKEN_SONAR (définitions seules, aucun appel Docker)
 
 # Valeurs écrites sans guillemets (lues à l'identique par Compose, `source`, `docker --env-file` et
 # l'import de variables CI) : seuls des caractères sans signification pour ces lecteurs sont admis
 readonly MOTIF_URL='^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$'
-readonly MOTIF_JETON_SONAR='^[A-Za-z0-9_]+$'
 readonly CA_CUSTOM=config/certs/ca/ca.pem
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
@@ -95,7 +96,7 @@ if present sonarqube; then
     lignes+=("# Token d'analyse absent de ce poste ($token_fichier) ; make bootstrap-sonarqube ENV=$env le récupère.")
     echo "Attention : $token_fichier absent : SONAR_TOKEN non écrit dans $sortie." >&2
   else
-    [[ "$token" =~ $MOTIF_JETON_SONAR ]] || erreur "contenu inattendu dans $token_fichier (token non exporté)"
+    [[ "$token" =~ $MOTIF_TOKEN_SONAR ]] || erreur "contenu inattendu dans $token_fichier (token non exporté)"
     if [[ "$etapes" != *" sonarqube "* ]]; then
       lignes+=("# Token d'analyse non revérifié lors de ce bootstrap (make bootstrap-sonarqube ENV=$env le contrôle).")
     fi

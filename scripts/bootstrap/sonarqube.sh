@@ -12,7 +12,8 @@
 # bootstrap, qui positionne une seule fois la cible Docker (contexte SSH d'une instance distante) : les
 # commandes appellent ensuite docker compose directement. L'API est appelée depuis le conteneur
 # sonarqube, identifiants transmis à curl par l'entrée standard (jamais en argument).
-# Documentation : docs/bootstrap-sonarqube.md.
+# Une seule étape SonarQube à la fois par instance : verrou flock dans le volume sonarqube_data
+# (scripts/lib/verrou.sh), pris une fois SonarQube prêt. Documentation : docs/bootstrap-sonarqube.md.
 #
 # Usage : scripts/bootstrap/sonarqube.sh envs/<env>.env
 set -euo pipefail
@@ -23,6 +24,8 @@ cd "$ROOT"
 source "$ROOT/scripts/lib/env.sh"
 # shellcheck source=scripts/lib/sonarqube.sh
 source "$ROOT/scripts/lib/sonarqube.sh"
+# shellcheck source=scripts/lib/verrou.sh
+source "$ROOT/scripts/lib/verrou.sh"
 
 # Même seuil que scripts/host-prereqs.sh
 readonly MAX_MAP_COUNT_MIN=524288
@@ -34,8 +37,9 @@ readonly PLUGIN_CLE=communityBranchPlugin
 readonly STOCKAGE_DIR=/opt/sonarqube/data/devops-platform
 readonly STOCKAGE_FICHIER=analyse-token
 readonly STOCKAGE="$STOCKAGE_DIR/$STOCKAGE_FICHIER"
-# Format d'un token (règle de masquage des variables CI GitLab, comme scripts/bootstrap/gitlab.sh)
-readonly MOTIF_JETON='^[A-Za-z0-9_]{8,}$'
+# Verrou de l'étape (scripts/lib/verrou.sh), à côté du stockage : sur l'hôte de l'instance, quel que
+# soit le poste
+readonly FICHIER_VERROU="$STOCKAGE_DIR/.bootstrap.lock"
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
@@ -47,6 +51,7 @@ token_fichier="outputs/$env.sonarqube-token"
 [[ "${ROTATION:-}" =~ ^1?$ ]] || erreur "ROTATION invalide : $ROTATION (1 ou vide)"
 
 dc() { docker compose --env-file "$env_file" "$@"; }
+trap verrou_liberer EXIT
 
 # Garde-fou : lancé hors `make bootstrap`, une instance distante serait cherchée sur le moteur local
 # (même nom de projet compose) et une éventuelle instance locale reconfigurée à sa place
@@ -92,6 +97,11 @@ for ((i = 1; ; i++)); do
   echo "    ($i/$ATTENTE_ESSAIS) statut : ${statut:-injoignable}, nouvel essai dans $ATTENTE_PAUSE s..."
   sleep "$ATTENTE_PAUSE"
 done
+
+# Une seule étape SonarQube à la fois par instance (mot de passe admin, rotation du token) : sans
+# verrou, deux exécutions concurrentes pourraient laisser dans le stockage un token déjà révoqué
+verrou_prendre sonarqube "$FICHIER_VERROU" "make bootstrap ENV=$env"
+echo "    Verrou de l'étape pris ($FICHIER_VERROU, conteneur sonarqube)."
 
 # --- 3. Mot de passe admin -----------------------------------------------------------------------
 echo "==> Compte admin..."
@@ -172,7 +182,7 @@ ecrire_local() { # <token>
 
 # Token utilisable : format attendu, token du nom présent dans SonarQube et accepté par SonarQube
 token_utilisable() { # <token>
-  [[ "$1" =~ $MOTIF_JETON ]] && ((token_existe)) && identite_valide "$1:"
+  [[ "$1" =~ $MOTIF_TOKEN_SONAR ]] && ((token_existe)) && identite_valide "$1:"
 }
 
 token_stocke="$(lire_stockage)"
@@ -188,6 +198,7 @@ elif [[ -n "$token_stocke" ]] && token_utilisable "$token_stocke"; then
 elif [[ -n "$token_local" ]] && token_utilisable "$token_local"; then
   # Instance bootstrappée avant le stockage de l'instance : le token de ce poste devient la référence
   token="$token_local"
+  verrou_tenu
   ecrire_stockage "$token" || erreur "écriture du token dans le stockage de l'instance ($STOCKAGE) impossible"
   echo "    Token de $token_fichier valide : recopié dans le stockage de l'instance ($STOCKAGE)."
 elif ((token_existe)) && [[ -z "$token_stocke" && -z "$token_local" ]]; then
@@ -206,6 +217,7 @@ else
 fi
 
 if [[ -z "$token" ]]; then
+  verrou_tenu
   if ((token_existe)); then
     sonar_api POST /api/user_tokens/revoke "$admin" "name=$TOKEN_NOM" || erreur "révocation du token impossible"
     [[ "$CODE" == 204 ]] || erreur "HTTP $CODE inattendu à la révocation du token : $CORPS"
@@ -215,10 +227,11 @@ if [[ -z "$token" ]]; then
   [[ "$CODE" == 200 ]] || erreur "HTTP $CODE inattendu à la génération du token : $CORPS"
   token="$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' <<<"$CORPS")"
   CORPS=''
-  [[ "$token" =~ $MOTIF_JETON ]] || erreur "réponse de génération du token sans token reconnaissable"
+  [[ "$token" =~ $MOTIF_TOKEN_SONAR ]] || erreur "réponse de génération du token sans token reconnaissable"
 
   # Stockage de l'instance d'abord (la référence), puis copie locale. Un échec arrête l'étape avant la
   # régénération de outputs/<env>.env ; la relance révoque et remplace le token du même nom.
+  verrou_tenu
   if ! ecrire_stockage "$token"; then
     echo "Erreur : token généré mais non écrit dans le stockage de l'instance ($STOCKAGE)." >&2
     echo "  outputs/$env.env n'est pas régénéré ; relancer make bootstrap ENV=$env." >&2

@@ -20,6 +20,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 # shellcheck source=scripts/lib/env.sh
 source "$ROOT/scripts/lib/env.sh"
+# shellcheck source=scripts/lib/verrou.sh
+source "$ROOT/scripts/lib/verrou.sh"
+# Verrou hérité par scripts/bootstrap/gitlab.sh : jamais repris du shell de l'opérateur
+unset VERROU_PID_HERITE
 
 # Copie et nettoyage des fichiers de config sur l'hôte cible (dernière stable, tag figé par son digest)
 readonly BUSYBOX_IMAGE="busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
@@ -36,6 +40,9 @@ readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
 readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning)
 readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.pem)
 readonly CA_CUSTOM=certs/ca/ca.pem
+# Verrou de l'instance, dans le volume du runner (même fichier dans scripts/bootstrap/gitlab.sh et
+# scripts/smoke.sh)
+readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
@@ -316,6 +323,15 @@ case "$action" in
     afficher_cible
     if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
     services=" $("${compose[@]}" config --services | paste -sd ' ' -) "
+    # Verrou de l'instance tenu pendant toutes les étapes : un make smoke ou un autre make bootstrap ne
+    # peut s'intercaler ni pendant la rotation du token SonarQube, ni entre elle et sa pose dans GitLab.
+    # Runner arrêté : pas de verrou ici, l'étape GitLab s'arrête d'elle-même (service arrêté).
+    if [[ "$services" == *" gitlab-runner "* && -n "$("${compose[@]}" ps -q --status running gitlab-runner)" ]]; then
+      trap verrou_liberer EXIT
+      verrou_prendre gitlab-runner "$FICHIER_VERROU" "make bootstrap ENV=$env"
+      echo "Verrou de l'instance pris ($FICHIER_VERROU, conteneur gitlab-runner)."
+      export VERROU_PID_HERITE="$verrou_pid"
+    fi
     # Fichier de sortie outputs/<env>.env régénéré après chaque étape réussie : une étape en échec
     # après une rotation du token SonarQube ne laisse pas un token révoqué (docs/sortie-instance.md)
     export SORTIE_SERVICES="$services" SORTIE_ETAPES=""

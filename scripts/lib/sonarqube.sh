@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# Appels à l'API SonarQube depuis le conteneur sonarqube, partagés par scripts/bootstrap/sonarqube.sh
-# (make bootstrap) et scripts/smoke.sh (make smoke). Fichier à sourcer : ne modifie pas les options du
-# shell appelant.
+# Appels à l'API SonarQube depuis le conteneur sonarqube et format du token d'analyse, partagés par
+# scripts/bootstrap/sonarqube.sh, scripts/bootstrap/gitlab.sh (make bootstrap), scripts/smoke.sh
+# (make smoke) et scripts/bootstrap/outputs.sh. Fichier à sourcer : ne modifie pas les options du shell
+# appelant, ne fait que des définitions (aucun appel Docker au chargement).
 #
 # Contrat avec l'appelant : dc <arguments docker compose…>, docker compose de l'instance (--env-file).
 # Identifiants transmis à curl par l'entrée standard (fichier de configuration -K -), jamais en argument.
 
 readonly SONAR_API=http://localhost:9000
+# Format d'un token d'analyse : règle de masquage des variables CI GitLab (8 caractères au moins,
+# alphabet Base64), à laquelle les tokens SonarQube se tiennent. Garantit aussi l'absence de " et \
+# (configuration curl) et de tout caractère à protéger dans outputs/<env>.env.
+# shellcheck disable=SC2034 # utilisée par les scripts qui sourcent ce fichier
+readonly MOTIF_TOKEN_SONAR='^[A-Za-z0-9_]{8,}$' # motif, pas une valeur (check-secrets: ignore)
 
 # Chaîne entre guillemets pour un fichier de config curl (\ et " échappés)
 cfg() { local v="${1//\\/\\\\}"; printf '"%s"' "${v//\"/\\\"}"; }

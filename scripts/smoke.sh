@@ -11,6 +11,8 @@
 # Aucun outil requis sur le poste : appels à l'API GitLab depuis le conteneur gitlab
 # (scripts/lib/gitlab.sh), à l'API SonarQube depuis le conteneur sonarqube (scripts/lib/sonarqube.sh).
 # Jeton root éphémère (PAT_NOM), révoqué en fin de script ; aucun secret en argument de processus.
+# Verrou de l'instance partagé avec make bootstrap (scripts/lib/verrou.sh) : ni deux smoke tests, ni un
+# smoke test et un bootstrap en même temps sur une instance.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +25,8 @@ source "$ROOT/scripts/lib/tls.sh"
 source "$ROOT/scripts/lib/gitlab.sh"
 # shellcheck source=scripts/lib/sonarqube.sh
 source "$ROOT/scripts/lib/sonarqube.sh"
+# shellcheck source=scripts/lib/verrou.sh
+source "$ROOT/scripts/lib/verrou.sh"
 
 # Projet de test : chemin GitLab (espace de noms root) et clé SonarQube, la seconde reprise dans
 # scripts/smoke/projet/.gitlab-ci.yml
@@ -32,6 +36,8 @@ readonly BRANCHE=main
 readonly SOURCES=scripts/smoke/projet
 # Nom du PAT root du smoke test, distinct de celui du bootstrap (qui révoque les jetons de son nom)
 readonly PAT_NOM=devops-platform-smoke
+# Verrou de make bootstrap (scripts/instance.sh, scripts/bootstrap/gitlab.sh) : volume du runner
+readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
 # Premier pipeline : téléchargement de l'image du scanner compris
 readonly ATTENTE_GITLAB=900 ATTENTE_SONAR=600 ATTENTE_PIPELINE=900 ATTENTE_ANALYSE=300
 readonly ATTENTE_SUPPRESSION=300 ATTENTE_PENDING=180
@@ -72,7 +78,8 @@ sonar_url="${sonar_url%/}"
 
 # --- Fin du script --------------------------------------------------------------------------------
 
-# Jeton root révoqué par lui-même (succès ou échec) ; projet de test conservé en cas d'échec
+# Jeton root révoqué par lui-même (succès ou échec), puis verrou libéré ; projet de test conservé en
+# cas d'échec
 projet_id="" projet_url="" pipeline_url=""
 # shellcheck disable=SC2016 # code Ruby
 readonly CODE_REVOCATION='
@@ -97,6 +104,7 @@ terminer() {
       echo "  SonarQube : $sonar_url/dashboard?id=$SONAR_CLE"
     } >&2
   fi
+  verrou_liberer
   exit "$code"
 }
 trap terminer EXIT
@@ -111,6 +119,8 @@ for service in gitlab gitlab-runner sonarqube; do
   [[ -n "$(dc ps -q --status running "$service")" ]] \
     || erreur "service $service arrêté : démarrer l'instance (make deploy ENV=$env)"
 done
+verrou_prendre gitlab-runner "$FICHIER_VERROU" "make smoke ENV=$env"
+echo "    Verrou de l'instance pris ($FICHIER_VERROU, conteneur gitlab-runner)."
 
 gitlab_pret() { dc exec -T gitlab curl -sf -o /dev/null http://localhost/-/readiness 2> /dev/null; }
 attendre "GitLab" "$ATTENTE_GITLAB" gitlab_pret \
@@ -155,9 +165,34 @@ runners="$(sed -n 's/^RUNNERS=//p' <<<"$sortie")"
 ((${runners:-0} > 0)) || erreur "aucun runner d'instance en ligne (make bootstrap ENV=$env, docs/bootstrap.md)"
 echo "    $runners runner(s) d'instance en ligne."
 
+# SONAR_TOKEN validé auprès de SonarQube avant le pipeline : un token révoqué (rotation depuis un autre
+# poste) ne se révélerait qu'après plusieurs minutes, dans le journal du job sonar-scanner. La valeur
+# n'est jamais affichée : une seule ligne VALEUR=… (ou CACHEE : variable « masked and hidden », valeur
+# illisible par l'API), lue dans une variable ; erreurs sans corps de réponse (api, jamais api!).
+# shellcheck disable=SC2016 # code Ruby
+code_sonar_token='
+code, v = api("get", "/admin/ci/variables/SONAR_TOKEN")
+abort("Lecture de la variable d instance (SONAR_TOKEN) : HTTP #{code}") unless code == 200 && v.is_a?(Hash)
+puts(v["value"].nil? ? "CACHEE" : "VALEUR=#{v["value"]}")
+'
+ligne_token="$(gitlab_api "$code_sonar_token")" || erreur "lecture de la variable CI d'instance SONAR_TOKEN impossible (voir ci-dessus)"
+if [[ "$ligne_token" == CACHEE ]]; then
+  echo "Attention : SONAR_TOKEN cachée (masked and hidden) : valeur illisible, non validée avant le pipeline." >&2
+elif [[ "$ligne_token" != VALEUR=* || ! "${ligne_token#VALEUR=}" =~ $MOTIF_TOKEN_SONAR ]]; then
+  unset ligne_token
+  erreur "SONAR_TOKEN ne contient pas un token SonarQube : make bootstrap ENV=$env la remet à jour (docs/analyse-sonarqube.md)"
+elif ! identite_valide "${ligne_token#VALEUR=}:"; then
+  unset ligne_token
+  erreur "SONAR_TOKEN refusé par SonarQube (token révoqué : rotation depuis un autre poste ?) : make bootstrap ENV=$env la remet à jour (docs/analyse-sonarqube.md)"
+else
+  echo "    SONAR_TOKEN acceptée par SonarQube (valeur non affichée)."
+fi
+unset ligne_token
+
 # --- 4. Projets de test ---------------------------------------------------------------------------
 
 etape "Projet de test root/$PROJET (GitLab) et $SONAR_CLE (SonarQube)"
+verrou_tenu
 # Projet réutilisé d'une exécution à l'autre, réglages rétablis : sans Auto DevOps (un seul pipeline,
 # le nôtre), runners d'instance autorisés, privé. Un projet en attente de suppression est restauré.
 # shellcheck disable=SC2016 # code Ruby
@@ -329,6 +364,8 @@ if [[ -n "${statut_final:-}" ]]; then
   fi
   erreur "pipeline $pipeline : $statut_final ($pipeline_url)"
 fi
+
+verrou_tenu
 
 # --- 7. Analyse SonarQube -------------------------------------------------------------------------
 
