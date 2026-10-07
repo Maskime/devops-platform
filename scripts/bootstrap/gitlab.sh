@@ -121,6 +121,45 @@ trap verrou_liberer EXIT
 
 # --- Fonctions ------------------------------------------------------------------------------------
 
+# Version du binaire gitlab-runner en cours d'exécution (X.Y.Z), vide si illisible
+version_runner_deployee() {
+  dc exec -T gitlab-runner gitlab-runner --version 2> /dev/null | awk '$1 == "Version:" { print $2; exit }' || true
+}
+
+# Version du runner déployé comparée à l'image attendue par la configuration (GITLAB_RUNNER_VERSION ou
+# défaut de compose/gitlab.yml) : un écart signale une version modifiée sans make deploy. Simple
+# avertissement, jamais un échec.
+controler_version_runner() {
+  local attendue deployee image_attendue image_deployee id
+  # Image du service dans la configuration résolue (config --images liste aussi ses dépendances)
+  # shellcheck disable=SC2016 # programme awk
+  image_attendue="$(dc config gitlab-runner 2> /dev/null | awk '
+    /^services:/ { s = 1; next }
+    /^[^ ]/ { s = 0 }
+    s && /^  [^ ]/ { r = ($1 == "gitlab-runner:") }
+    s && r && /^    image:/ { print $2; exit }')" || image_attendue=""
+  deployee="$(version_runner_deployee)"
+  if [[ "$image_attendue" =~ :v?([0-9]+\.[0-9]+\.[0-9]+)$ && -n "$deployee" ]]; then
+    attendue="${BASH_REMATCH[1]}"
+    [[ "$attendue" == "$deployee" ]] && return 0
+  else
+    # Tag non numéroté (ou version illisible) : comparaison des images, préfixes de Docker Hub retirés
+    id="$(dc ps -q gitlab-runner | head -n1)"
+    image_deployee="$(docker inspect --format '{{.Config.Image}}' "$id" 2> /dev/null)" || image_deployee=""
+    if [[ -z "$image_attendue" || -z "$image_deployee" ]]; then
+      echo "Attention : version du runner déployé non comparable à la configuration (GITLAB_RUNNER_VERSION)." >&2
+      return 0
+    fi
+    image_attendue="${image_attendue#docker.io/}" image_deployee="${image_deployee#docker.io/}"
+    [[ "${image_attendue#library/}" == "${image_deployee#library/}" ]] && return 0
+    attendue="$image_attendue" deployee="$image_deployee"
+  fi
+  {
+    echo "Attention : gitlab-runner déployé en $deployee, configuration attendue $attendue (GITLAB_RUNNER_VERSION) :"
+    echo "  make deploy ENV=$env pour l'appliquer (docs/montee-de-version.md)."
+  } >&2
+}
+
 gitlab_pret() { dc exec -T gitlab curl -sf -o /dev/null http://localhost/-/readiness 2>/dev/null; }
 
 # URL publique joignable depuis le runner (alias Traefik, certificat) : 200 ou 401 sur /api/v4/version.
@@ -200,6 +239,7 @@ for service in gitlab gitlab-runner; do
   [[ -n "$(dc ps -q --status running "$service")" ]] \
     || erreur "service $service arrêté : démarrer l'instance (make deploy ENV=$env)"
 done
+controler_version_runner
 if [[ -n "${VERROU_PID_HERITE:-}" ]]; then
   verrou_heriter "$VERROU_PID_HERITE" gitlab-runner "$FICHIER_VERROU" "make bootstrap ENV=$env"
   echo "    Verrou de l'instance tenu par make bootstrap ($FICHIER_VERROU, conteneur gitlab-runner)."
@@ -286,10 +326,79 @@ definir_variable() { # <clé> <masquée 0|1> <valeur>
   esac
 }
 
+# Retrait d'une variable d'instance gérée par la plateforme (description = marqueur) ; une variable du
+# même nom posée à la main est conservée. Seuls des marqueurs sont affichés, jamais la réponse du GET.
+# shellcheck disable=SC2016 # code Ruby
+code_retrait='
+cle, marqueur = ARGV[0], ARGV[1]
+code, actuel = api("get", "/admin/ci/variables/#{cle}")
+case code
+when 404 then puts "ABSENTE"
+when 200
+  if actuel["description"] == marqueur
+    c, _ = api("delete", "/admin/ci/variables/#{cle}")
+    abort("Suppression de la variable #{cle} : HTTP #{c}") unless [204, 404].include?(c)
+    puts "RETIREE"
+  else
+    puts "CONSERVEE"
+  end
+else
+  abort("Lecture de la variable #{cle} : HTTP #{code}")
+end
+'
+retirer_variable() { # <clé> ; état dans etat_retrait
+  local sortie
+  sortie="$(gitlab_api "$code_retrait" "$1" "$MARQUEUR")" || sortie=""
+  case "$sortie" in
+    ABSENTE) etat_retrait="absente (service sonarqube absent)" ;;
+    RETIREE) etat_retrait="retirée (service sonarqube absent)"; echo "    $1 retirée (gérée par la plateforme)." ;;
+    CONSERVEE)
+      etat_retrait="conservée (service sonarqube absent, variable non gérée par la plateforme)"
+      echo "Attention : variable CI d'instance $1 posée hors de la plateforme : conservée, à retirer à la main si besoin." >&2 ;;
+    *) erreur "variable CI d'instance $1 : retrait impossible (voir ci-dessus)" ;;
+  esac
+}
+
+# Ancien token d'analyse du compte admin (bootstrap antérieur au compte d'analyse) : révoqué une fois
+# SONAR_TOKEN posée, et seulement si elle porte le token du compte d'analyse (propriétaire enregistré dans
+# le stockage de l'instance, scripts/bootstrap/sonarqube.sh, et copie locale identique au stockage)
+revoquer_ancien_token_admin() {
+  local admin_mdp token_stocke compte_stocke
+  admin_mdp="$(env_valeur_fichier "$env_file" SONARQUBE_ADMIN_PASSWORD)"
+  if [[ -z "$admin_mdp" ]] || ! sonar_api GET /api/user_tokens/search "admin:$admin_mdp" login=admin \
+    || [[ "$CODE" != 200 ]]; then
+    echo "Attention : tokens du compte admin SonarQube illisibles (SONARQUBE_ADMIN_PASSWORD) : ancien token d'analyse non contrôlé." >&2
+    return 0
+  fi
+  [[ "$CORPS" == *"\"name\":\"$SONAR_TOKEN_NOM\""* ]] || return 0
+  token_stocke="$(sonar_stockage_lire "$SONAR_STOCKAGE")" || token_stocke=""
+  compte_stocke="$(sonar_stockage_lire "$SONAR_STOCKAGE_COMPTE")" || compte_stocke=""
+  if [[ "$compte_stocke" != "$SONAR_ANALYSE_LOGIN" || -z "$token_stocke" || "$token_stocke" != "$token_sonar" ]]; then
+    {
+      echo "Attention : ancien token $SONAR_TOKEN_NOM du compte admin encore actif, et SONAR_TOKEN ne porte pas"
+      echo "  le token du compte d'analyse : make bootstrap ENV=$env (étape SonarQube comprise) le révoque."
+    } >&2
+    return 0
+  fi
+  verrou_tenu
+  sonar_api POST /api/user_tokens/revoke "admin:$admin_mdp" login=admin "name=$SONAR_TOKEN_NOM" \
+    || erreur "révocation de l'ancien token du compte admin impossible (service sonarqube injoignable)"
+  [[ "$CODE" == 204 ]] || erreur "HTTP $CODE inattendu à la révocation de l'ancien token du compte admin : $CORPS"
+  echo "    Ancien token $SONAR_TOKEN_NOM du compte admin révoqué (remplacé par celui du compte d'analyse)."
+}
+
 etat_sonar_url="non posée" etat_sonar_token="non posée"
 if [[ " $(dc config --services | paste -sd ' ' -) " != *" sonarqube "* ]]; then
-  echo "    Service sonarqube absent de l'instance : étape ignorée."
-  etat_sonar_url="non posée (service sonarqube absent)" etat_sonar_token="$etat_sonar_url"
+  # Brique retirée : variables gérées par la plateforme retirées, et elles seules
+  echo "    Service sonarqube absent de l'instance : retrait des variables gérées par la plateforme."
+  verrou_tenu
+  retirer_variable SONAR_HOST_URL
+  etat_sonar_url="$etat_retrait"
+  retirer_variable SONAR_TOKEN
+  etat_sonar_token="$etat_retrait"
+  if [[ -f "$sonar_token_fichier" ]]; then
+    echo "    Copie locale $sonar_token_fichier conservée sur ce poste (secret : la supprimer si inutile)."
+  fi
 else
   verrou_tenu
   # URL des jobs : publique (alias réseau de Traefik), sauf hostname *.localhost (que libcurl résout vers
@@ -331,6 +440,7 @@ else
   else
     definir_variable SONAR_TOKEN 1 "$token_sonar"
     etat_sonar_token="masquée, token de $sonar_token_fichier (valeur non affichée)"
+    revoquer_ancien_token_admin
   fi
   unset token_sonar
 fi
@@ -353,7 +463,7 @@ done < <(blocs_runner)
 # Image auxiliaire tirée sur la cible (même moteur Docker que le runner) : erreur claire avant tout
 # ré-enregistrement ; simple avertissement si un runner conforme existe déjà (relance idempotente)
 if [[ -n "$helper_image" ]]; then
-  version_runner="$(dc exec -T gitlab-runner gitlab-runner --version | awk '$1 == "Version:" { print $2; exit }')"
+  version_runner="$(version_runner_deployee)"
   [[ "$version_runner" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     || erreur "version du runner illisible (« $version_runner ») : image de développement sans helper publié ?"
   image_helper_courante="$helper_depot:v$version_runner"

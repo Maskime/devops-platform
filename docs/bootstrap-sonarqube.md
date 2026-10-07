@@ -12,7 +12,8 @@ place.
 | Attente | `api/system/status` à `UP`, 10 minutes au plus | — |
 | Compte admin | Mot de passe par défaut `admin` remplacé par `SONARQUBE_ADMIN_PASSWORD` | rien à faire si déjà positionné |
 | Plugin | `communityBranchPlugin` installé, sinon arrêt | — |
-| Token d'analyse | Token `devops-platform-analyse` stocké sur l'instance, copié dans `outputs/<env>.sonarqube-token` | conservé tant qu'il reste valide, depuis tout poste |
+| Compte d'analyse | Compte technique `devops-platform-analyse`, permissions globales *Execute Analysis* et *Create Projects* seulement | rien à faire si déjà en place |
+| Token d'analyse | Token `devops-platform-analyse` du compte d'analyse, stocké sur l'instance, copié dans `outputs/<env>.sonarqube-token` | conservé tant qu'il reste valide, depuis tout poste |
 
 ## Fonctionnement
 
@@ -34,23 +35,40 @@ place.
 - **Statut `DB_MIGRATION_NEEDED`.** Après une montée de version, SonarQube attend la migration de sa
   base : le bootstrap s'arrête et renvoie à la [Montée de version](montee-de-version.md).
 
+## Compte d'analyse
+
+Le token exposé aux jobs CI appartient à un compte technique dédié, `devops-platform-analyse`, et non
+au compte `admin`.
+
+- **Création.** Compte local créé par `api/users/create` s'il n'existe pas (un compte désactivé du même
+  login est réactivé). Son mot de passe est aléatoire et n'est conservé nulle part : personne ne s'y
+  connecte.
+- **Permissions.** Permissions globales directes ramenées à *Execute Analysis* (`scan`) et *Create
+  Projects* (`provisioning`) : celles qui manquent sont ajoutées, toute autre est retirée. Les
+  permissions globales des groupes `sonar-users` (dont le compte est membre, comme tout compte) et
+  `Anyone` sont contrôlées : une permission autre que ces deux-là est signalée, pas modifiée.
+- **Génération du token.** SonarQube refuse de générer un token d'analyse globale pour un autre compte :
+  le bootstrap pose un mot de passe aléatoire sur le compte, fait générer le token par le compte
+  lui-même, puis remplace aussitôt ce mot de passe par un autre aléa. Mots de passe et token ne passent
+  que par l'entrée standard de `curl`.
+
 ## Token d'analyse
 
-Token de type `GLOBAL_ANALYSIS_TOKEN` du compte `admin` : il permet d'analyser n'importe quel projet,
-sans aucun droit d'administration. Sans date d'expiration.
+Token de type `GLOBAL_ANALYSIS_TOKEN` du compte d'analyse : il permet d'analyser n'importe quel projet,
+et rien d'autre (ni administration, ni lecture par l'API). Sans date d'expiration.
 
 SonarQube ne restitue jamais un token : le bootstrap le conserve à deux endroits.
 
 | Emplacement | Rôle | Permissions |
 |---|---|---|
-| `/opt/sonarqube/data/devops-platform/analyse-token`, conteneur `sonarqube` (volume `sonarqube_data`, sur l'hôte de l'instance) | Référence, lisible depuis tout poste qui pilote l'instance | répertoire `700`, fichier `600` (utilisateur `sonarqube`) |
+| `/opt/sonarqube/data/devops-platform/analyse-token`, conteneur `sonarqube` (volume `sonarqube_data`, sur l'hôte de l'instance) | Référence, lisible depuis tout poste qui pilote l'instance ; `analyse-token.compte` à côté enregistre le compte propriétaire | répertoire `700`, fichiers `600` (utilisateur `sonarqube`) |
 | `outputs/<env>.sonarqube-token` sur le poste | Copie locale, rafraîchie à chaque passage | `outputs/` en `700`, fichier `600`, non versionné |
 
 - **Accès.** Lecture et écriture par `docker compose exec -T sonarqube`, avec la cible de `make
   bootstrap` : même mécanisme pour une instance locale et distante (`DEPLOY_SSH`). Le token passe par
   l'entrée standard, jamais en argument ni dans les journaux.
 - **Relance.** Le token du stockage de l'instance est conservé s'il est encore valide et toujours
-  présent dans SonarQube ; la copie locale est alors mise à jour si elle diffère. Depuis un autre poste,
+  présent pour le compte d'analyse ; la copie locale est alors mise à jour si elle diffère. Depuis un autre poste,
   le bootstrap récupère donc le même token : variable CI et consommateurs restent valides.
 - **Remplacement.** Token du stockage invalide (révoqué à la main, base restaurée) ou absent de
   SonarQube (instance réinstallée) : le token du même nom est révoqué et remplacé, écrit dans le
@@ -64,17 +82,21 @@ SonarQube ne restitue jamais un token : le bootstrap le conserve à deux endroit
   variable CI garde l'ancien token jusqu'au prochain `make bootstrap-gitlab`. Tout autre utilisateur du
   token (projets consommateurs) est à mettre à jour ; les autres postes récupèrent le nouveau token à
   leur prochain bootstrap. Supprimer la copie locale ne provoque plus de rotation.
-- **Garde-fou.** Token `devops-platform-analyse` présent dans SonarQube, mais ni dans le stockage de
-  l'instance ni dans la copie locale : le bootstrap refuse de le révoquer (il a été généré depuis un
-  autre poste, avant le stockage de l'instance). Voir la migration ci-dessous ; si la copie est
-  perdue, `ROTATION=1`.
 
 ### Migration d'une instance existante
 
-Une instance bootstrappée avant le stockage de l'instance n'a son token que dans
-`outputs/<env>.sonarqube-token`, sur un seul poste. Lancer d'abord `make bootstrap-sonarqube ENV=<env>`
-depuis ce poste : le token y est validé puis recopié dans le stockage de l'instance, sans rotation.
-Depuis un autre poste, le garde-fou ci-dessus s'applique tant que cette migration n'est pas faite.
+Une instance bootstrappée avant le compte d'analyse a un token `devops-platform-analyse` du compte
+`admin`. Le premier `make bootstrap ENV=<env>` qui suit :
+
+1. crée le compte d'analyse et lui génère un nouveau token (étape SonarQube) ; tant que l'ancien token
+   `admin` existe, seul un token dont le stockage enregistre le compte propriétaire est conservé ;
+2. pose ce token dans `SONAR_TOKEN`, puis révoque l'ancien token du compte `admin` (étape GitLab).
+   L'étape GitLab ne révoque que si `SONAR_TOKEN` porte bien le token du stockage de l'instance, de
+   propriétaire le compte d'analyse ; sinon elle le signale.
+
+Les projets consommateurs qui utilisaient l'ancien token (`outputs/<env>.env` d'une version antérieure)
+sont à reconfigurer. Avec `make bootstrap-sonarqube` seul, l'ancien token reste actif, et `SONAR_TOKEN`
+inchangée, jusqu'au prochain `make bootstrap` ou `make bootstrap-gitlab`.
 
 ### Limites
 
@@ -83,11 +105,18 @@ Depuis un autre poste, le garde-fou ci-dessus s'applique tant que cette migratio
   root, comme pour la base). Ne jamais supprimer ce volume pour reconstruire les index
   ([montée de version](montee-de-version.md)) : le token serait remplacé au bootstrap suivant.
 - **Validation.** `api/authentication/validate` accepte tout token valide : un autre token déposé à la
-  main dans le stockage serait conservé. Un token d'analyse globale ne permet pas de vérifier son nom.
+  main dans le stockage serait conservé. Un token d'analyse globale ne permet de vérifier ni son nom ni
+  son propriétaire : le fichier `analyse-token.compte` est déclaratif.
+- **Projets créés par analyse.** Le modèle de permissions par défaut de SonarQube donne au créateur
+  d'un projet (*Project Creators*) l'administration de ce projet : le compte d'analyse administre les
+  projets que crée leur première analyse. Le token, d'analyse seulement, ne permet pas d'en user.
+- **Groupes.** Les permissions héritées des groupes `sonar-users` et `Anyone` sont signalées, pas
+  retirées : elles relèvent de la configuration de l'opérateur.
 - **Exécutions simultanées.** L'étape est verrouillée dans le conteneur `sonarqube`
   (`/opt/sonarqube/data/devops-platform/.bootstrap.lock`) une fois SonarQube prêt : une seconde
   exécution s'arrête sans rien modifier ([exécutions simultanées](bootstrap.md#exécutions-simultanées)).
-- **Trace.** `bash -x scripts/bootstrap/sonarqube.sh` afficherait le token : ne pas tracer ce script.
+- **Trace.** `bash -x scripts/bootstrap/sonarqube.sh` afficherait le token et les mots de passe : ne
+  pas tracer ce script (ni `scripts/bootstrap/gitlab.sh`).
 
 ## Mot de passe admin inconnu
 

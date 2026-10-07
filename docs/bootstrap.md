@@ -14,7 +14,7 @@ indépendamment du DNS et du TLS du poste.
 
 | Ordre | Étape | Script | Lancée seule par |
 |---|---|---|---|
-| 1 | SonarQube : `vm.max_map_count`, compte admin, plugin, token d'analyse ([détails](bootstrap-sonarqube.md)) | `scripts/bootstrap/sonarqube.sh` | `make bootstrap-sonarqube` |
+| 1 | SonarQube : `vm.max_map_count`, compte admin, plugin, compte et token d'analyse ([détails](bootstrap-sonarqube.md)) | `scripts/bootstrap/sonarqube.sh` | `make bootstrap-sonarqube` |
 | 2 | GitLab : jeton d'administration, variables CI SonarQube, runner d'instance (ci-dessous) | `scripts/bootstrap/gitlab.sh` | `make bootstrap-gitlab` |
 
 SonarQube passe en premier : son token d'analyse est posé en variable CI d'instance par l'étape
@@ -40,13 +40,17 @@ Lancé directement, un script d'étape refuse une instance distante.
 1. **Attente de GitLab** : services `gitlab` et `gitlab-runner` démarrés, verrou de l'instance pris,
    puis GitLab prêt
    (`/-/readiness`, 15 minutes au plus), puis URL publique joignable depuis le runner, par Traefik
-   (5 minutes au plus ; un certificat refusé ou un routage absent s'y signale). En `TLS_MODE=custom`,
+   (5 minutes au plus ; un certificat refusé ou un routage absent s'y signale). Un avertissement
+   signale un runner déployé dans une autre version que celle de la configuration
+   (`GITLAB_RUNNER_VERSION` modifiée sans `make deploy`). En `TLS_MODE=custom`,
    le certificat y est vérifié avec la CA privée si elle est fournie
    ([CA privée](certificats.md#ca-privée)).
 2. **Jeton d'accès personnel d'administration** : voir ci-dessous.
 3. **Variables CI d'instance** `SONAR_HOST_URL` et `SONAR_TOKEN` (masquée), créées ou mises à jour,
-   token validé auprès de SonarQube avant écriture : voir [Analyse SonarQube depuis la
-   CI](analyse-sonarqube.md). Ignorée si le service `sonarqube` est absent de l'instance.
+   token validé auprès de SonarQube avant écriture, puis révocation de l'ancien token d'analyse du
+   compte `admin` : voir [Analyse SonarQube depuis la CI](analyse-sonarqube.md). Service `sonarqube`
+   absent de l'instance : ces deux variables sont retirées si elles sont gérées par la plateforme, et
+   elles seules.
 4. **Runner d'instance** : voir ci-dessous. Le bootstrap attend enfin que le runner soit en ligne.
 
 Le récapitulatif final affiche l'id du runner, son réseau, l'URL, l'expiration du jeton et l'état des
@@ -123,7 +127,7 @@ l'une de l'autre, ou en laisseraient deux enregistrés.
 | Verrou | Fichier | Pris par |
 |---|---|---|
 | Instance | `/etc/gitlab-runner/.bootstrap.lock` du conteneur `gitlab-runner` (volume du runner) | `make bootstrap` (toutes les étapes), `make bootstrap-sonarqube`, `make bootstrap-gitlab`, `make smoke` |
-| Étape SonarQube | `/opt/sonarqube/data/devops-platform/.bootstrap.lock` du conteneur `sonarqube` (volume `sonarqube_data`) | étape SonarQube, de la fin de l'attente de SonarQube jusqu'à la fin (mot de passe admin, token d'analyse) |
+| Étape SonarQube | `/opt/sonarqube/data/devops-platform/.bootstrap.lock` du conteneur `sonarqube` (volume `sonarqube_data`) | étape SonarQube, de la fin de l'attente de SonarQube jusqu'à la fin (mot de passe admin, compte et token d'analyse) |
 
 | Propriété | Valeur |
 |---|---|

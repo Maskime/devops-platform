@@ -14,6 +14,24 @@ readonly SONAR_API=http://localhost:9000
 # shellcheck disable=SC2034 # utilisée par les scripts qui sourcent ce fichier
 readonly MOTIF_TOKEN_SONAR='^[A-Za-z0-9_]{8,}$' # motif, pas une valeur (check-secrets: ignore)
 
+# Compte technique d'analyse (login) et nom de son token d'analyse (des noms, pas des valeurs). Le token
+# du même nom porté autrefois par le compte admin est l'ancien token d'analyse, révoqué par l'étape
+# GitLab une fois SONAR_TOKEN mise à jour (docs/bootstrap-sonarqube.md).
+# shellcheck disable=SC2034 # utilisées par les scripts qui sourcent ce fichier
+readonly SONAR_ANALYSE_LOGIN=devops-platform-analyse SONAR_TOKEN_NOM=devops-platform-analyse # noms (check-secrets: ignore)
+# Stockage du token sur l'instance, dans le conteneur sonarqube (volume sonarqube_data) : token et
+# login de son compte propriétaire (fichier .compte)
+readonly SONAR_STOCKAGE_DIR=/opt/sonarqube/data/devops-platform
+# shellcheck disable=SC2034 # utilisées par les scripts qui sourcent ce fichier
+readonly SONAR_STOCKAGE="$SONAR_STOCKAGE_DIR/analyse-token" SONAR_STOCKAGE_COMPTE="$SONAR_STOCKAGE_DIR/analyse-token.compte"
+
+# Contenu d'un fichier du stockage de l'instance : vide si le fichier n'existe pas, retour non nul s'il
+# est illisible ou si le service est injoignable (à ne pas confondre avec un fichier absent)
+sonar_stockage_lire() { # <chemin>
+  # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+  dc exec -T sonarqube sh -c '[ -e "$1" ] || exit 0; cat "$1"' sh "$1" </dev/null 2>/dev/null
+}
+
 # Chaîne entre guillemets pour un fichier de config curl (\ et " échappés)
 cfg() { local v="${1//\\/\\\\}"; printf '"%s"' "${v//\"/\\\"}"; }
 

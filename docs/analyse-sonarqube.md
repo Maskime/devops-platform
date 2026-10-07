@@ -35,14 +35,20 @@ relance sur une instance à jour ne les modifie pas. Elle passe avant l'enregist
   il est validé auprès de SonarQube : un token absent, illisible ou refusé (copie périmée) laisse
   `SONAR_TOKEN` telle quelle, avec un avertissement, pour ne pas remplacer un token valide par un token
   révoqué.
+- **Ancien token du compte `admin`.** Une fois `SONAR_TOKEN` posée avec le token du compte d'analyse,
+  l'étape GitLab révoque le token `devops-platform-analyse` que portait le compte `admin` avant le
+  compte d'analyse ([compte d'analyse](bootstrap-sonarqube.md#compte-danalyse)).
 - **Rotation.** `make bootstrap ENV=<env> ROTATION=1` : l'étape SonarQube révoque et remplace le token,
   l'étape GitLab met `SONAR_TOKEN` à jour. Avec
   `make bootstrap-sonarqube` seul, les pipelines utilisent l'ancien token, révoqué, jusqu'au prochain
   `make bootstrap-gitlab`.
 - **Changement de hostname ou de `TLS_MODE`.** `make deploy` puis `make bootstrap` : `SONAR_HOST_URL`
   suit.
-- **Brique SonarQube absente** (service `sonarqube` retiré de l'instance) : l'étape est ignorée, les
-  variables existantes ne sont pas retirées (#117).
+- **Brique SonarQube absente** (service `sonarqube` retiré de l'instance) : l'étape retire
+  `SONAR_HOST_URL` et `SONAR_TOKEN` si elles sont gérées par la plateforme (description « Géré par
+  devops-platform (make bootstrap) ») ; une variable du même nom posée à la main est conservée, avec un
+  avertissement. La copie locale `outputs/<env>.sonarqube-token` reste sur le poste : la supprimer si
+  elle n'a plus d'usage.
 
 ## Exemple de job
 
@@ -85,9 +91,11 @@ sonarqube:
 
 ## Limites
 
-- **Token partagé.** `SONAR_TOKEN` est un token d'analyse globale du compte `admin`, disponible dans
-  tous les projets de l'instance. Le masquage ne cache la valeur que des logs : tout projet peut la lire
-  dans un job, puis analyser, donc créer ou écraser, n'importe quel projet SonarQube (#116).
+- **Token partagé.** `SONAR_TOKEN` est un token d'analyse globale du compte technique
+  `devops-platform-analyse` (permissions *Execute Analysis* et *Create Projects* seulement), disponible
+  dans tous les projets de l'instance. Le masquage ne cache la valeur que des logs : tout projet peut la
+  lire dans un job, puis analyser, donc créer ou écraser, n'importe quel projet SonarQube. Le token ne
+  donne aucun accès d'administration ni de lecture par l'API.
 - **Runners hors plateforme.** Un runner de projet ou de groupe installé ailleurs ne joint pas
   les noms internes ni les alias de Traefik : le projet ou le groupe y surcharge `SONAR_HOST_URL`
   (une variable de projet ou de groupe prime sur la variable d'instance).

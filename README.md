@@ -18,7 +18,7 @@ profil de dimensionnement, versions et secrets.
 ```bash
 make init ENV=local                   # génère envs/local.env (Entrée pour garder chaque défaut)
 make deploy ENV=local                 # démarre tous les services et attend qu'ils soient healthy
-make bootstrap ENV=local              # SonarQube (compte admin, token d'analyse) puis GitLab (runner)
+make bootstrap ENV=local              # SonarQube (compte admin, compte et token d'analyse) puis GitLab (runner)
 make smoke ENV=local                  # projet de test, pipeline et analyse SonarQube de bout en bout
 ```
 
@@ -58,7 +58,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make deploy ENV=<env>` | Démarre l'instance, locale ou distante, et attend que tous les services soient healthy |
 | `make status ENV=<env>` | État des services et URLs de l'instance |
 | `make down ENV=<env>` | Arrête l'instance (volumes conservés) |
-| `make bootstrap ENV=<env>` | Configure SonarQube puis GitLab : compte admin, token d'analyse, runner d'instance (idempotent) ; `ROTATION=1` remplace le token d'analyse |
+| `make bootstrap ENV=<env>` | Configure SonarQube puis GitLab : compte admin, compte et token d'analyse, runner d'instance (idempotent) ; `ROTATION=1` remplace le token d'analyse |
 | `make bootstrap-sonarqube ENV=<env>` / `bootstrap-gitlab` | Une seule étape de `make bootstrap` |
 | `make smoke ENV=<env>` | Smoke test de bout en bout : projet de test, pipeline, analyse SonarQube ; `NETTOYER=1` le supprime |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
