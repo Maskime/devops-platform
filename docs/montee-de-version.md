@@ -134,7 +134,8 @@ GitLab impose un **chemin de mise à jour** : on ne saute pas de versions arbitr
 6. **PostgreSQL embarqué.** Si les notes de version d'un arrêt exigent une montée de la base embarquée,
    la lancer une fois l'arrêt atteint : `dc exec gitlab gitlab-ctl pg-upgrade` (sauvegarde préalable).
 7. **Runner** : une fois GitLab à la version cible, aligner `GITLAB_RUNNER_VERSION` sur la même
-   `majeure.mineure` (tag `v<version>`), puis `make deploy ENV=<env>`. L'enregistrement du runner est
+   `majeure.mineure` (tag `v<version>`), puis `make deploy ENV=<env>` ; tant que le déploiement n'est
+   pas fait, `make bootstrap` signale l'écart de version. L'enregistrement du runner est
    conservé dans le volume `gitlab_runner_config` ; une image auxiliaire personnalisée
    (`GITLAB_RUNNER_HELPER_IMAGE`) suit la nouvelle version sans relancer le bootstrap : le miroir
    éventuel doit publier le tag `v<version>` correspondant ([bootstrap](bootstrap.md#image-auxiliaire-des-jobs)).

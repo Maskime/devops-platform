@@ -9,6 +9,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Token d'analyse SonarQube : le premier `make bootstrap` crée le compte technique
+  `devops-platform-analyse`, lui génère un nouveau token, le pose dans `SONAR_TOKEN` et révoque
+  l'ancien token `devops-platform-analyse` du compte `admin`. Les projets consommateurs qui utilisent
+  l'ancien token (`outputs/<env>.env`) sont à reconfigurer avec le nouveau.
 - Isolation réseau des jobs CI : `GITLAB_RUNNER_NETWORK` désigne désormais un réseau **dédié**, créé
   par Compose (défaut `devops-platform_ci`), et non plus un réseau existant ; une valeur égale à
   `PLATFORM_NETWORK` (ancien défaut) ou à un autre réseau de la plateforme est refusée par
@@ -52,6 +56,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Compte technique SonarQube `devops-platform-analyse`, créé par `make bootstrap`, limité aux
+  permissions *Execute Analysis* et *Create Projects* : `SONAR_TOKEN` et `outputs/<env>.env` portent
+  désormais un token d'analyse de ce compte, et non plus du compte `admin`.
+- `make bootstrap` retire les variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN` gérées par la
+  plateforme quand le service `sonarqube` est absent de l'instance (les variables posées à la main sont
+  conservées).
+- `make bootstrap` signale un runner déployé dans une autre version que `GITLAB_RUNNER_VERSION`.
 - Isolation réseau des jobs CI : les conteneurs de jobs tournent sur un réseau dédié
   (`GITLAB_RUNNER_NETWORK`) où seul Traefik est joignable (ni bases, ni Loki, ni nginx de GitLab) ; en
   `*.localhost` et pour SonarQube avec une CA privée, ils passent par l'entrypoint interne de Traefik
