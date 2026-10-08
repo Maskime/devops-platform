@@ -264,6 +264,90 @@ nettoyer_config() {
     || echo "Attention : nettoyage des anciennes copies de configuration impossible (sans incidence)." >&2
 }
 
+# --- CA privée (TLS_MODE=custom) ------------------------------------------------------------------
+
+# Attend que chaque service soit healthy (après un restart, qui n'attend pas)
+attendre_sante() { # <service>...
+  local fin=$((SECONDS + WAIT_TIMEOUT)) service id etat
+  for service in "$@"; do
+    while :; do
+      id="$("${compose[@]}" ps -q "$service")"
+      etat="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2>/dev/null || true)"
+      [[ "$etat" == healthy ]] && break
+      ((SECONDS < fin)) || erreur "$service n'est pas healthy après ${WAIT_TIMEOUT} s (état : ${etat:-absent}) : voir scripts/instance.sh compose $env logs $service"
+      sleep 5
+    done
+  done
+}
+
+# gitlab-runner et sonarqube lisent la CA à leur démarrage : un changement de CA leur est appliqué ici
+# (make deploy, make reload-certs), à eux seuls, avec arrêt gracieux du runner (compose/gitlab.yml).
+#   - distant : la CA a sa copie ca-<empreinte> (PLATFORM_CA_DIR) ; un conteneur qui monte une autre
+#     copie est recréé (`up` l'a déjà fait dans make deploy) ;
+#   - local : le répertoire monté est le même ; un conteneur démarré avant la dernière modification de
+#     config/certs/ca/ (ctime : cp, mv, suppression, y compris cp -p) est redémarré. Rien ne dépend
+#     d'une variable de scripts/instance.sh : un `docker compose` direct ne recrée rien.
+# Ajout ou retrait de la CA : le runner doit aussi être ré-enregistré (make bootstrap, tls-ca-file).
+appliquer_ca() {
+  [[ "$(env_valeur "$env_file" TLS_MODE)" == custom ]] || return 0
+  local services service id source demarre modif=0 f a_appliquer=() delai
+  services=" $("${compose[@]}" config --services | paste -sd ' ' -) "
+  if [[ -z "$deploy_ssh" ]]; then
+    for f in "${CA_CUSTOM%/*}" "$CA_CUSTOM"; do
+      if [[ -e "$f" ]] && (($(stat -c %Z "$f") > modif)); then modif="$(stat -c %Z "$f")"; fi
+    done
+  fi
+  for service in gitlab-runner sonarqube; do
+    [[ "$services" == *" $service "* ]] || continue
+    id="$("${compose[@]}" ps -q --status running "$service")"
+    [[ -n "$id" ]] || continue
+    if [[ -n "$deploy_ssh" ]]; then
+      source="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/devops-platform/ca"}}{{.Source}}{{end}}{{end}}' "$id")"
+      [[ "$source" != "$PLATFORM_CA_DIR" ]] && a_appliquer+=("$service")
+    else
+      demarre="$(date -d "$(docker inspect -f '{{.State.StartedAt}}' "$id")" +%s)"
+      ((modif > demarre)) && a_appliquer+=("$service")
+    fi
+  done
+  if ((${#a_appliquer[@]})); then
+    echo "CA privée modifiée : ${a_appliquer[*]} à redémarrer."
+    if [[ " ${a_appliquer[*]} " == *" gitlab-runner "* ]]; then
+      delai="$(env_valeur "$env_file" GITLAB_RUNNER_STOP_GRACE_PERIOD)"
+      echo "  Arrêt gracieux du runner : il ne prend plus de job et attend la fin des jobs en cours (au plus ${delai:-1h})."
+      echo "  Interrompu (Ctrl-C), relancer la commande : le runner peut rester arrêté jusque-là."
+    fi
+    if [[ -n "$deploy_ssh" ]]; then
+      # Recréation sur la nouvelle copie ; d'autres changements en attente sur ces services sont appliqués aussi
+      (set -x; "${compose[@]}" up -d --no-deps --wait --wait-timeout "$WAIT_TIMEOUT" "${a_appliquer[@]}")
+    else
+      (set -x; "${compose[@]}" restart "${a_appliquer[@]}")
+      attendre_sante "${a_appliquer[@]}"
+    fi
+    echo "CA privée appliquée à ${a_appliquer[*]}."
+  else
+    echo "CA privée inchangée pour gitlab-runner et sonarqube."
+  fi
+  verifier_ca_runner
+}
+
+# Avertit si la présence de la CA ne correspond plus à l'enregistrement du runner (tls-ca-file de
+# config.toml, posé par make bootstrap) ; runner arrêté ou pas encore enregistré : rien
+verifier_ca_runner() {
+  local enregistree=0 presente=0
+  [[ -n "$("${compose[@]}" ps -q --status running gitlab-runner 2>/dev/null)" ]] || return 0
+  "${compose[@]}" exec -T gitlab-runner test -s /etc/gitlab-runner/config.toml 2>/dev/null || return 0
+  if "${compose[@]}" exec -T gitlab-runner grep -qE '^[[:space:]]*tls-ca-file[[:space:]]*=' \
+      /etc/gitlab-runner/config.toml 2>/dev/null; then enregistree=1; fi
+  [[ -f "$CA_CUSTOM" ]] && presente=1
+  ((enregistree == presente)) && return 0
+  if ((presente)); then
+    echo "Attention : $CA_CUSTOM ajoutée, mais le runner est enregistré sans CA (tls-ca-file)." >&2
+  else
+    echo "Attention : $CA_CUSTOM retirée, mais le runner est enregistré avec une CA (tls-ca-file) : il ne joint plus GitLab." >&2
+  fi
+  echo "  Lancer make bootstrap ENV=$env (ré-enregistrement du runner)." >&2
+}
+
 # --- Récapitulatif -------------------------------------------------------------------------------
 
 recapitulatif() {
@@ -340,6 +424,7 @@ case "$action" in
       fi
     done
     (set -x; "${compose[@]}" up -d --wait --wait-timeout "$WAIT_TIMEOUT" "${options[@]}")
+    appliquer_ca
     if [[ -n "$deploy_ssh" ]]; then nettoyer_config; fi
     "${compose[@]}" ps -a --format 'table {{.Service}}\t{{.Status}}'
     recapitulatif
@@ -359,9 +444,11 @@ case "$action" in
     ;;
   reload-certs)
     # Traefik ne relit pas les fichiers de certificat : recréation (montages relus, y compris après un
-    # remplacement par mv ; en distant, nouvelle copie de config), coupure de quelques secondes.
+    # remplacement par mv ; en distant, nouvelle copie de config), coupure de quelques secondes. Puis
+    # CA privée appliquée à gitlab-runner et sonarqube si elle a changé (appliquer_ca).
     if [[ -n "$deploy_ssh" ]]; then verifier_instance 1; copier_config; fi
-    (set -x; "${compose[@]}" up -d --wait --force-recreate traefik)
+    (set -x; "${compose[@]}" up -d --wait --wait-timeout "$WAIT_TIMEOUT" --force-recreate traefik)
+    appliquer_ca
     if [[ -n "$deploy_ssh" ]]; then nettoyer_config; fi
     ;;
   bootstrap)
