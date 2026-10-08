@@ -89,24 +89,31 @@ doivent donc y être présents.
 - `config/loki/loki-config.yaml`
 - `config/promtail/promtail-config.yaml`
 - `config/grafana/provisioning/`
-- en `TLS_MODE=custom` : `config/traefik/tls-custom.yml`, `config/certs/cert.pem`,
-  `config/certs/key.pem` et, s'il existe, `config/certs/ca/ca.pem` (seul fichier copié de
-  `config/certs/ca/`, créé vide sur le serveur sinon : [CA privée](certificats.md#ca-privée))
+- en `TLS_MODE=custom` : `config/traefik/tls-custom.yml`, `config/certs/cert.pem` et
+  `config/certs/key.pem`
+- en `TLS_MODE=custom`, à part : `config/certs/ca/ca.pem` s'il existe (seul fichier copié de
+  `config/certs/ca/` : [CA privée](certificats.md#ca-privée))
 
 **Où** : dans `${DEPLOY_DIR}/config-<empreinte>` sur le serveur. L'empreinte est calculée sur les
 chemins et le contenu de ces fichiers. Les montages pointent vers ce répertoire via la variable interne
 `PLATFORM_CONFIG_DIR`, qui vaut par défaut `config/` du repo.
 
+La CA privée a sa propre copie, `${DEPLOY_DIR}/ca-<empreinte de ca.pem>` (`ca-vide` sans CA, créé
+quand même : il est monté). La variable interne `PLATFORM_CA_DIR` y pointe, et vaut par défaut
+`config/certs/ca/` du repo. Seuls `gitlab-runner` et `sonarqube` la montent. Un changement d'une
+autre partie de la configuration ne les recrée donc pas.
+
 **Idempotence** : si un répertoire de même empreinte existe déjà, rien n'est envoyé.
 
 **Prise en compte d'une modification** : un fichier modifié produit une nouvelle empreinte, donc un
 nouveau répertoire. `make deploy` recrée alors les services qui montent la configuration (Loki,
-Promtail, Grafana, et Traefik et `gitlab-runner` en `TLS_MODE=custom`), et eux seuls.
+Promtail, Grafana, et Traefik en `TLS_MODE=custom`), et eux seuls. Un changement de `ca.pem` recrée
+`gitlab-runner` et `sonarqube`, et eux seuls, par `make deploy` ou `make reload-certs`.
 
 **Méthode de copie** : le transfert passe par le contexte Docker. Un conteneur `busybox` (sans réseau)
 extrait une archive tar envoyée depuis le poste. Il ne faut ni `rsync`, ni `scp`, ni `sudo`.
 
-**Atomicité** : la copie est extraite dans `config-<empreinte>.tmp`, puis renommée. Une copie
+**Atomicité** : la copie est extraite dans `config-<empreinte>.tmp` (ou `ca-<empreinte>.tmp`), puis renommée. Une copie
 interrompue est refaite au déploiement suivant.
 
 **Droits sur le serveur** :
@@ -117,13 +124,36 @@ interrompue est refaite au déploiement suivant.
 | Fichiers copiés | propriétaire `root`, lisibles par tous (Grafana et Loki ne tournent pas en root) |
 | `certs/key.pem` | `600` (Traefik tourne en root) |
 
-**Nettoyage** : après un déploiement réussi, les copies qu'aucun conteneur du projet ne monte plus
-sont supprimées. Après un `make reload-certs`, seul Traefik passe sur la nouvelle copie, et l'ancienne
-reste tant que d'autres services la montent.
+**Nettoyage** : après un déploiement réussi, les copies (`config-*`, `ca-*`) qu'aucun conteneur du
+projet ne monte plus sont supprimées. Après un `make reload-certs`, seuls Traefik, et le runner et
+SonarQube si la CA a changé, passent sur les nouvelles copies. Les anciennes restent tant que d'autres
+services les montent.
 
 Les montages sont déclarés avec `create_host_path: false`. Lancée sans `PLATFORM_CONFIG_DIR`, une
 commande échoue donc (« bind source path does not exist ») au lieu de créer des répertoires vides sur
 le serveur.
+
+### Arrêt du runner
+
+`gitlab-runner` s'arrête par `SIGQUIT` : il ne prend plus de job et attend la fin des jobs en cours.
+Au-delà de `GITLAB_RUNNER_STOP_GRACE_PERIOD` (1 h par défaut, `envs/.env.example`), Docker le tue.
+Cela vaut pour toute recréation ou tout arrêt du runner :
+
+- `make deploy` (nouvelle version, configuration modifiée, CA privée changée) ;
+- `make reload-certs` (CA privée changée) ;
+- `make down`.
+
+Ces commandes attendent donc la fin des jobs en cours. Pendant l'attente, aucun nouveau job ne
+démarre ; les jobs en attente reprennent avec le nouveau runner.
+
+- **Forcer l'arrêt** (jobs interrompus) : `scripts/instance.sh compose <env> stop -t 10 gitlab-runner`,
+  puis la commande voulue.
+- **Commande interrompue** (Ctrl-C, coupure SSH) pendant l'attente : Docker termine l'arrêt, mais le
+  nouveau conteneur n'est pas créé. Relancer `make deploy ENV=<env>`.
+- **Délai dépassé** : le runner est tué et les conteneurs de ses jobs restent en place. Les lister :
+  `docker ps --filter label=com.gitlab.gitlab-runner.managed=true`. Les supprimer avec `docker rm -f`.
+- **Redémarrage de Docker ou du serveur** : l'arrêt est borné par le délai d'arrêt du service
+  `docker` (systemd), en général plus court. Les jobs en cours sont alors interrompus.
 
 ### Une instance par serveur
 

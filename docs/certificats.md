@@ -79,7 +79,8 @@ recréation de son conteneur.
    d'erreur (clé non appariée, hostname non couvert…), rien n'est redémarré et l'ancien certificat
    reste servi, mais seulement jusqu'au prochain redémarrage de Traefik (redémarrage de l'hôte…) :
    corriger, ou remettre l'ancienne paire, sans attendre. Sinon elle recrée Traefik et attend qu'il soit `healthy`. **Coupure** : tous les
-   services web sont indisponibles quelques secondes. Le SSH de GitLab n'est pas concerné.
+   services web sont indisponibles quelques secondes. Le SSH de GitLab n'est pas concerné. Si la
+   [CA privée](#ca-privée) a changé, le runner et SonarQube sont aussi redémarrés.
 4. **Vérifier** que le nouveau certificat est servi : commande `openssl s_client` ci-dessus (nouveau
    numéro de série, nouvelle date d'expiration).
 5. **Retour arrière** si besoin : remettre l'ancienne paire, puis `make reload-certs ENV=<env>`.
@@ -91,36 +92,57 @@ les 30 jours qui précèdent, et planifier le renouvellement avec la PKI.
 
 Les navigateurs et les postes de l'organisation font en général déjà confiance à la CA interne. Les
 conteneurs de la plateforme, non : le runner joint GitLab par son URL publique, donc par Traefik et
-son certificat ([GitLab derrière le proxy](gitlab-proxy.md#runner-et-jobs-ci)).
+son certificat ([GitLab derrière le proxy](gitlab-proxy.md#runner-et-jobs-ci)) ; SonarQube aussi,
+pour l'intégration GitLab (ALM) et la décoration des merge requests.
 
 **Fichier** : `config/certs/ca/ca.pem`, facultatif. Il ne contient que des certificats publics (CA
-racine, éventuellement intermédiaires) ; le répertoire `config/certs/ca/` n'admet que lui, parce
-qu'il est monté dans le runner et copié sur le serveur. Ne jamais y laisser la clé de la CA. Sans ce
-fichier (certificat d'une CA publique), rien ne change.
+racine, éventuellement intermédiaires, plusieurs blocs PEM admis) ; le répertoire `config/certs/ca/`
+n'admet que lui, parce qu'il est monté dans le runner et SonarQube et copié sur le serveur. Ne jamais
+y laisser la clé de la CA. Sans ce fichier (certificat d'une CA publique), rien ne change.
 
 **Mécanisme**, en `TLS_MODE=custom` seulement :
 
-- `compose/tls/gitlab/custom.yml` monte `config/certs/ca/` en lecture seule dans `gitlab-runner`
-  (`/etc/devops-platform/ca/`). En `none` et `letsencrypt`, rien n'est monté.
+- `compose/tls/gitlab/custom.yml` et `compose/tls/sonarqube/custom.yml` montent `config/certs/ca/` en
+  lecture seule dans `gitlab-runner` et `sonarqube` (`/etc/devops-platform/ca/`). En `none` et
+  `letsencrypt`, rien n'est monté.
 - `make bootstrap` vérifie l'URL publique avec cette CA (`curl --cacert`, jamais `-k`) et enregistre
   le runner avec `--tls-ca-file` : `config.toml` porte `tls-ca-file`, que le runner utilise pour
   `register`, `verify` et la récupération des jobs.
 - Les jobs reçoivent la CA dans `CI_SERVER_TLS_CA_FILE`, et le helper l'utilise pour cloner par l'URL
   publique en `https://` (hors hostnames `*.localhost`, clonés par l'entrypoint interne de Traefik :
   [réseau des jobs](gitlab-proxy.md#réseau-des-jobs)).
-- En déploiement distant, seul `ca.pem` est copié sur le serveur ([déploiement](deploiement.md)).
+- SonarQube, au démarrage, construit un magasin de confiance (`/tmp/devops-platform/truststore.p12`
+  dans le conteneur) : les CA publiques du JDK de l'image, plus chaque certificat de `ca.pem`. Il est
+  passé aux JVM web et Compute Engine (qui décore les merge requests) par
+  `SONAR_WEB_JAVAADDITIONALOPTS` et `SONAR_CE_JAVAADDITIONALOPTS`, en complément des options de l'image.
+  Sans `ca.pem`, l'entrypoint de l'image est lancé tel quel. Un `ca.pem` sans certificat lisible fait
+  échouer le démarrage (`make deploy` en échec, voir les logs de `sonarqube`).
+- En déploiement distant, seul `ca.pem` est copié sur le serveur, dans un répertoire propre à la CA
+  ([déploiement](deploiement.md#fichiers-de-configuration-sur-le-serveur)).
 
-**Ajout, retrait ou changement de CA** : `make deploy ENV=<env>`, puis `make bootstrap ENV=<env>`. Le
-bootstrap ré-enregistre le runner si la présence de la CA a changé. Si seul le contenu de `ca.pem`
-change (même chemin), le runner garde la CA chargée à son démarrage : le redémarrer
-(`scripts/instance.sh compose <env> restart gitlab-runner`, jobs en cours interrompus).
-`make reload-certs` ne recrée que Traefik.
+**Changement de CA** (nouveau contenu de `ca.pem`) : `make reload-certs ENV=<env>` ou
+`make deploy ENV=<env>`. Le runner et SonarQube lisent la CA à leur démarrage. Ces deux commandes les
+redémarrent (local), ou les recréent (distant), quand la CA a changé, et eux seuls :
+
+- **Local** : un conteneur démarré avant la dernière modification de `config/certs/ca/` est redémarré.
+  La date comparée est le *ctime* du fichier, mis à jour par `cp`, `mv` ou une suppression, y compris
+  avec `cp -p`.
+- **Distant** : le conteneur qui monte une autre copie de la CA que la copie courante est recréé.
+- **Runner** : il s'arrête de façon gracieuse ([arrêt du runner](deploiement.md#arrêt-du-runner)) : il
+  ne prend plus de job et laisse finir les jobs en cours. La commande attend donc jusqu'à
+  `GITLAB_RUNNER_STOP_GRACE_PERIOD` (1 h par défaut).
+- **SonarQube** : il est indisponible le temps de son redémarrage, environ deux minutes.
+
+Un `docker compose` lancé directement ne redémarre rien.
+
+**Ajout ou retrait de la CA** : en plus, `make bootstrap ENV=<env>`, qui ré-enregistre le runner avec
+ou sans `--tls-ca-file`. `make deploy` et `make reload-certs` le signalent tant que l'enregistrement
+ne correspond pas. Après un retrait, le runner ne joint plus GitLab jusqu'à ce bootstrap.
 
 **Clients non couverts** :
 
 - **Outils lancés depuis l'hôte** (`curl`, `git`…) : ajouter la CA au magasin de
   l'hôte (Debian/Ubuntu : copier `ca.crt` dans `/usr/local/share/ca-certificates/`, puis
   `update-ca-certificates`), ou passer `CURL_CA_BUNDLE=/chemin/ca.pem` dans l'environnement.
-- **Appels de SonarQube vers GitLab** (JVM) : ils ne connaissent pas la CA interne (#110).
 - **Jobs** : seuls git et `CI_SERVER_TLS_CA_FILE` sont fournis ; un outil qui appelle l'API GitLab
   depuis un job doit recevoir la CA explicitement (`curl --cacert "$CI_SERVER_TLS_CA_FILE"`).
