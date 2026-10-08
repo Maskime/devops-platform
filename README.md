@@ -78,6 +78,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance, image auxiliaire), idempotence |
 | [Analyse SonarQube depuis la CI](docs/analyse-sonarqube.md) | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN`, exemple de job `sonar-scanner` |
 | [Smoke test](docs/smoke-test.md) | `make smoke` : vérifications, données de test, nettoyage (`NETTOYER=1`), délais |
+| [Branchement d'un projet](docs/branchement-projet.md) | Brancher un projet hébergé, co-localisé ou distant : `outputs/<env>.env`, `.gitlab-ci.yml` avec analyse SonarQube, réseau Docker externe |
 | [Fichier de sortie](docs/sortie-instance.md) | `outputs/<env>.env` pour les projets consommateurs : URLs, API GitLab, token d'analyse |
 | [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | Étape SonarQube : `vm.max_map_count`, compte admin, token d'analyse, mot de passe admin inconnu |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
