@@ -4,7 +4,10 @@
 #   - Loki lancé avec -config.expand-env=true (sinon LOKI_RETENTION_PERIOD n'est pas substituée) ;
 #   - LOKI_RETENTION_PERIOD vide (défaut), 0 (rétention illimitée) ou d'au moins 24h : Loki accepte
 #     une durée plus courte sans erreur, ni à -verify-config ni au démarrage ;
-#   - -verify-config avec l'image et la valeur résolues par compose (variable du shell prioritaire).
+#   - -verify-config avec l'image et la valeur résolues par compose (variable du shell prioritaire),
+#     sur un moteur Docker LOCAL, quels que soient le contexte courant et DOCKER_HOST : contexte courant
+#     s'il est local (unix://, npipe:// : Docker Desktop, Colima…) et joignable, sinon `default`. Sans
+#     moteur local joignable, contrôles statiques seuls et avertissement (docs/deploiement.md#prérequis).
 # Lecture seule : télécharge au besoin l'image Loki, ne crée ni conteneur durable, ni réseau, ni volume.
 set -euo pipefail
 
@@ -57,9 +60,30 @@ if [[ -n "$retention" ]]; then
   fi
 fi
 
-if ! sortie="$(docker run --rm -e LOKI_RETENTION_PERIOD="$retention" -v "$ROOT/config/loki:/etc/loki:ro" \
+# Moteur local : le contexte `default` est construit à partir de DOCKER_HOST (et des variables TLS
+# associées), qui primeraient aussi sur tout contexte : elles sont retirées pour ce contrôle.
+unset DOCKER_HOST DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+# Candidats : contexte courant s'il est local, puis `default` ; premier moteur joignable retenu.
+candidats=(default)
+courant="$(docker context show 2>/dev/null || true)"
+if [[ -n "$courant" && "$courant" != default ]] \
+  && [[ "$(docker context inspect -f '{{.Endpoints.docker.Host}}' "$courant" 2>/dev/null || true)" =~ ^(unix|npipe):// ]]; then
+  candidats=("$courant" default)
+fi
+contexte=""
+for c in "${candidats[@]}"; do
+  if docker --context "$c" version --format '{{.Server.Version}}' >/dev/null 2>&1; then contexte="$c"; break; fi
+done
+if [[ -z "$contexte" ]]; then
+  echo "Attention : $env_file : aucun moteur Docker local joignable (contextes ${candidats[*]}) ; -verify-config" >&2
+  echo "  de Loki non exécuté, contrôles statiques seuls (docs/deploiement.md#prérequis)." >&2
+  echo "$env_file : configuration Loki contrôlée statiquement ($image, rétention ${retention:-par défaut de loki-config.yaml})"
+  exit 0
+fi
+
+if ! sortie="$(docker --context "$contexte" run --rm -e LOKI_RETENTION_PERIOD="$retention" -v "$ROOT/config/loki:/etc/loki:ro" \
     "$image" -config.file=/etc/loki/loki-config.yaml -config.expand-env=true -verify-config 2>&1)"; then
   echo "$sortie" >&2
   echo "$env_file : configuration Loki refusée par $image (-verify-config)" >&2; exit 1
 fi
-echo "$env_file : configuration Loki valide ($image, rétention ${retention:-par défaut de loki-config.yaml})"
+echo "$env_file : configuration Loki valide ($image sur le moteur local $contexte, rétention ${retention:-par défaut de loki-config.yaml})"
