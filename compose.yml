@@ -12,6 +12,8 @@
 #                              letsencrypt), fusionné avec compose/proxy.yml dans le même include
 #   compose/tls/gitlab/<mode>.yml  overlay de gitlab-runner propre au TLS_MODE (CA privée en custom),
 #                              fusionné avec compose/gitlab.yml dans le même include
+#   compose/tls/sonarqube/<mode>.yml  overlay de sonarqube propre au TLS_MODE (CA privée en custom),
+#                              fusionné avec compose/sonarqube.yml dans le même include
 #
 # Toujours piloter la plateforme depuis ce fichier, avec le fichier d'environnement de l'instance :
 #   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
@@ -44,7 +46,10 @@ include:
       - compose/gitlab.yml
       - compose/tls/gitlab/${TLS_MODE:-none}.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
-  - path: compose/sonarqube.yml
+  # SonarQube : overlay propre au mode TLS (compose/tls/sonarqube/<mode>.yml : CA privée en custom)
+  - path:
+      - compose/sonarqube.yml
+      - compose/tls/sonarqube/${TLS_MODE:-none}.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
   - path: compose/observability.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env

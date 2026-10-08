@@ -74,7 +74,7 @@ if [[ -f compose.yml ]]; then
   for f in "${env_files[@]}"; do
     if docker compose --env-file "$f" -f compose.yml config -q; then ok "$f"; else ko "$f"; fi
   done
-  # Chaque overlay de mode TLS (compose/tls/<mode>.yml et compose/tls/gitlab/<mode>.yml), sur l'exemple
+  # Chaque overlay de mode TLS (compose/tls/<mode>.yml et compose/tls/<brique>/<mode>.yml), sur l'exemple
   for mode in "${tls_modes[@]}"; do
     if env "${VARS_MODE_TLS[@]}" TLS_MODE="$mode" docker compose --env-file envs/.env.example -f compose.yml config -q; then
       ok "envs/.env.example, TLS_MODE=$mode"
@@ -82,6 +82,18 @@ if [[ -f compose.yml ]]; then
       ko "envs/.env.example, TLS_MODE=$mode"
     fi
   done
+  # Entrypoint de sonarqube en TLS_MODE=custom (compose/tls/sonarqube/custom.yml) : les options de l'image
+  # (agent du plugin branch) sont complétées dans le conteneur, jamais interpolées (vidées) par Compose
+  if [[ -f compose/tls/sonarqube/custom.yml ]]; then
+    rendu="$(TLS_MODE=custom docker compose --env-file envs/.env.example -f compose.yml config sonarqube 2>/dev/null || true)"
+    # shellcheck disable=SC2016 # motifs littéraux ($$ = échappement Compose)
+    if grep -qF '"$${SONAR_WEB_JAVAADDITIONALOPTS:-} ' <<<"$rendu" \
+        && grep -qF '"$${SONAR_CE_JAVAADDITIONALOPTS:-} ' <<<"$rendu"; then
+      ok "sonarqube, TLS_MODE=custom : options JVM de l'image conservées"
+    else
+      ko "sonarqube, TLS_MODE=custom : SONAR_{WEB,CE}_JAVAADDITIONALOPTS interpolées par Compose (écrire \$\${…})"
+    fi
+  fi
   # Chaque challenge ACME de TLS_MODE=letsencrypt (config/traefik/acme-<challenge>.env), sur l'exemple
   shopt -s nullglob
   for c in config/traefik/acme-*.env; do
@@ -289,8 +301,8 @@ section "variables documentées"
 if [[ -f compose.yml && -f envs/.env.example ]]; then
   # Variables interpolées, et sources `environment: <VAR>` des secrets (lues sans interpolation)
   mapfile -t compose_vars < <({
-    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml | sed -E 's/.*\$\{//'
-    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml
+    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml | sed -E 's/.*\$\{//'
+    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml
   } | sort -u)
   missing=0
   for v in "${compose_vars[@]}"; do
@@ -311,7 +323,7 @@ scripts/check-images.sh || ko "images épinglées (voir ci-dessus)"
 # 6. Noms de conteneurs : Compose les attribue, les scripts ciblent les services
 #    (`docker compose exec <service>`). Commentaires ignorés ; `docker run` et `docker inspect <id>` admis.
 section "noms de conteneurs"
-if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml; then
+if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml; then
   ko "nom de conteneur fixé dans un fichier compose (voir ci-dessus)"
 else
   ok "aucun nom fixé dans les fichiers compose"
@@ -342,10 +354,10 @@ if [[ -f compose.yml ]]; then
     fi
   }
   if sortie="$(compose_propre)"; then ok "compose.yml : accepté"; else ko "compose.yml : refusé : $sortie"; fi
-  for f in compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml; do
+  for f in compose/*.yml compose/tls/*.yml compose/tls/*/*.yml; do
     m="$(basename "$f" .yml)"
     case "$f" in
-      compose/tls/gitlab/*) m="tls-gitlab-$m" ;;
+      compose/tls/*/*) m="tls-$(basename "$(dirname "$f")")-$m" ;;
       compose/tls/*) m="tls-$m" ;;
     esac
     grep -qE "^x-garde-fou-${m}: \"\\$\{PLATFORM_GARDE_FOU:\?" "$f" || ko "$f : extension x-garde-fou-${m} absente"

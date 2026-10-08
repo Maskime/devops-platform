@@ -1,0 +1,60 @@
+# =============================================================================
+# Overlay de la brique SonarQube pour TLS_MODE=custom : confiance dans la CA privée facultative
+# (config/certs/ca/ca.pem) pour les appels de SonarQube vers GitLab (intégration ALM, décoration des
+# merge requests) : docs/certificats.md.
+# Fusionné avec compose/sonarqube.yml par l'include de compose.yml (compose/tls/sonarqube/${TLS_MODE}.yml) ;
+# ne se lance pas seul. Chemins relatifs résolus depuis compose/ (premier fichier de l'include) ;
+# ${PLATFORM_CA_DIR} les remplace en déploiement distant (docs/deploiement.md).
+# =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-tls-sonarqube-custom: "${PLATFORM_GARDE_FOU:?compose/tls/sonarqube/custom.yml est un overlay de la brique SonarQube de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
+services:
+  sonarqube:
+    # Répertoire de la CA monté en lecture seule (même source que gitlab-runner : compose/tls/gitlab/custom.yml)
+    volumes:
+      - type: bind
+        source: ${PLATFORM_CA_DIR:-../config/certs/ca}
+        target: /etc/devops-platform/ca
+        read_only: true
+        bind:
+          create_host_path: false
+    # Au démarrage (et à chaque redémarrage), avec ca.pem : truststore = CA publiques du JDK de l'image
+    # + chaque certificat de ca.pem, passé aux JVM web et Compute Engine (qui décore les merge
+    # requests) en complément de SONAR_{WEB,CE}_JAVAADDITIONALOPTS de l'image (agent du plugin branch,
+    # à conserver). Sans ca.pem : entrypoint de l'image, inchangé. Mot de passe « changeit » : celui,
+    # public, du cacerts du JDK (certificats publics seulement). Échappement Compose : $$ partout.
+    # Chemin de l'entrypoint de l'image à vérifier à chaque montée de SONARQUBE_VERSION.
+    entrypoint:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        ca=/etc/devops-platform/ca/ca.pem
+        if [[ -s "$${ca}" ]]; then
+          d=/tmp/devops-platform
+          ts="$${d}/truststore.p12"
+          mkdir -p "$${d}"
+          rm -f "$${ts}" "$${d}"/ca-*.pem
+          cp "$${JAVA_HOME}/lib/security/cacerts" "$${ts}"
+          # Blocs BEGIN…END CERTIFICATE seuls (texte autour et fins de ligne CRLF ignorés)
+          awk -v d="$${d}" '
+            /-----BEGIN CERTIFICATE-----/ { n++; f = sprintf("%s/ca-%03d.pem", d, n); dedans = 1 }
+            dedans { sub(/\r$$/, ""); print > f }
+            /-----END CERTIFICATE-----/ { if (dedans) close(f); dedans = 0 }
+          ' "$${ca}"
+          n=0
+          for f in "$${d}"/ca-*.pem; do
+            [[ -e "$${f}" ]] || continue
+            n=$$((n + 1))
+            keytool -importcert -noprompt -alias "devops-platform-ca-$${n}" -file "$${f}" \
+              -keystore "$${ts}" -storepass changeit >/dev/null
+          done
+          if ((n == 0)); then echo "Erreur : aucun certificat dans $${ca}." >&2; exit 1; fi
+          opts="-Djavax.net.ssl.trustStore=$${ts} -Djavax.net.ssl.trustStoreType=PKCS12 -Djavax.net.ssl.trustStorePassword=changeit"
+          export SONAR_WEB_JAVAADDITIONALOPTS="$${SONAR_WEB_JAVAADDITIONALOPTS:-} $${opts}"
+          export SONAR_CE_JAVAADDITIONALOPTS="$${SONAR_CE_JAVAADDITIONALOPTS:-} $${opts}"
+          echo "CA privée : $${n} certificat(s) de $${ca} ajouté(s) au truststore de SonarQube (web, CE)."
+        fi
+        exec /opt/sonarqube/docker/entrypoint.sh "$$@"
+      - sonarqube-ca
