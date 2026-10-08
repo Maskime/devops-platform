@@ -113,7 +113,7 @@ services:
       - grafana_admin_password
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password # chemin du secret, pas une valeur (check-secrets: ignore)
       # Authentification obligatoire : ni accès anonyme, ni inscription, ni création d'organisation
       # (sign-up et org create valent déjà false par défaut : explicités pour figer la surface)
       GF_AUTH_ANONYMOUS_ENABLED: "false"
