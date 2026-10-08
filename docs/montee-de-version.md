@@ -12,10 +12,11 @@ perte de données.
 - **Surcharge par instance.** Une instance peut fixer sa propre version dans `envs/<env>.env`
   (`GITLAB_VERSION=19.4.1-ce.0`). Une instance surchargée **ne suit plus** les défauts du repo : à chaque
   montée de version du repo, il faut mettre à jour ou retirer sa surcharge.
-- **Garde-fous.** `make verify` refuse une image compose non paramétrée, un défaut sans version
-  `majeure.mineure` (`latest`, `17`, `lts`…), un défaut différent de celui de `envs/.env.example`, un tag
-  `latest` explicite dans les scripts et une version vide ou `latest` dans `envs/*.env`. `make deploy`
-  (cible `check-env`) refuse une version vide ou `latest` dans le fichier de l'instance.
+- **Garde-fous.** `scripts/check-images.sh` (lancé par `make verify`, `make check-images` et la CI à chaque
+  push et PR) refuse une image compose non paramétrée, un défaut sans version `majeure.mineure` (`latest`,
+  `17`, `lts`…), un défaut différent de celui de `envs/.env.example`, une image de script ou de pipeline
+  GitLab non versionnée, un tag `latest` explicite et une version vide ou `latest` dans `envs/*.env`
+  (fichiers absents en CI, contrôlés localement seulement). `make deploy` (cible `check-env`) refuse une version vide ou `latest` dans le fichier de l'instance.
 - **Limite : les tags sont mutables.** Un éditeur peut republier un tag (`postgres:17.11` est reconstruit à
   chaque mise à jour de son image de base, `mc1arke/…` peut être republié). L'épinglage par tag garantit la
   **version applicative**, pas l'identité bit à bit. Pour cette dernière, épingler aussi le digest dans
@@ -38,7 +39,7 @@ perte de données.
 | `traefik` | `TRAEFIK_VERSION` | ≥ 3.6.1 pour Docker Engine 29 ; préfixe `v` | [traefik](https://github.com/traefik/traefik/releases) |
 | `wollomatic/socket-proxy` | `SOCKET_PROXY_VERSION` | tag sans préfixe `v` ; liste blanche à revalider ([accès à l'API Docker](acces-docker.md)) | [socket-proxy](https://github.com/wollomatic/socket-proxy/releases) |
 
-Images d'outillage, épinglées en dur dans les scripts (variables `*_IMAGE`, contrôlées par `make verify`) :
+Images d'outillage, épinglées en dur dans les scripts (variables `*_IMAGE`, contrôlées par `scripts/check-images.sh`) :
 
 | Image | Script | Usage |
 |---|---|---|

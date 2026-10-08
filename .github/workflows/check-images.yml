@@ -1,0 +1,26 @@
+# Contrôle d'épinglage des images (aucun tag flottant), sur chaque push et chaque pull request.
+# Déclencheur pull_request (et jamais pull_request_target) : les PR issues de forks
+# s'exécutent sans secrets et avec un jeton en lecture seule.
+name: check-images
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-images-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-images:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Images épinglées
+        run: bash scripts/check-images.sh

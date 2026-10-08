@@ -8,7 +8,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT" || exit 1
 failed=0
 
-# Images des linters : tag versionné ou digest (contrôlé par la section « images épinglées »).
+# Images des linters : tag versionné ou digest (contrôlé par scripts/check-images.sh).
 # yamllint : aucun tag versionné publié, le tag 1 est figé par son digest.
 SHELLCHECK_IMAGE="koalaman/shellcheck:v0.11.0"
 YAMLLINT_IMAGE="cytopia/yamllint:1@sha256:596fb19eb71e55ba5b2fa56d8c18a615ec82adc8d3bf2d73918cb78c8f3240fb"
@@ -304,58 +304,9 @@ else
   ok "pas encore de compose.yml"
 fi
 
-# 5. Images épinglées : deux instances installées à des dates différentes doivent être identiques
-#    (procédure de montée de version : docs/montee-de-version.md)
+# 5. Images épinglées : délégué à scripts/check-images.sh (sans Docker, également lancé par la CI)
 section "images épinglées"
-# Tag versionné : contient une version majeure.mineure (refuse latest, 1, 17, lts, alpine…) ou un digest
-tag_versionne() { [[ "$1" =~ [0-9]+\.[0-9]+ || "$1" == *@sha256:* ]]; }
-# Référence d'image complète (<dépôt>:<tag> ou <dépôt>[:<tag>]@sha256:…)
-image_versionnee() {
-  local nom="${1##*/}"
-  [[ "$nom" == *@sha256:* ]] || { [[ "$nom" == *:* ]] && tag_versionne "${nom#*:}"; }
-}
-images_ko=0
-nb_images=0
-if [[ -f compose.yml ]]; then
-  # Chaque image compose : <dépôt>:${<NOM>_VERSION:-<tag>}, défaut identique à envs/.env.example
-  motif_image='^[[:space:]]*image:[[:space:]]*[^[:space:]$]+:\$\{([A-Z][A-Z0-9_]*_VERSION):-([^}]*)\}[[:space:]]*$'
-  while IFS=: read -r fichier num ligne; do
-    nb_images=$((nb_images + 1))
-    if [[ ! "$ligne" =~ $motif_image ]]; then
-      ko "$fichier:$num : image non paramétrée (attendu : <dépôt>:\${<NOM>_VERSION:-<tag>})"
-      images_ko=1; continue
-    fi
-    var="${BASH_REMATCH[1]}" defaut="${BASH_REMATCH[2]}"
-    if ! tag_versionne "$defaut"; then
-      ko "$fichier:$num : défaut de $var non versionné ($defaut)"; images_ko=1
-    fi
-    doc="$(sed -nE "s/^#?${var}=[\"']?([^\"']*)[\"']?[[:space:]]*\$/\1/p" envs/.env.example | head -n1)"
-    if [[ "$doc" != "$defaut" ]]; then
-      ko "$var : défaut compose ($defaut) ≠ envs/.env.example (${doc:-absent})"; images_ko=1
-    fi
-  done < <(grep -nE '^[[:space:]]*image:' compose.yml compose/*.yml compose/tls/*.yml compose/tls/gitlab/*.yml)
-fi
-# Images lancées par les scripts : variables *_IMAGE à tag versionné ou digest
-while IFS=: read -r fichier num ligne; do
-  nb_images=$((nb_images + 1))
-  valeur="${ligne#*=}" valeur="${valeur//[\"\']/}"
-  image_versionnee "$valeur" || { ko "$fichier:$num : image non versionnée ($valeur)"; images_ko=1; }
-done < <(git ls-files --cached --others --exclude-standard '*.sh' | sort -u \
-  | xargs -r grep -nE '^[[:space:]]*(readonly[[:space:]]+)?[A-Z][A-Z0-9_]*_IMAGE=' /dev/null)
-# Aucun tag latest explicite (motif sans le littéral, pour ne pas détecter ce script)
-if git ls-files --cached --others --exclude-standard compose.yml compose scripts Makefile | sort -u \
-    | xargs -r grep -nE '[:]latest([^A-Za-z0-9_.-]|$)' /dev/null; then
-  ko "tag latest explicite (voir ci-dessus)"; images_ko=1
-fi
-# Instances locales : même règle que la cible check-env du Makefile (à garder synchronisées)
-shopt -s nullglob
-for f in envs/*.env; do
-  if grep -nHE '^[A-Z0-9_]+_VERSION=["'"'"']?(latest)?["'"'"']?[[:space:]]*$' "$f"; then
-    ko "$f : version vide ou latest (voir ci-dessus)"; images_ko=1
-  fi
-done
-shopt -u nullglob
-((images_ko)) || ok "$nb_images image(s)"
+scripts/check-images.sh || ko "images épinglées (voir ci-dessus)"
 
 # 6. Noms de conteneurs : Compose les attribue, les scripts ciblent les services
 #    (`docker compose exec <service>`). Commentaires ignorés ; `docker run` et `docker inspect <id>` admis.

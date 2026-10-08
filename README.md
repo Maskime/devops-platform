@@ -63,7 +63,8 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make bootstrap-sonarqube ENV=<env>` / `bootstrap-gitlab` | Une seule étape de `make bootstrap` |
 | `make smoke ENV=<env>` | Smoke test de bout en bout : projet de test, pipeline, analyse SonarQube ; `NETTOYER=1` le supprime |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
-| `make verify` | Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis) |
+| `make verify` | Vérifications statiques : shellcheck, yamllint, compose, images, secrets (Docker requis) |
+| `make check-images` | Contrôle d'épinglage des images (sans Docker) |
 | `make check-secrets` | Recherche de secrets dans le dépôt |
 | `make install-hooks` | Active le hook pre-commit optionnel de recherche de secrets |
 
@@ -90,7 +91,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Dimensionnement](docs/dimensionnement.md) | Profils `small` / `medium` / `large` : ressources minimales et réglages |
 | [Rétention des logs](docs/logs.md) | Durée de rétention Loki, délai de purge |
 | [Accès à l'API Docker](docs/acces-docker.md) | Proxy de socket filtrant pour Traefik et Promtail : endpoints autorisés, isolement, limites |
-| [Garde-fous](docs/garde-fous.md) | Lancements compose en double, fuites de secrets (CI, hook pre-commit) |
+| [Garde-fous](docs/garde-fous.md) | Lancements compose en double, fuites de secrets (CI, hook pre-commit), images épinglées (CI) |
 | [Montée de version](docs/montee-de-version.md) | Procédure par image (chemin de mise à jour GitLab, migration SonarQube) |
 
 ## Avancement

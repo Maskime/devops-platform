@@ -59,6 +59,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 - Guide de branchement d'un projet (`docs/branchement-projet.md`) : `outputs/<env>.env`, exemple de
   `.gitlab-ci.yml` avec analyse SonarQube, projet hébergé, co-localisé (réseau Docker externe) ou
   distant (URLs publiques).
+- Contrôle d'épinglage des images extrait de `verify.sh` dans `scripts/check-images.sh` (bash, sans
+  Docker), lancé par `make verify`, `make check-images` et le job GitHub Actions `check-images` à chaque
+  push et PR. Il couvre en plus les images des pipelines `*.gitlab-ci.yml` versionnés et recherche les
+  tags `latest` dans `envs/.env.example` et `.github/`.
 - `outputs/<env>.env` exporte `DEVOPS_PLATFORM_CI_NETWORK`, le réseau des jobs CI à rejoindre par un
   projet co-localisé.
 - Guide d'installation d'une instance vierge (`docs/installation.md`) : prérequis, choix du

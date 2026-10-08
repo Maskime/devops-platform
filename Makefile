@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke
+.PHONY: help verify check-images check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -20,8 +20,11 @@ help: ## Affiche cette aide
 	@echo "Cibles disponibles :"
 	@awk 'BEGIN { FS = ":.*## " } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-verify: ## Vérifications statiques : shellcheck, yamllint, compose, secrets (Docker requis)
+verify: ## Vérifications statiques : shellcheck, yamllint, compose, images, secrets (Docker requis)
 	@scripts/verify.sh
+
+check-images: ## Contrôle d'épinglage des images (sans Docker, également lancé par la CI)
+	@scripts/check-images.sh
 
 check-secrets: ## Recherche de secrets dans le dépôt (fichiers suivis et non suivis non ignorés)
 	@scripts/check-secrets.sh
@@ -66,7 +69,7 @@ check-env: check-env-file
 	@if grep -nE '^[A-Z0-9_]+=change_me' "$(ENV_FILE)" >&2; then \
 	  echo "Valeurs d'exemple encore présentes dans $(ENV_FILE) (voir ci-dessus) : à remplacer." >&2; exit 1; \
 	fi
-	@# Même règle dans scripts/verify.sh (section « images épinglées ») : à garder synchronisées
+	@# Même règle dans scripts/check-images.sh : à garder synchronisées
 	@if grep -nE '^[A-Z0-9_]+_VERSION=["'"'"']?(latest)?["'"'"']?[[:space:]]*$$' "$(ENV_FILE)" >&2; then \
 	  echo "Version vide ou « latest » dans $(ENV_FILE) (voir ci-dessus) : épingler un tag." >&2; exit 1; \
 	fi
