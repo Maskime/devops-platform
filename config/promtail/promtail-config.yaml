@@ -12,9 +12,9 @@ scrape_configs:
   - job_name: containers
     # Les logs sont lus via l'API Docker : ni montage de /var/lib/docker/containers,
     # ni décodage de l'enveloppe json-file ne sont nécessaires.
-    # API Docker filtrée (lecture seule) par le proxy de socket : compose/socket-proxy.yml.
+    # API Docker filtrée (lecture seule) par son proxy de socket : compose/socket-proxy.yml.
     docker_sd_configs:
-      - host: tcp://socket-proxy:2375
+      - host: tcp://socket-proxy-promtail:2375
         refresh_interval: 5s
         filters:
           - name: status

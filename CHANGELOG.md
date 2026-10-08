@@ -15,6 +15,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   plus par `docker compose config` ; un lancement `docker compose up` sans make avec une valeur vide
   est refusé par l'entrypoint de Grafana. Une surcharge locale qui définirait `GF_SECURITY_ADMIN_PASSWORD`
   est à retirer (Grafana refuse de démarrer).
+- Proxy de socket Docker : l'ancien proxy commun `socket-proxy` est remplacé par un proxy par client.
+  Au prochain `make deploy`, son conteneur est supprimé avant le démarrage de `socket-proxy-traefik`
+  et `socket-proxy-promtail`, Traefik et Promtail sont recréés (coupure HTTP de quelques secondes ;
+  Promtail reprend la collecte à ses positions), puis le réseau `devops-platform_socket-proxy` est
+  supprimé. Une surcharge locale qui viserait `socket-proxy` est à adapter.
 - Token d'analyse SonarQube : le premier `make bootstrap` crée le compte technique
   `devops-platform-analyse`, lui génère un nouveau token, le pose dans `SONAR_TOKEN` et révoque
   l'ancien token `devops-platform-analyse` du compte `admin`. Les projets consommateurs qui utilisent
@@ -251,6 +256,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Modifié
 
+- **Une liste blanche par client du proxy de socket Docker** (`compose/socket-proxy.yml`) : Traefik et
+  Promtail passent chacun par leur propre proxy (`socket-proxy-traefik`, `socket-proxy-promtail`), sur
+  leur propre réseau interne. Traefik, exposé sur 80/443, n'a plus accès aux logs des conteneurs ;
+  Promtail n'a plus accès aux événements ni à `/version`. `make verify` contrôle les listes blanches
+  (client unique, options admises, logs réservés au proxy de Promtail) et l'isolement des réseaux.
+  `make deploy` ignore les conteneurs orphelins pour décider d'une recréation forcée. Documentation :
+  `docs/acces-docker.md`.
 - **Verrous d'instance étendus** (`scripts/lib/verrou.sh`, détenteur `flock` factorisé) : `make bootstrap`
   tient le verrou du conteneur `gitlab-runner` pendant toutes ses étapes, l'étape SonarQube prend en
   plus un verrou dans le conteneur `sonarqube` (mot de passe admin, rotation du token), et `make smoke`
