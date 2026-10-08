@@ -93,7 +93,7 @@ services:
   # URL : ${GRAFANA_EXTERNAL_URL} (défaut : http://${GRAFANA_HOSTNAME}), servie par Traefik
   # ---------------------------------------------------------------------------
   grafana:
-    image: grafana/grafana:${GRAFANA_VERSION:-13.2.3}
+    image: grafana/grafana:${GRAFANA_VERSION:-latest}
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
