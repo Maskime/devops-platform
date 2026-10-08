@@ -4,7 +4,8 @@
 #   - DEPLOY_SSH vide ou absente de envs/<env>.env : moteur Docker courant du poste (comme avant) ;
 #   - DEPLOY_SSH=ssh://[user@]hôte[:port] : contexte Docker SSH devops-platform-<env> (créé ou mis à
 #     jour), fichiers de config montés par les services copiés sur l'hôte dans
-#     ${DEPLOY_DIR}/config-<empreinte> (PLATFORM_CONFIG_DIR), garde-fou ${DEPLOY_DIR}/instance.
+#     ${DEPLOY_DIR}/config-<empreinte> (PLATFORM_CONFIG_DIR), CA privée de TLS_MODE=custom dans
+#     ${DEPLOY_DIR}/ca-<empreinte> (PLATFORM_CA_DIR), garde-fou ${DEPLOY_DIR}/instance.
 # DEPLOY_SSH et DEPLOY_DIR sont lues dans le fichier uniquement (jamais depuis le shell) : la cible
 # d'une commande ne dépend que du fichier de l'instance. Documentation : docs/deploiement.md.
 #
@@ -36,11 +37,13 @@ readonly PARALLELISME_SSH=4
 # d'abord, son token d'analyse servant à la configuration de GitLab
 readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
 # Fichiers de config/ montés par les services (les env_file, lus par Compose sur le poste, n'en font
-# pas partie). TLS_MODE=custom : fichiers de compose/tls/custom.yml en plus, et la CA facultative
-# montée par compose/tls/gitlab/custom.yml (seul ca.pem est copié : jamais une clé de CA déposée à côté).
+# pas partie). TLS_MODE=custom : fichiers de compose/tls/custom.yml en plus. La CA facultative, montée
+# par gitlab-runner et sonarqube (compose/tls/gitlab/custom.yml, compose/tls/sonarqube/custom.yml), a sa
+# propre copie et sa propre empreinte : un autre changement de config ne recrée pas ces services, et
+# seul ca.pem est copié (jamais une clé de CA déposée à côté).
 readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning)
 readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.pem)
-readonly CA_CUSTOM=certs/ca/ca.pem
+readonly CA_CUSTOM=config/certs/ca/ca.pem
 # Verrou de l'instance, dans le volume du runner (même fichier dans scripts/bootstrap/gitlab.sh et
 # scripts/smoke.sh)
 readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
@@ -173,27 +176,29 @@ config_montee() {
   local tls_mode
   tls_mode="$(env_valeur "$env_file" TLS_MODE)"
   printf '%s\n' "${CONFIG_MONTEE[@]}"
-  if [[ "$tls_mode" == custom ]]; then
-    printf '%s\n' "${CONFIG_MONTEE_CUSTOM[@]}"
-    if [[ -f "config/$CA_CUSTOM" ]]; then printf '%s\n' "$CA_CUSTOM"; fi
-  fi
+  if [[ "$tls_mode" == custom ]]; then printf '%s\n' "${CONFIG_MONTEE_CUSTOM[@]}"; fi
   return 0
 }
+
+sha256() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 
 # Empreinte (12 caractères) des chemins et contenus des fichiers montés : un changement de config
 # change le répertoire source, donc Compose recrée les services qui montent la configuration (et eux seuls)
 empreinte_config() {
-  local sha=(sha256sum) chemins
-  command -v sha256sum >/dev/null || sha=(shasum -a 256)
+  local chemins
   mapfile -t chemins < <(config_montee)
-  (cd config && find "${chemins[@]}" -type f | LC_ALL=C sort | while IFS= read -r f; do "${sha[@]}" "$f"; done) \
-    | "${sha[@]}" | cut -c1-12
+  (cd config && find "${chemins[@]}" -type f | LC_ALL=C sort | while IFS= read -r f; do sha256 "$f"; done) \
+    | sha256 | cut -c1-12
+}
+
+# Empreinte (12 caractères) du contenu de la CA privée, « vide » sans ca.pem
+empreinte_ca() {
+  if [[ -f "$CA_CUSTOM" ]]; then sha256 <"$CA_CUSTOM" | cut -c1-12; else echo vide; fi
 }
 
 # Copie idempotente dans ${DEPLOY_DIR}/config-<empreinte> (rien n'est envoyé si elle existe déjà) :
 # extraction dans un .tmp puis renommage ; propriétaire root, lecture seule pour les autres (grafana,
 # loki ne tournent pas en root), clé privée en 600 (traefik tourne en root), DEPLOY_DIR en 700.
-# certs/ca/ toujours créé : monté par gitlab-runner en TLS_MODE=custom, CA fournie ou non.
 copier_config() {
   local chemins resultat
   mapfile -t chemins < <(config_montee)
@@ -207,29 +212,51 @@ copier_config() {
         rm -rf "$d.tmp"
         mkdir "$d.tmp"
         tar -xo -f - -C "$d.tmp"
-        mkdir -p "$d.tmp/certs/ca"
         chown -R 0:0 "$d.tmp"
         chmod -R u=rwX,go=rX "$d.tmp"
         if [ -f "$d.tmp/certs/key.pem" ]; then chmod 600 "$d.tmp/certs/key.pem"; fi
         mv "$d.tmp" "$d"
         echo "copiée"' sh "$empreinte")"
   echo "Configuration $deploy_dir/config-$empreinte : $resultat."
+  if [[ -n "${PLATFORM_CA_DIR:-}" ]]; then copier_ca; fi
 }
 
-# Supprime les copies qu'aucun conteneur du projet ne monte plus (non bloquant)
+# CA privée (TLS_MODE=custom) dans ${DEPLOY_DIR}/ca-<empreinte>, même méthode que copier_config.
+# Répertoire créé même vide (ca-vide) : monté par gitlab-runner et sonarqube, CA fournie ou non.
+copier_ca() {
+  local resultat archive=(true)
+  [[ -f "$CA_CUSTOM" ]] && archive=(tar -C "$(dirname "$CA_CUSTOM")" --format=ustar -cf - ca.pem)
+  # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+  resultat="$(COPYFILE_DISABLE=1 "${archive[@]}" \
+    | utilitaire -i -v "$deploy_dir:/dst" "$BUSYBOX_IMAGE" sh -c '
+        set -e
+        d="/dst/ca-$1"
+        if [ -d "$d" ]; then cat >/dev/null; echo "déjà présente"; exit 0; fi
+        rm -rf "$d.tmp"
+        mkdir "$d.tmp"
+        if [ "$1" != vide ]; then tar -xo -f - -C "$d.tmp"; else cat >/dev/null; fi
+        chown -R 0:0 "$d.tmp"
+        chmod -R u=rwX,go=rX "$d.tmp"
+        mv "$d.tmp" "$d"
+        echo "copiée"' sh "$empreinte_ca")"
+  echo "CA privée $PLATFORM_CA_DIR : $resultat."
+}
+
+# Supprime les copies (config-*, ca-*) qu'aucun conteneur du projet ne monte plus (non bloquant)
 nettoyer_config() {
   local ids gardees
   mapfile -t ids < <(docker ps -aq --filter "label=com.docker.compose.project=$projet")
   gardees="config-$empreinte"
+  if [[ -n "${PLATFORM_CA_DIR:-}" ]]; then gardees+=" ${PLATFORM_CA_DIR##*/}"; fi
   if ((${#ids[@]})); then
     gardees+=" $(docker inspect -f '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' "${ids[@]}" \
-      | sed -n "s#^$deploy_dir/\(config-[^/]*\).*#\1#p" | sort -u | paste -sd ' ' -)"
+      | sed -n "s#^$deploy_dir/\(\(config\|ca\)-[^/]*\).*#\1#p" | sort -u | paste -sd ' ' -)"
   fi
   # shellcheck disable=SC2016,SC2086 # script exécuté par le sh du conteneur ; liste découpée voulue
   utilitaire -v "$deploy_dir:/dst" "$BUSYBOX_IMAGE" sh -c '
       racine="$1"; shift
       cd /dst
-      for d in config-*; do
+      for d in config-* ca-*; do
         [ -e "$d" ] || continue
         case " $* " in *" $d "*) continue ;; esac
         rm -rf "$d" && echo "Copie de configuration supprimée : $racine/$d"
@@ -277,11 +304,16 @@ if [[ -n "$deploy_ssh" ]]; then
   preparer_contexte_distant
   empreinte="$(empreinte_config)"
   export PLATFORM_CONFIG_DIR="$deploy_dir/config-$empreinte"
+  unset PLATFORM_CA_DIR
+  if [[ "$(env_valeur "$env_file" TLS_MODE)" == custom ]]; then
+    empreinte_ca="$(empreinte_ca)"
+    export PLATFORM_CA_DIR="$deploy_dir/ca-$empreinte_ca"
+  fi
 else
-  # Variable interne : en local, les montages lisent config/ du repo
-  unset PLATFORM_CONFIG_DIR
-  # Répertoire de la CA facultative, monté par gitlab-runner en TLS_MODE=custom (versionné vide ;
-  # recréé s'il a disparu, sinon `up` échouerait : « bind source path does not exist »)
+  # Variables internes : en local, les montages lisent config/ du repo
+  unset PLATFORM_CONFIG_DIR PLATFORM_CA_DIR
+  # Répertoire de la CA facultative, monté par gitlab-runner et sonarqube en TLS_MODE=custom (versionné
+  # vide ; recréé s'il a disparu, sinon `up` échouerait : « bind source path does not exist »)
   if [[ "$(env_valeur "$env_file" TLS_MODE)" == custom ]]; then mkdir -p config/certs/ca; fi
 fi
 config="$("${compose[@]}" config)"

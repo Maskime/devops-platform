@@ -295,11 +295,11 @@ if [[ -f compose.yml && -f envs/.env.example ]]; then
   missing=0
   for v in "${compose_vars[@]}"; do
     # Variables internes : fournie par Compose / définie par le garde-fou de lancement (section 6 bis) /
-    # positionnée par scripts/instance.sh (copie de config/ sur l'hôte d'une instance distante)
-    [[ "$v" == COMPOSE_PROJECT_NAME || "$v" == PLATFORM_GARDE_FOU || "$v" == PLATFORM_CONFIG_DIR ]] && continue
+    # positionnées par scripts/instance.sh (copies de config/ et de la CA sur l'hôte d'une instance distante)
+    case "$v" in COMPOSE_PROJECT_NAME | PLATFORM_GARDE_FOU | PLATFORM_CONFIG_DIR | PLATFORM_CA_DIR) continue ;; esac
     grep -qE "^#?${v}=" envs/.env.example || { ko "$v absente de envs/.env.example"; missing=1; }
   done
-  ((missing)) || ok "${#compose_vars[@]} variable(s) (dont 3 internes)"
+  ((missing)) || ok "${#compose_vars[@]} variable(s) (dont 4 internes)"
 else
   ok "pas encore de compose.yml"
 fi

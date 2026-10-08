@@ -4,7 +4,9 @@
 # jobs (CI_SERVER_TLS_CA_FILE). Utilisée par make bootstrap (tls-ca-file) : docs/certificats.md.
 # Fusionné avec compose/gitlab.yml par l'include de compose.yml (compose/tls/gitlab/${TLS_MODE}.yml) ;
 # ne se lance pas seul. Chemins relatifs résolus depuis compose/ (premier fichier de l'include) ;
-# ${PLATFORM_CONFIG_DIR} les remplace en déploiement distant (docs/deploiement.md).
+# ${PLATFORM_CA_DIR} les remplace en déploiement distant : copie propre à la CA, d'empreinte distincte
+# de celle de config/ (docs/deploiement.md). Un changement de CA est appliqué par make reload-certs et
+# make deploy (scripts/instance.sh), avec arrêt gracieux du runner (compose/gitlab.yml).
 # =============================================================================
 # Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
 x-garde-fou-tls-gitlab-custom: "${PLATFORM_GARDE_FOU:?compose/tls/gitlab/custom.yml est un overlay de la brique GitLab de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
@@ -16,7 +18,7 @@ services:
     # (scripts/bootstrap/gitlab.sh) : à garder identiques.
     volumes:
       - type: bind
-        source: ${PLATFORM_CONFIG_DIR:-../config}/certs/ca
+        source: ${PLATFORM_CA_DIR:-../config/certs/ca}
         target: /etc/devops-platform/ca
         read_only: true
         bind:
