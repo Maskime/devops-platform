@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+## [0.2.0] - 2026-10-08
+
+Première version exploitable : instances paramétrées par environnement, déployables en local ou sur
+un serveur distant, avec TLS, bootstrap, smoke test, documentation et durcissement (épopées 2 à 7).
+
 ### Migration
 
 - CA privée et arrêt gracieux du runner, au prochain `make deploy` :
@@ -404,5 +409,6 @@ Base de référence : extraction à l'identique de l'infrastructure de Software 
 
 - Portainer passe à la variante `2.45.1-alpine` (même version) pour permettre un healthcheck.
 
-[Non publié]: https://github.com/Maskime/devops-platform/compare/v0.1.0...HEAD
+[Non publié]: https://github.com/Maskime/devops-platform/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.1.0
