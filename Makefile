@@ -84,16 +84,21 @@ check-env: check-env-file
 	if [[ -n "$${PLATFORM_PROFILE+x}" ]]; then \
 	  echo "Attention : PLATFORM_PROFILE=$$profil vient du shell et remplace la valeur de $(ENV_FILE)." >&2; \
 	fi
-	@# Mot de passe admin Portainer : passé par un secret Compose (source environment), que Compose ne
-	@# peut pas rendre obligatoire sans l'afficher dans `config`. Même lecture que le profil ; valeur
-	@# jamais affichée. Portainer refuse un mot de passe de moins de 12 caractères.
-	@cle=PORTAINER_ADMIN_PASSWORD; \
-	if [[ -n "$${!cle+x}" ]]; then mdp="$${!cle}"; else \
-	  mdp="$$(sed -nE "s/^[[:space:]]*$${cle}=[\"']?([^\"']*)[\"']?[[:space:]]*$$/\1/p" "$(ENV_FILE)" | tail -n1)"; \
-	fi; \
-	if (( $${#mdp} < 12 )); then \
-	  echo "PORTAINER_ADMIN_PASSWORD absent ou trop court dans $(ENV_FILE) (12 caractères minimum, voir envs/.env.example)." >&2; exit 1; \
-	fi
+	@# Mots de passe admin Portainer et Grafana : passés par des secrets Compose (source environment),
+	@# que Compose ne peut pas rendre obligatoires sans les afficher dans `config`. Même lecture que le
+	@# profil ; valeurs jamais affichées. Paires <clé>:<longueur minimale> : Portainer refuse un mot de
+	@# passe de moins de 12 caractères, Grafana n'impose rien (présence seule).
+	@for paire in PORTAINER_ADMIN_PASSWORD:12 GRAFANA_ADMIN_PASSWORD:1; do \
+	  cle="$${paire%%:*}"; min="$${paire#*:}"; \
+	  if [[ -n "$${!cle+x}" ]]; then mdp="$${!cle}"; else \
+	    mdp="$$(sed -nE "s/^[[:space:]]*$${cle}=[\"']?([^\"']*)[\"']?[[:space:]]*$$/\1/p" "$(ENV_FILE)" | tail -n1)"; \
+	  fi; \
+	  if (( $${#mdp} < min )); then \
+	    if (( min > 1 )); then detail="absent ou trop court dans $(ENV_FILE) ($$min caractères minimum"; \
+	    else detail="absent ou vide dans $(ENV_FILE) (obligatoire"; fi; \
+	    echo "$$cle $$detail, voir envs/.env.example)." >&2; exit 1; \
+	  fi; \
+	done
 	@scripts/check-env-urls.sh "$(ENV_FILE)"
 	@$(COMPOSE) config -q || { echo "Configuration invalide pour $(ENV_FILE) (voir ci-dessus)." >&2; exit 1; }
 	@scripts/check-loki-config.sh "$(ENV_FILE)" >/dev/null

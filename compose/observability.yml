@@ -95,9 +95,25 @@ services:
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION:-13.2.3}
     restart: unless-stopped
+    # Garde-fou : sans secret lisible et non vide, /run.sh exporterait un mot de passe vide et Grafana
+    # créerait le compte admin avec le mot de passe par défaut (admin). Démarrage refusé à la place,
+    # y compris lancé par `docker compose up` sans make (contrôle de make check-env contourné).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        test -r /run/secrets/grafana_admin_password && test -s /run/secrets/grafana_admin_password ||
+        { echo "Secret grafana_admin_password absent ou vide : définir GRAFANA_ADMIN_PASSWORD (envs/.env.example)" >&2; exit 1; };
+        exec /run.sh "$$@"
+      - sh
+    # Mot de passe admin lu dans le fichier par /run.sh (convention __FILE de l'image), appliqué à la
+    # création du compte seulement (volume grafana_data vierge). Ne pas définir aussi
+    # GF_SECURITY_ADMIN_PASSWORD (surcharge locale) : /run.sh refuse de démarrer.
+    secrets:
+      - grafana_admin_password
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD obligatoire (voir envs/.env.example)}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
       # Authentification obligatoire : ni accès anonyme, ni inscription, ni création d'organisation
       # (sign-up et org create valent déjà false par défaut : explicités pour figer la surface)
       GF_AUTH_ANONYMOUS_ENABLED: "false"
@@ -134,6 +150,14 @@ services:
       start_period: 30s
     networks:
       - platform
+
+# Mot de passe admin lu dans la variable GRAFANA_ADMIN_PASSWORD (envs/<env>.env), monté en fichier
+# dans /run/secrets : jamais interpolé ici, donc absent de `docker compose config` et de `docker inspect`.
+# Présence contrôlée par make check-env (un ${…:?} afficherait la valeur dans `config`) et, au
+# démarrage, par l'entrypoint de grafana.
+secrets:
+  grafana_admin_password:
+    environment: GRAFANA_ADMIN_PASSWORD
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
