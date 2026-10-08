@@ -56,6 +56,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Guide d'installation d'une instance vierge (`docs/installation.md`) : prérequis, choix du
+  `TLS_MODE`, enchaînement `init` → `host-prereqs` → `deploy` → `bootstrap` → `smoke`, dépannage.
 - Compte technique SonarQube `devops-platform-analyse`, créé par `make bootstrap`, limité aux
   permissions *Execute Analysis* et *Create Projects* : `SONAR_TOKEN` et `outputs/<env>.env` portent
   désormais un token d'analyse de ce compte, et non plus du compte `admin`.

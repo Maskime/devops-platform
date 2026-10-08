@@ -30,6 +30,7 @@ make smoke ENV=local                  # projet de test, pipeline et analyse Sona
 | Portainer | http://portainer.localhost |
 | PlantUML | http://plantuml.localhost |
 
+Pour installer une instance sur un serveur, suivre le guide [Installation pas à pas](docs/installation.md).
 Les mots de passe générés par `make init` se lisent dans `envs/local.env`. Si git ou wget ne résolvent
 pas `*.localhost`, `make init` indique la ligne à ajouter à `/etc/hosts`.
 
@@ -72,6 +73,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 
 | Page | Sujet |
 |---|---|
+| [Installation pas à pas](docs/installation.md) | Instance vierge de bout en bout : prérequis (serveur, DNS, ports, ressources), choix du `TLS_MODE`, `init` → `host-prereqs` → `deploy` → `bootstrap` → `smoke`, dépannage |
 | [Préparation d'un serveur](docs/serveur.md) | `scripts/host-prereqs.sh` : Docker, `vm.max_map_count`, `daemon.json`, pare-feu, nettoyage Docker planifié |
 | [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
