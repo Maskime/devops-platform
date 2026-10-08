@@ -26,7 +26,8 @@ Pour une instance **locale** (essai, développement), poste et serveur sont la m
   installer au préalable Docker Engine 25.0 minimum, le plugin Compose 2.24 minimum et `jq`.
 - Un utilisateur joignable en SSH **par clé**, qui aura accès à Docker (étape 4).
 - Accès sortant aux registres d'images : Docker Hub, et `registry.gitlab.com` pour l'image auxiliaire
-  des jobs CI (sinon, voir [Dépannage](#autres-problèmes-courants)).
+  des jobs CI, dont l'authentification passe par `gitlab.com` : les deux doivent être joignables
+  (sinon, voir [Dépannage](#autres-problèmes-courants)).
 
 Détails : [Préparation d'un serveur](serveur.md), [Déploiement](deploiement.md#prérequis).
 
@@ -165,6 +166,11 @@ ssh -t deploy@devops.mondomaine.fr sudo bash /tmp/host-prereqs.sh --port-ssh-git
 traiter (ils sont rappelés dans le résumé). Le script est idempotent : relancé, il termine par
 « 0 modification(s) ».
 
+Si des conteneurs tournent déjà sur l'hôte, le script ne redémarre pas Docker et signale que
+`/etc/docker/daemon.json` n'est pas appliqué : relancer avec `--redemarrer-docker` (les conteneurs
+sont arrêtés puis relancés selon leur politique `restart`), ou redémarrer Docker dans une fenêtre de
+maintenance, **avant** `make deploy`.
+
 Puis donner à l'utilisateur de déploiement l'accès à Docker (le script n'ajoute personne au groupe
 `docker`) et vérifier, **depuis le poste**, que la connexion ne pose aucune question :
 
@@ -179,8 +185,9 @@ connecte sans interaction et échoue sinon.
 
 **En local :**
 
-- **Linux natif** (Debian ou Ubuntu, systemd) : `sudo bash scripts/host-prereqs.sh --sans-https`.
-- **Docker Desktop** (WSL2, macOS) : **ne pas** lancer le script, qui installerait un second moteur
+- **Linux natif** (Debian ou Ubuntu, systemd), y compris **WSL2 avec Docker Engine installé dans la
+  distribution** (systemd activé) : `sudo bash scripts/host-prereqs.sh --sans-https`.
+- **Docker Desktop** (macOS, ou WSL2 avec l'intégration Docker Desktop) : **ne pas** lancer le script, qui installerait un second moteur
   Docker. Seul `vm.max_map_count` est nécessaire, à régler dans la VM de Docker Desktop par un
   conteneur privilégié, seulement si la valeur actuelle est inférieure à 524288 (ne pas abaisser une
   valeur plus élevée) :
@@ -208,7 +215,7 @@ make deploy ENV=prod
 2. En distant : contexte Docker `devops-platform-<env>` sur `DEPLOY_SSH`, copie des fichiers de
    configuration sur le serveur, garde-fou « une instance par serveur ».
 3. Téléchargement des images et démarrage, puis attente que tous les services soient `healthy`
-   (**15 minutes au plus**). Le premier démarrage de GitLab prend plusieurs minutes : c'est normal.
+   (**15 minutes au plus**) ; Loki, sans healthcheck, apparaît simplement démarré (`Up`). Le premier démarrage de GitLab prend plusieurs minutes : c'est normal.
 4. Récapitulatif : état de chaque service et URL de chaque interface.
 
 `make status ENV=prod` réaffiche ce récapitulatif à tout moment. En `letsencrypt`, les certificats
@@ -347,8 +354,10 @@ légitime. Sur une instance qui a des données, ne jamais supprimer le volume `s
   question (`ssh <hôte> docker version`) ; voir l'étape 4 et [Déploiement](deploiement.md#prérequis).
 - **`git clone` ne résout pas `gitlab.localhost`** : ajouter la ligne affichée par `make init` à
   `/etc/hosts` ([Exposition](exposition.md)).
-- **Jobs CI en échec `runner_external_dependency_failure`** : le serveur ne joint pas
-  `registry.gitlab.com` ; renseigner `GITLAB_RUNNER_HELPER_IMAGE`
+- **Jobs CI en échec `runner_external_dependency_failure`** (`make smoke` le signale) : le serveur ne
+  joint pas `registry.gitlab.com` ou `gitlab.com` (par exemple `TLS handshake timeout` derrière un
+  filtrage réseau) ; renseigner `GITLAB_RUNNER_HELPER_IMAGE=gitlab/gitlab-runner-helper` (Docker
+  Hub) dans `envs/<env>.env`, puis `make bootstrap` et `make smoke`
   ([image auxiliaire](bootstrap.md#image-auxiliaire-des-jobs)).
 - **`make bootstrap` : mot de passe admin SonarQube refusé** :
   [Mot de passe admin inconnu](bootstrap-sonarqube.md#mot-de-passe-admin-inconnu).
