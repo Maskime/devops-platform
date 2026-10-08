@@ -61,6 +61,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   distant (URLs publiques).
 - `outputs/<env>.env` exporte `DEVOPS_PLATFORM_CI_NETWORK`, le réseau des jobs CI à rejoindre par un
   projet co-localisé.
+- Guide d'installation d'une instance vierge (`docs/installation.md`) : prérequis, choix du
+  `TLS_MODE`, enchaînement `init` → `host-prereqs` → `deploy` → `bootstrap` → `smoke`, dépannage.
 - Compte technique SonarQube `devops-platform-analyse`, créé par `make bootstrap`, limité aux
   permissions *Execute Analysis* et *Create Projects* : `SONAR_TOKEN` et `outputs/<env>.env` portent
   désormais un token d'analyse de ce compte, et non plus du compte `admin`.
