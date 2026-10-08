@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fichier de sortie d'une instance pour les projets consommateurs : outputs/<env>.env (URLs publiques,
-# URL de l'API GitLab, token d'analyse SonarQube, réseau Docker des jobs pour les projets co-localisés). Lit uniquement des fichiers locaux (envs/<env>.env,
-# outputs/<env>.sonarqube-token), aucun appel Docker : régénérer est toujours sans risque. Idempotent.
+# URL de l'API GitLab, token d'analyse SonarQube, réseau Docker des jobs pour les projets co-localisés).
+# Lit uniquement des fichiers locaux (envs/<env>.env, outputs/<env>.sonarqube-token), aucun appel Docker :
+# régénérer est toujours sans risque. Idempotent.
 # Lancé par `make bootstrap ENV=<env>` (scripts/instance.sh bootstrap) après chaque étape réussie.
 # Documentation : docs/sortie-instance.md.
 #
