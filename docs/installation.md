@@ -229,8 +229,8 @@ Deux étapes, dans l'ordre, sans aucune donnée de test :
 2. **GitLab** : variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN`, enregistrement du runner
    d'instance, attente qu'il soit en ligne.
 
-Il écrit `outputs/<env>.env` (URLs, API GitLab, token d'analyse) pour les projets qui consomment la
-plateforme ([Fichier de sortie](sortie-instance.md)). Il est idempotent : en cas d'échec, corriger
+Il écrit `outputs/<env>.env` (URLs, API GitLab, token d'analyse, réseau des jobs) pour les projets qui
+consomment la plateforme ([Fichier de sortie](sortie-instance.md)). Il est idempotent : en cas d'échec, corriger
 puis relancer.
 
 Détails : [Bootstrap](bootstrap.md), [Bootstrap SonarQube](bootstrap-sonarqube.md).
@@ -264,7 +264,8 @@ Les mots de passe ne sont jamais affichés : les lire dans `envs/<env>.env`.
 Les mots de passe de GitLab et Portainer ne sont appliqués qu'au **premier démarrage** : une fois
 changés dans l'interface, le fichier ne fait plus foi pour eux.
 
-L'instance est prête. Pour la suite : [Analyse SonarQube depuis la CI](analyse-sonarqube.md),
+L'instance est prête. Pour la suite : [Branchement d'un projet](branchement-projet.md),
+[Analyse SonarQube depuis la CI](analyse-sonarqube.md),
 [Montée de version](montee-de-version.md), [Rétention des logs](logs.md).
 
 ## Dépannage

@@ -56,6 +56,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Guide de branchement d'un projet (`docs/branchement-projet.md`) : `outputs/<env>.env`, exemple de
+  `.gitlab-ci.yml` avec analyse SonarQube, projet hébergé, co-localisé (réseau Docker externe) ou
+  distant (URLs publiques).
+- `outputs/<env>.env` exporte `DEVOPS_PLATFORM_CI_NETWORK`, le réseau des jobs CI à rejoindre par un
+  projet co-localisé.
 - Guide d'installation d'une instance vierge (`docs/installation.md`) : prérequis, choix du
   `TLS_MODE`, enchaînement `init` → `host-prereqs` → `deploy` → `bootstrap` → `smoke`, dépannage.
 - Compte technique SonarQube `devops-platform-analyse`, créé par `make bootstrap`, limité aux
@@ -306,6 +311,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Corrigé
 
+- `make deploy` ne refuse plus un conteneur d'un autre projet Compose attaché au réseau des jobs CI
+  (projet co-localisé) ; le réseau de la plateforme et les volumes restent contrôlés.
 - `scripts/instance.sh` : en distant (`DEPLOY_SSH`), le pré-test SSH consommait l'entrée standard
   destinée à `scripts/instance.sh compose <env> exec -T …` (`ssh -n`).
 - GitLab : la concurrence Sidekiq était réglée par `sidekiq['max_concurrency']`, supprimé en GitLab
