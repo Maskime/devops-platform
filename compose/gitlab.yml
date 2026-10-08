@@ -110,6 +110,11 @@ services:
   gitlab-runner:
     image: gitlab/gitlab-runner:${GITLAB_RUNNER_VERSION:-v19.4.1}
     restart: always
+    # Arrêt gracieux (recréation, make down, changement de CA) : SIGQUIT, le runner ne prend plus de
+    # job et attend la fin des jobs en cours, au plus GITLAB_RUNNER_STOP_GRACE_PERIOD avant SIGKILL
+    # (docs/certificats.md). SIGTERM, défaut de Docker, interromprait les jobs.
+    stop_signal: SIGQUIT
+    stop_grace_period: ${GITLAB_RUNNER_STOP_GRACE_PERIOD:-1h}
     environment:
       # Serveur de métriques interne (sans publication de port) : sert de sonde de santé
       LISTEN_ADDRESS: ":9252"
