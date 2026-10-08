@@ -112,9 +112,12 @@ Sur le poste :
 ```bash
 git clone https://github.com/Maskime/devops-platform.git
 cd devops-platform
-git checkout v0.1.0                   # ou la version voulue : une instance suit une version figée
+git checkout <version>                # facultatif : figer une version publiée (git tag -l)
 make init ENV=prod                    # « prod » : nom de l'instance, fichier envs/prod.env
 ```
+
+Une instance suit une version figée. La version 0.1.0 précède l'outillage décrit ici (`make init`,
+`make bootstrap`…) : prendre une version ultérieure, ou `main` tant qu'aucune n'est publiée.
 
 `make init` pose quatre questions (Entrée garde la valeur par défaut) : domaine de base, hostname de
 chaque service, `TLS_MODE`, profil ; en `letsencrypt`, il demande aussi `ACME_EMAIL`. Il génère tous
