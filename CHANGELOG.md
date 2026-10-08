@@ -9,6 +9,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- CA privée et arrêt gracieux du runner, au prochain `make deploy` :
+  - tous modes : `gitlab-runner` est recréé une fois (délai d'arrêt `GITLAB_RUNNER_STOP_GRACE_PERIOD`) ;
+    il attend désormais la fin des jobs en cours, comme à chaque arrêt ;
+  - `TLS_MODE=custom` : `sonarqube` est recréé une fois (environ deux minutes d'indisponibilité),
+    avec ou sans CA ;
+  - `TLS_MODE=custom` distant : le runner passe de `config-<empreinte>/certs/ca` à
+    `ca-<empreinte>`. Avec une CA, l'empreinte de la configuration change aussi : Traefik, Grafana,
+    Loki et Promtail sont recréés une fois.
 - Mot de passe admin Grafana : `GRAFANA_ADMIN_PASSWORD` est désormais transmis par un secret Compose.
   Aucune action : même variable, `grafana` recréé au prochain `make deploy` (volume `grafana_data` et
   compte admin conservés, mot de passe inchangé). Son absence est refusée par `make check-env` et non
@@ -67,6 +75,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- CA privée (`TLS_MODE=custom`) : SonarQube fait confiance à `config/certs/ca/ca.pem` (intégration
+  GitLab, décoration des merge requests), par un magasin de confiance construit au démarrage
+  (`compose/tls/sonarqube/<mode>.yml`). Un changement de CA est appliqué au runner et à SonarQube,
+  et à eux seuls, par `make reload-certs` ou `make deploy`. En distant, la CA a sa propre copie
+  `${DEPLOY_DIR}/ca-<empreinte>` : un autre changement de configuration ne recrée plus le runner
+  (`docs/certificats.md`, `docs/deploiement.md`).
+- Arrêt gracieux du runner (`SIGQUIT`, `GITLAB_RUNNER_STOP_GRACE_PERIOD`, 1 h par défaut) : recréation
+  et arrêt laissent finir les jobs en cours (`docs/deploiement.md`, « Arrêt du runner »).
 - `make down` sur une instance distante (`DEPLOY_SSH`) demande de retaper le nom de l'instance, ou
   `CONFIRMER=1` sur la ligne de commande hors terminal ; aucun contact avec le serveur avant
   confirmation.

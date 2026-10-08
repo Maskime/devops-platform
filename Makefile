@@ -121,7 +121,7 @@ down: check-env-file ## [ENV] Arrête l'instance ENV : conteneurs supprimés, vo
 status: check-env-file ## [ENV] État des services de l'instance ENV et récapitulatif des URLs
 	@FORCER="$(FORCER)" scripts/instance.sh status "$(ENV)"
 
-reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_MODE=custom) : Traefik recréé
+reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_MODE=custom) : Traefik recréé ; runner et SonarQube si la CA a changé
 	@# Mode effectif lu comme le profil (check-env) : variable du shell, sinon dernière affectation
 	@if [[ -n "$${TLS_MODE+x}" ]]; then mode="$${TLS_MODE}"; else \
 	  mode="$$(sed -nE "s/^[[:space:]]*TLS_MODE=[\"']?([^\"']*)[\"']?[[:space:]]*$$/\1/p" "$(ENV_FILE)" | tail -n1)"; \
@@ -129,7 +129,7 @@ reload-certs: check-env ## [ENV] Recharge les certificats de config/certs/ (TLS_
 	if [[ "$${mode:-none}" != custom ]]; then \
 	  echo "reload-certs : réservé à TLS_MODE=custom ($(ENV_FILE) : TLS_MODE=$${mode:-none})." >&2; exit 1; \
 	fi
-	@# Certificats déjà contrôlés par check-env ; recréation de Traefik par scripts/instance.sh
+	@# Certificats déjà contrôlés par check-env ; Traefik, puis CA privée, par scripts/instance.sh
 	@FORCER="$(FORCER)" scripts/instance.sh reload-certs "$(ENV)"
 
 # Étapes dans l'ordre : SonarQube puis GitLab, cible préparée une seule fois (docs/bootstrap.md)

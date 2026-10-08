@@ -147,8 +147,8 @@ verifier_certificats_custom() {
 }
 
 # Contrôle de la CA facultative de TLS_MODE=custom, <répertoire>/ca/ca.pem (docs/certificats.md), montée
-# dans gitlab-runner. Erreurs (retour 1) : <répertoire>/ca/ contient autre chose que ca.pem et .gitkeep
-# (une clé de CA serait copiée sur l'hôte cible, montée dans le runner) ; ca.pem vide, illisible, pas
+# dans gitlab-runner et sonarqube. Erreurs (retour 1) : <répertoire>/ca/ contient autre chose que
+# ca.pem et .gitkeep (une clé de CA serait copiée sur l'hôte cible, montée dans les conteneurs) ; ca.pem vide, illisible, pas
 # un certificat PEM ou contenant une clé privée ; <répertoire>/cert.pem non vérifiable avec cette CA
 # (-partial_chain : une CA intermédiaire suffit, comme pour le runner et curl). Sans ca.pem : rien.
 # Messages sur stderr ; lecture seule. Suppose <répertoire>/cert.pem lisible (verifier_certificats_custom).
@@ -164,7 +164,7 @@ verifier_ca_custom() {
   done
   if ((${#intrus[@]})); then
     echo "$dir/ ne doit contenir que ca.pem (certificat public de la CA) : retirer ${intrus[*]}." >&2
-    echo "  Le répertoire est monté dans gitlab-runner et copié sur l'hôte cible : jamais de clé de CA." >&2
+    echo "  Le répertoire est monté dans gitlab-runner et sonarqube, et copié sur l'hôte cible : jamais de clé de CA." >&2
     return 1
   fi
   [[ -e "$ca" ]] || return 0
