@@ -78,14 +78,14 @@ services:
     depends_on:
       loki:
         condition: service_started
-      socket-proxy:
+      socket-proxy-promtail:
         condition: service_healthy
     networks:
-      # platform : seul réseau à passerelle (socket-proxy est interne), voir compose/proxy.yml
+      # platform : seul réseau à passerelle (socket-proxy-promtail est interne), voir compose/proxy.yml
       - platform
-      # Découverte des conteneurs et lecture de leurs logs via l'API Docker filtrée
-      # (compose/socket-proxy.yml, tcp://socket-proxy:2375 dans promtail-config.yaml)
-      - socket-proxy
+      # Découverte des conteneurs et lecture de leurs logs via l'API Docker filtrée par son proxy
+      # (compose/socket-proxy.yml, tcp://socket-proxy-promtail:2375 dans promtail-config.yaml)
+      - socket-proxy-promtail
 
   # ---------------------------------------------------------------------------
   # Grafana — UI de visualisation des logs
@@ -164,8 +164,8 @@ networks:
   platform:
     name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
-  socket-proxy:
-    name: devops-platform_socket-proxy
+  socket-proxy-promtail:
+    name: devops-platform_socket-proxy-promtail
     driver: bridge
     internal: true
 

@@ -95,7 +95,7 @@ job : libcurl (donc git) résout tout `*.localhost` vers `127.0.0.1` sans consul
 `/etc/hosts`, et la JVM du scanner SonarQube n'utilise pas la CA fournie aux jobs (#144).
 
 `make check-env` et `make bootstrap` refusent un `GITLAB_RUNNER_NETWORK` égal à un réseau de la
-plateforme (`PLATFORM_NETWORK`, `devops-platform_socket-proxy`, `devops-platform_gitlab-proxy`). Le
+plateforme (`PLATFORM_NETWORK`, `devops-platform_socket-proxy*`, `devops-platform_gitlab-proxy`). Le
 smoke test vérifie l'isolation depuis un job ([smoke test](smoke-test.md)).
 
 Après un changement de hostname, de `TLS_MODE` ou de `GITLAB_RUNNER_NETWORK`, `make bootstrap`

@@ -7,7 +7,8 @@
 #   compose/observability.yml  loki, promtail, grafana
 #   compose/tools.yml          portainer, plantuml
 #   compose/proxy.yml          traefik (reverse proxy : seul point d'entrée HTTP, routage par hostname)
-#   compose/socket-proxy.yml   socket-proxy (API Docker filtrée, en lecture, pour traefik et promtail)
+#   compose/socket-proxy.yml   socket-proxy-traefik, socket-proxy-promtail (API Docker filtrée, en
+#                              lecture, un proxy et une liste blanche par client)
 #   compose/tls/<mode>.yml     overlay de traefik propre au TLS_MODE de l'instance (none, custom,
 #                              letsencrypt), fusionné avec compose/proxy.yml dans le même include
 #   compose/tls/gitlab/<mode>.yml  overlay de gitlab-runner propre au TLS_MODE (CA privée en custom),

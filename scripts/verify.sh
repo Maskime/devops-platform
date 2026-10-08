@@ -220,17 +220,25 @@ else
   ok "pas encore de compose.yml"
 fi
 
-# 3 quinquies. Accès au socket Docker : seuls le proxy filtrant (socket-proxy) et les services hors
-#              périmètre (gitlab-runner, portainer) montent un socket Docker (cible ou source
-#              contenant docker.sock, ou /run, /var/run, /run/user/<uid> entiers). Le réseau dédié
-#              socket-proxy est interne, réservé au proxy et à ses clients (traefik, promtail), et
-#              le proxy n'est sur aucun autre réseau. Mêmes cibles que la section précédente.
+# 3 quinquies. Accès au socket Docker : seuls les proxys filtrants (socket-proxy-<client>) et les
+#              services hors périmètre (gitlab-runner, portainer) montent un socket Docker (cible ou
+#              source contenant docker.sock, ou /run, /var/run, /run/user/<uid> entiers). Un proxy par
+#              client (PROXYS_ATTENDUS), chacun seul avec son client sur son réseau dédié
+#              socket-proxy-<client>, interne. Liste blanche par client : options du proxy limitées à
+#              OPTIONS_PROXY (aucune méthode d'écriture, ni liste par labels, ni socket ou bind mount),
+#              `-allowfrom` réduit à son client, aucune variable SP_*, lecture des logs réservée à
+#              LOGS_AUTORISES. Mêmes cibles que la section précédente.
 section "accès au socket Docker"
-SOCKET_AUTORISES=(gitlab-runner portainer socket-proxy)
-CLIENTS_PROXY=(socket-proxy traefik promtail)
-dans_liste() { # <valeur> <éléments…>
+SOCKET_AUTORISES=(gitlab-runner portainer 'socket-proxy-?*')
+PROXYS_ATTENDUS=(socket-proxy-traefik socket-proxy-promtail)
+LOGS_AUTORISES=(socket-proxy-promtail)
+# Options admises dans le `command` d'un proxy (-allowGET et -allowHEAD : lecture seule)
+OPTIONS_PROXY=(-listenip -allowfrom -allowGET -allowHEAD -allowhealthcheck -watchdoginterval
+  -stoponwatchdog -shutdowngracetime -loglevel -logjson)
+dans_liste() { # <valeur> <motifs…>
   local v="$1" e; shift
-  for e in "$@"; do [[ "$e" == "$v" ]] && return 0; done
+  # shellcheck disable=SC2053 # motif voulu : `*` des listes
+  for e in "$@"; do [[ "$v" == $e ]] && return 0; done
   return 1
 }
 if [[ -f compose.yml ]]; then
@@ -240,8 +248,9 @@ if [[ -f compose.yml ]]; then
     if ! config="$(config_cible "$cible")"; then
       ko "$f : configuration illisible"; continue
     fi
-    # Montages (service:source:cible) et réseaux (service:clé) des services ; réseau socket-proxy
-    # déclaré interne. Sortie normalisée : clés de service à 4 espaces, éléments à 6, champs à 8.
+    # Montages (service:source:cible), réseaux (service:clé), réseaux internes (clé), arguments
+    # (service<TAB>argument) et variables (service<TAB>clé) des proxys. Sortie normalisée : clés de
+    # service à 4 espaces, éléments à 6, champs à 8.
     mapfile -t montages < <(awk '
       function sortir() { if (src != "" || dst != "") print service ":" src ":" dst; src = dst = "" }
       /^[^ ]/ { sortir(); dans_services = ($0 == "services:"); dans_vol = 0; next }
@@ -260,11 +269,20 @@ if [[ -f compose.yml ]]; then
       /^    [^ ]/ { dans_net = ($1 == "networks:"); next }
       dans_net && /^      [^ -]/ { r = $1; sub(/:$/, "", r); print service ":" r }
     ' <<< "$config")
-    interne="$(awk '
+    mapfile -t internes < <(awk '
       /^[^ ]/ { dans = ($0 == "networks:"); next }
-      dans && /^  [^ ]/ { reseau = $1; next }
-      dans && reseau == "socket-proxy:" && /^    internal: true$/ { print "oui" }
-    ' <<< "$config")"
+      dans && /^  [^ ]/ { reseau = $1; sub(/:$/, "", reseau); next }
+      dans && /^    internal: true$/ { print reseau }
+    ' <<< "$config")
+    mapfile -t parametres < <(awk '
+      /^[^ ]/ { dans_services = ($0 == "services:"); cle = ""; next }
+      !dans_services { next }
+      /^  [^ ]/ { service = $1; sub(/:$/, "", service); cle = ""; next }
+      service !~ /^socket-proxy/ { next }
+      /^    [^ ]/ { cle = $1; sub(/:.*$/, "", cle); next }
+      cle == "command" && /^      - / { a = $0; sub(/^      - /, "", a); gsub(/^["\x27]|["\x27]$/, "", a); print service "\t" a }
+      cle == "environment" && /^      [^ ]/ { v = $1; sub(/:$/, "", v); print service "\tenv:" v }
+    ' <<< "$config")
     if ((${#montages[@]} == 0 || ${#reseaux[@]} == 0)); then
       ko "$f : aucun montage ou réseau lu (format de docker compose config inattendu ?)"; continue
     fi
@@ -276,19 +294,53 @@ if [[ -f compose.yml ]]; then
         dans_liste "$s" "${SOCKET_AUTORISES[@]}" || interdits+=("socket monté par $s ($src)")
       fi
     done
+    # Membres de chaque réseau socket-proxy* : le proxy et son client (traefik pour socket-proxy-traefik)
     for r in "${reseaux[@]}"; do
       s="${r%%:*}" n="${r#*:}"
-      if [[ "$n" == socket-proxy ]]; then
-        dans_liste "$s" "${CLIENTS_PROXY[@]}" || interdits+=("$s sur le réseau socket-proxy")
-      elif [[ "$s" == socket-proxy ]]; then
-        interdits+=("socket-proxy sur le réseau $n")
+      if [[ "$n" == socket-proxy* ]]; then
+        [[ "$s" == "$n" || "$s" == "${n#socket-proxy-}" ]] || interdits+=("$s sur le réseau $n")
+      elif [[ "$s" == socket-proxy* ]]; then
+        interdits+=("$s sur le réseau $n")
       fi
     done
-    [[ "$interne" == oui ]] || interdits+=("réseau socket-proxy absent ou non interne")
+    for p in "${PROXYS_ATTENDUS[@]}"; do
+      client="${p#socket-proxy-}"
+      dans_liste "$p:$p" "${reseaux[@]}" || interdits+=("$p absent ou hors du réseau $p")
+      dans_liste "$client:$p" "${reseaux[@]}" || interdits+=("$client hors du réseau $p")
+    done
+    # Tout réseau socket-proxy* déclaré par un service est interne
+    for r in "${reseaux[@]}"; do
+      n="${r#*:}"
+      [[ "$n" == socket-proxy* ]] && ! dans_liste "$n" "${internes[@]}" \
+        && interdits+=("réseau $n non interne")
+    done
+    # Liste blanche de chaque proxy
+    declare -A allowfrom=()
+    for l in "${parametres[@]}"; do
+      s="${l%%$'\t'*}" a="${l#*$'\t'}"
+      case "$a" in
+        env:SP_*) interdits+=("$s : variable ${a#env:} (configuration du proxy par command uniquement)") ;;
+        env:*) ;;
+        -allowfrom=*) allowfrom[$s]+="${a#-allowfrom=} " ;;
+        *)
+          dans_liste "${a%%=*}" "${OPTIONS_PROXY[@]}" || interdits+=("$s : option ${a%%=*} non admise")
+          if [[ "$a" == -allow* && "$a" == *logs* ]] && ! dans_liste "$s" "${LOGS_AUTORISES[@]}"; then
+            interdits+=("$s : lecture des logs autorisée")
+          fi
+          ;;
+      esac
+    done
+    # Un seul client par proxy : celui que désigne son nom
+    for s in $(printf '%s\n' "${reseaux[@]%%:*}" | grep '^socket-proxy' | sort -u); do
+      [[ "${allowfrom[$s]:-}" == "${s#socket-proxy-} " ]] \
+        || interdits+=("$s : -allowfrom=${allowfrom[$s]:-(absent) }au lieu de -allowfrom=${s#socket-proxy-}")
+    done
+    unset allowfrom
+    mapfile -t interdits < <(printf '%s\n' "${interdits[@]}" | sed '/^$/d' | sort -u)
     if ((${#interdits[@]})); then
       ko "$f : $(printf '%s ; ' "${interdits[@]}" | sed 's/ ; $//')"
     else
-      ok "$f : socket monté par ${SOCKET_AUTORISES[*]} au plus ; réseau socket-proxy interne (${CLIENTS_PROXY[*]})"
+      ok "$f : socket monté par ${SOCKET_AUTORISES[*]} au plus ; ${PROXYS_ATTENDUS[*]} seuls avec leur client sur leur réseau interne ; logs : ${LOGS_AUTORISES[*]}"
     fi
   done
 else

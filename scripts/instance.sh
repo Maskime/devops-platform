@@ -264,6 +264,37 @@ nettoyer_config() {
     || echo "Attention : nettoyage des anciennes copies de configuration impossible (sans incidence)." >&2
 }
 
+# --- Migration du proxy de socket ----------------------------------------------------------------
+
+# Migration : l'ancien proxy de socket commun à Traefik et Promtail (service socket-proxy) est remplacé
+# par un proxy par client (socket-proxy-traefik, socket-proxy-promtail). Son conteneur, orphelin, monte
+# encore le socket Docker : supprimé avant `up` (idempotent, sans effet une fois migré).
+readonly ANCIEN_SERVICE_PROXY=socket-proxy
+readonly ANCIEN_RESEAU_PROXY=devops-platform_socket-proxy
+retirer_ancien_proxy() {
+  local ids
+  ids="$(docker ps -aq --filter "label=com.docker.compose.project=$projet" \
+    --filter "label=com.docker.compose.service=$ANCIEN_SERVICE_PROXY")"
+  [[ -n "$ids" ]] || return 0
+  echo "Ancien proxy de socket commun ($ANCIEN_SERVICE_PROXY) : suppression du conteneur (remplacé par un proxy par client)."
+  # shellcheck disable=SC2086 # un identifiant par mot
+  docker rm -f $ids >/dev/null  # check-noms: id
+}
+
+# Réseau de l'ancien proxy commun, sans membre une fois Traefik et Promtail recréés par `up` : supprimé
+# (idempotent). Conservé, avec un avertissement, s'il a encore des membres.
+retirer_ancien_reseau_proxy() {
+  local membres
+  membres="$(docker network inspect -f '{{len .Containers}}' "$ANCIEN_RESEAU_PROXY" 2>/dev/null)" || return 0
+  if [[ "$membres" == 0 ]]; then
+    echo "Ancien réseau du proxy de socket commun ($ANCIEN_RESEAU_PROXY) : suppression."
+    docker network rm "$ANCIEN_RESEAU_PROXY" >/dev/null
+  else
+    echo "Avertissement : le réseau $ANCIEN_RESEAU_PROXY a encore $membres membre(s), conservé" \
+      "(docker network inspect $ANCIEN_RESEAU_PROXY)." >&2
+  fi
+}
+
 # --- CA privée (TLS_MODE=custom) ------------------------------------------------------------------
 
 # Attend que chaque service soit healthy (après un restart, qui n'attend pas)
@@ -409,13 +440,15 @@ case "$action" in
     if [[ -n "$deploy_ssh" ]]; then verifier_instance 1; copier_config; fi
     # Conteneurs en double (lancés hors compose.yml ou sous un autre projet) : refus avant `up`
     scripts/check-doublons.sh "$env_file"
+    retirer_ancien_proxy
     # Compose reconnecte les conteneurs existants à un réseau renommé (PLATFORM_NETWORK) sans les
     # recréer : leur NetworkMode vise encore l'ancien réseau, supprimé, et ils ne redémarrent plus.
     # Dans ce cas, recréation forcée (volumes conservés). Un conteneur peut n'être que sur un réseau
-    # dédié (socket-proxy) : son réseau principal est comparé à l'ensemble des réseaux déclarés.
+    # dédié (socket-proxy-*) : son réseau principal est comparé à l'ensemble des réseaux déclarés.
+    # Conteneurs des services retirés de la configuration (orphelins) exclus : sans objet ici.
     reseaux=" $(sed -n '/^networks:/,/^[^ ]/ s/^    name: //p' <<<"$config" | paste -sd ' ' -) "
     options=()
-    for id in $("${compose[@]}" ps -aq); do
+    for id in $("${compose[@]}" ps -aq --orphans=false); do
       mode="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$id")"
       if [[ "$reseaux" != *" $mode "* ]]; then
         echo "Réseau modifié ($mode, absent de :$reseaux) : recréation des conteneurs."
@@ -424,6 +457,7 @@ case "$action" in
       fi
     done
     (set -x; "${compose[@]}" up -d --wait --wait-timeout "$WAIT_TIMEOUT" "${options[@]}")
+    retirer_ancien_reseau_proxy
     appliquer_ca
     if [[ -n "$deploy_ssh" ]]; then nettoyer_config; fi
     "${compose[@]}" ps -a --format 'table {{.Service}}\t{{.Status}}'

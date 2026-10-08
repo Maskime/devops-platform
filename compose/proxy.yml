@@ -40,9 +40,9 @@ services:
       # (URL_INTERNE_*) : à garder identiques.
       TRAEFIK_ENTRYPOINTS_INTERNE_ADDRESS: ":8000"
       TRAEFIK_ENTRYPOINTS_INTERNE_HTTP_ALIASHEADERSSTRATEGY: delete
-      # API Docker lue via le proxy de socket filtrant (compose/socket-proxy.yml) : Traefik ne monte
-      # pas le socket, une compromission ne donne pas la main sur l'hôte
-      TRAEFIK_PROVIDERS_DOCKER_ENDPOINT: tcp://socket-proxy:2375
+      # API Docker lue via son proxy de socket filtrant (compose/socket-proxy.yml) : Traefik ne monte
+      # pas le socket, une compromission ne donne pas la main sur l'hôte (ni accès aux logs)
+      TRAEFIK_PROVIDERS_DOCKER_ENDPOINT: tcp://socket-proxy-traefik:2375
       # Seuls les conteneurs marqués traefik.enable=true sont exposés
       TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
       # Réseau par lequel joindre les services (requis dès qu'un conteneur en a plusieurs)
@@ -62,7 +62,7 @@ services:
     ports:
       - "80:80"
     depends_on:
-      socket-proxy:
+      socket-proxy-traefik:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
@@ -71,7 +71,7 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      # platform et ci : réseaux à passerelle (socket-proxy et gitlab-proxy sont internes), porteurs des
+      # platform et ci : réseaux à passerelle (socket-proxy-traefik et gitlab-proxy sont internes), porteurs des
       # ports publiés et de l'accès sortant (ACME). Pas de gw_priority : il exigerait Compose 2.33 /
       # Engine 28, au-delà des versions minimales de scripts/host-prereqs.sh (#145).
       platform:
@@ -99,16 +99,16 @@ services:
           - sonarqube.devops-platform.internal
       # Lien vers le nginx de GitLab, seul sous-réseau auquel GitLab fait confiance pour X-Forwarded-For
       gitlab-proxy: {}
-      # Accès à l'API Docker filtrée (compose/socket-proxy.yml)
-      socket-proxy: {}
+      # Accès à l'API Docker filtrée (compose/socket-proxy.yml), réseau partagé avec son seul proxy
+      socket-proxy-traefik: {}
 
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
   platform:
     name: ${PLATFORM_NETWORK:-devops-platform}
     driver: bridge
-  socket-proxy:
-    name: devops-platform_socket-proxy
+  socket-proxy-traefik:
+    name: devops-platform_socket-proxy-traefik
     driver: bridge
     internal: true
   # Réseau des conteneurs de jobs CI (GITLAB_RUNNER_NETWORK, enregistré par make bootstrap), créé ici
