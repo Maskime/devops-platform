@@ -9,6 +9,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Mot de passe admin Grafana : `GRAFANA_ADMIN_PASSWORD` est désormais transmis par un secret Compose.
+  Aucune action : même variable, `grafana` recréé au prochain `make deploy` (volume `grafana_data` et
+  compte admin conservés, mot de passe inchangé). Son absence est refusée par `make check-env` et non
+  plus par `docker compose config` ; un lancement `docker compose up` sans make avec une valeur vide
+  est refusé par l'entrypoint de Grafana. Une surcharge locale qui définirait `GF_SECURITY_ADMIN_PASSWORD`
+  est à retirer (Grafana refuse de démarrer).
 - Token d'analyse SonarQube : le premier `make bootstrap` crée le compte technique
   `devops-platform-analyse`, lui génère un nouveau token, le pose dans `SONAR_TOKEN` et révoque
   l'ancien token `devops-platform-analyse` du compte `admin`. Les projets consommateurs qui utilisent
@@ -332,6 +338,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Sécurité
 
+- Mot de passe admin Grafana transmis par un secret Compose (`GF_SECURITY_ADMIN_PASSWORD__FILE`), comme
+  celui de Portainer : il n'apparaît plus dans `docker inspect` ni dans `docker compose config`.
+  Présence contrôlée par `make check-env` ; un secret vide fait refuser le démarrage de Grafana au lieu
+  de créer le compte admin avec le mot de passe par défaut.
 - Plus aucun secret en argument de processus dans les scripts (visible par `ps` ou `docker inspect`) :
   identifiants et jetons passent par l'entrée standard (`curl -K -`, API GitLab) ou par une variable
   d'environnement héritée (`CI_SERVER_TOKEN` de `gitlab-runner register`).
