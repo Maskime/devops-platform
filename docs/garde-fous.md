@@ -1,7 +1,8 @@
 # Garde-fous
 
-Deux protections de la plateforme : contre le démarrage de conteneurs en double sur les volumes d'une
-instance, et contre la publication de secrets dans ce repo public.
+Trois protections de la plateforme : contre le démarrage de conteneurs en double sur les volumes d'une
+instance, contre la publication de secrets dans ce repo public et contre l'introduction d'une image
+non épinglée.
 
 ## Lancements en double
 
@@ -94,3 +95,22 @@ git config --unset core.hooksPath     # désactivation
 
 **Fuite avérée.** Révoquer immédiatement le secret auprès du service concerné : une fois poussé sur un
 repo public, il doit être considéré comme compromis. Purger ensuite l'historique (`git filter-repo`).
+
+## Images épinglées
+
+`scripts/check-images.sh` refuse toute image dont la version n'est pas figée : image compose non
+paramétrée par `*_VERSION`, défaut sans version `majeure.mineure` ou différent de `envs/.env.example`,
+variable `*_IMAGE` d'un script ou image d'un pipeline `*.gitlab-ci.yml` sans tag versionné ni digest,
+tag `latest` explicite, version vide ou `latest` dans `envs/*.env`. Le script n'utilise que bash, git et
+les outils POSIX (aucun Docker). Règles et procédure : [Montée de version](montee-de-version.md).
+
+| Contexte | Commande |
+|---|---|
+| CI GitHub Actions (chaque push et PR) | `.github/workflows/check-images.yml`, automatique |
+| Manuel | `make check-images` (inclus dans `make verify`) |
+
+La CI ne voit que les fichiers versionnés : les fichiers d'instance `envs/<env>.env` restent contrôlés
+par `make verify` et, avant tout démarrage, par `make check-env`.
+
+Un job en échec ne bloque le merge d'une PR que si le check est déclaré obligatoire dans la protection
+de la branche `main` (réglage GitHub du repo).
