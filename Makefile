@@ -105,8 +105,13 @@ check-env: check-env-file
 deploy: check-env ## [ENV] Démarre l'instance ENV (locale ou distante) et attend que tous les services soient healthy
 	@FORCER="$(FORCER)" scripts/instance.sh deploy "$(ENV)"
 
-down: check-env-file ## [ENV] Arrête l'instance ENV : conteneurs supprimés, volumes conservés
-	@FORCER="$(FORCER)" scripts/instance.sh down "$(ENV)"
+# Instance distante : confirmation demandée (terminal) ou CONFIRMER=1, accepté seulement sur la ligne de
+# commande, comme NETTOYER
+down: check-env-file ## [ENV] Arrête l'instance ENV : conteneurs supprimés, volumes conservés ; distante : confirmation, ou CONFIRMER=1
+	@if [[ "$(origin CONFIRMER)" == "environment" ]]; then \
+	  echo "CONFIRMER hérité du shell refusé : le passer explicitement, make down ENV=$(ENV) CONFIRMER=1" >&2; exit 1; \
+	fi
+	@FORCER="$(FORCER)" CONFIRMER="$(CONFIRMER)" scripts/instance.sh down "$(ENV)"
 
 status: check-env-file ## [ENV] État des services de l'instance ENV et récapitulatif des URLs
 	@FORCER="$(FORCER)" scripts/instance.sh status "$(ENV)"

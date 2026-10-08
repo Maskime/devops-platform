@@ -13,7 +13,8 @@
 #         scripts/instance.sh compose <env> <arguments docker compose…>   (commande manuelle)
 # Garde-fous de configuration (make check-env) : appliqués par le Makefile avant deploy et reload-certs.
 # Variables transmises par le Makefile : FORCER=1 (garde-fou de l'hôte), ROTATION=1 (bootstrap : token
-# d'analyse SonarQube remplacé, voir scripts/bootstrap/sonarqube.sh).
+# d'analyse SonarQube remplacé, voir scripts/bootstrap/sonarqube.sh), CONFIRMER=1 (down d'une instance
+# distante sans question, obligatoire hors terminal).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -254,9 +255,25 @@ recapitulatif() {
   printf '  %-10s ssh://git@%s:%s\n' "SSH GitLab" "${hote:-gitlab.localhost}" "${port_ssh:-2222}"
 }
 
+# Arrêt d'une instance distante : confirmation avant tout contact avec le serveur. En terminal, le nom
+# de l'instance est à retaper (l'hôte affiché révèle une faute sur ENV) ; hors terminal, CONFIRMER=1.
+confirmer_arret() {
+  case "${CONFIRMER:-}" in
+    1) return 0 ;;
+    '') ;;
+    *) erreur "CONFIRMER invalide : $CONFIRMER (attendu : 1)" ;;
+  esac
+  [[ -t 0 ]] || erreur "arrêt de l'instance distante $env ($deploy_ssh) : confirmation requise hors terminal, make down ENV=$env CONFIRMER=1"
+  local reponse=""
+  echo "Arrêt de l'instance $env sur $deploy_ssh : conteneurs supprimés (volumes conservés), services indisponibles." >&2
+  read -r -p "Taper le nom de l'instance ($env) pour confirmer : " reponse || true
+  [[ "$reponse" == "$env" ]] || erreur "arrêt annulé (réponse différente de « $env »)."
+}
+
 # --- Actions -------------------------------------------------------------------------------------
 
 if [[ -n "$deploy_ssh" ]]; then
+  if [[ "$action" == down ]]; then confirmer_arret; fi
   preparer_contexte_distant
   empreinte="$(empreinte_config)"
   export PLATFORM_CONFIG_DIR="$deploy_dir/config-$empreinte"

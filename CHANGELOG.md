@@ -56,6 +56,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- `make down` sur une instance distante (`DEPLOY_SSH`) demande de retaper le nom de l'instance, ou
+  `CONFIRMER=1` sur la ligne de commande hors terminal ; aucun contact avec le serveur avant
+  confirmation.
 - Guide de branchement d'un projet (`docs/branchement-projet.md`) : `outputs/<env>.env`, exemple de
   `.gitlab-ci.yml` avec analyse SonarQube, projet hébergé, co-localisé (réseau Docker externe) ou
   distant (URLs publiques).
@@ -315,6 +318,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Corrigé
 
+- `make check-env` et `make verify` valident la configuration Loki sur un moteur Docker du poste, quels
+  que soient le contexte Docker courant et `DOCKER_HOST` (contexte courant s'il est local, sinon
+  `default`) ; sans moteur local, contrôles statiques seuls avec un avertissement.
 - `make deploy` ne refuse plus un conteneur d'un autre projet Compose attaché au réseau des jobs CI
   (projet co-localisé) ; le réseau de la plateforme et les volumes restent contrôlés.
 - `scripts/instance.sh` : en distant (`DEPLOY_SSH`), le pré-test SSH consommait l'entrée standard

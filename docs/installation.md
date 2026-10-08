@@ -50,7 +50,8 @@ En local, choisir `small`. Sous WSL2, la mémoire disponible pour Docker est cel
 ### Poste de l'opérateur
 
 - Docker (CLI, plugin Compose 2.24 minimum) **et un moteur Docker local** : `make` valide la
-  configuration de Loki dans un conteneur local, même pour une instance distante.
+  configuration de Loki dans un conteneur local, même pour une instance distante, quel que soit le
+  contexte Docker courant ou `DOCKER_HOST` ([détails](deploiement.md#prérequis)).
 - GNU `make`, `git`, bash 4 minimum (sur macOS : celui de Homebrew), client OpenSSH 7.7 minimum,
   `sha256sum` ou `shasum`, `openssl` (contrôle des certificats en `TLS_MODE=custom`).
 
