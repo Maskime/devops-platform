@@ -71,3 +71,10 @@ Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, en `TLS_MOD
   Portainer est de fait `root` sur l'hôte.
 - **Grafana.** Authentification obligatoire : accès anonyme, inscription et création d'organisation
   désactivés, ainsi que les dashboards partagés publiquement et les snapshots (consultables sans compte).
+  Le compte admin est créé au premier démarrage avec `GRAFANA_ADMIN_PASSWORD`, transmis par un secret
+  Compose (`GF_SECURITY_ADMIN_PASSWORD__FILE`) : absent de `docker compose config` et de
+  `docker inspect`. Le script de démarrage de l'image le recopie toutefois dans l'environnement du
+  processus Grafana, lisible depuis le conteneur (`docker exec`). Un secret vide ou absent fait
+  refuser le démarrage (`make check-env`, puis l'entrypoint du conteneur), faute de quoi Grafana
+  créerait le compte avec le mot de passe par défaut `admin`. Ne pas définir aussi
+  `GF_SECURITY_ADMIN_PASSWORD` par une surcharge locale : Grafana refuse alors de démarrer.

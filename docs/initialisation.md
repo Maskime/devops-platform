@@ -29,6 +29,6 @@ proposées par défaut et **ses secrets sont repris**. Les autres réglages (por
 repartent du modèle : les reprendre depuis la sauvegarde si besoin.
 `FORCE=1 NOUVEAUX_MDP=1` régénère aussi les secrets : à réserver à une instance jamais déployée ou à
 réinstaller, car le mot de passe PostgreSQL de SonarQube est inscrit dans son volume et les mots de
-passe root GitLab et admin Portainer ne sont appliqués qu'au premier démarrage. Un secret absent de
+passe root GitLab et admin Grafana et Portainer ne sont appliqués qu'au premier démarrage. Un secret absent de
 l'ancien fichier (variable ajoutée depuis) est généré et signalé. `FORCE` et `NOUVEAUX_MDP` ne sont acceptés
 que sur la ligne de commande, jamais hérités du shell.
