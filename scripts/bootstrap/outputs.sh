@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fichier de sortie d'une instance pour les projets consommateurs : outputs/<env>.env (URLs publiques,
-# URL de l'API GitLab, token d'analyse SonarQube). Lit uniquement des fichiers locaux (envs/<env>.env,
+# URL de l'API GitLab, token d'analyse SonarQube, réseau Docker des jobs pour les projets co-localisés). Lit uniquement des fichiers locaux (envs/<env>.env,
 # outputs/<env>.sonarqube-token), aucun appel Docker : régénérer est toujours sans risque. Idempotent.
 # Lancé par `make bootstrap ENV=<env>` (scripts/instance.sh bootstrap) après chaque étape réussie.
 # Documentation : docs/sortie-instance.md.
@@ -112,6 +112,11 @@ if present grafana; then
 else
   lignes+=("# Grafana : service absent de l'instance.")
 fi
+
+# Réseau des jobs CI, créé par compose/proxy.yml quels que soient les services : à rejoindre par un
+# projet co-localisé (docs/branchement-projet.md). Même validation que make check-env.
+reseau="$(reseau_jobs "$env_file")" || erreur "réseau des jobs non exportable"
+lignes+=("DEVOPS_PLATFORM_CI_NETWORK=$reseau")
 
 if [[ "$tls_mode" == custom && -f "$CA_CUSTOM" ]]; then
   lignes+=("# Certificats signés par une CA privée : fournir $CA_CUSTOM aux clients (git, curl, scanners).")

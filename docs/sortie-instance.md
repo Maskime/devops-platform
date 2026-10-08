@@ -1,7 +1,8 @@
 # Fichier de sortie d'une instance
 
 `make bootstrap ENV=<env>` écrit `outputs/<env>.env` : ce qu'il faut pour brancher un projet sur
-l'instance (URLs publiques, API GitLab, token d'analyse SonarQube), sans relire `envs/<env>.env`.
+l'instance (URLs publiques, API GitLab, token d'analyse SonarQube, réseau Docker des jobs), sans relire
+`envs/<env>.env`. Mode d'emploi côté projet : [branchement d'un projet](branchement-projet.md).
 Le fichier est produit par `scripts/bootstrap/outputs.sh`.
 
 ## Contenu
@@ -15,6 +16,7 @@ Le fichier est produit par `scripts/bootstrap/outputs.sh`.
 | `SONAR_HOST_URL` | URL publique de SonarQube |
 | `SONAR_TOKEN` | Token d'analyse SonarQube ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)) |
 | `GRAFANA_URL` | URL publique de Grafana |
+| `DEVOPS_PLATFORM_CI_NETWORK` | Réseau Docker des jobs CI (`GITLAB_RUNNER_NETWORK`), à rejoindre par un [projet co-localisé](branchement-projet.md#projet-co-localisé) |
 
 `SONAR_HOST_URL` et `SONAR_TOKEN` portent les noms attendus par les scanners SonarQube.
 
@@ -71,10 +73,8 @@ docker compose --env-file outputs/<env>.env config   # interpolation Compose
 docker run --env-file outputs/<env>.env …            # variables d'un conteneur
 ```
 
-Un projet hébergé sur l'instance n'a rien à déclarer : `make bootstrap` pose `SONAR_HOST_URL` et
-`SONAR_TOKEN` en variables CI d'instance ([Analyse SonarQube depuis la CI](analyse-sonarqube.md)). Pour
-un projet hébergé sur un autre GitLab, les déclarer comme variables CI de ce projet (`SONAR_TOKEN`
-masquée).
+Quelles variables reprendre selon l'emplacement du projet (hébergé sur l'instance, co-localisé,
+distant) : [branchement d'un projet](branchement-projet.md).
 
 ## Limites
 
