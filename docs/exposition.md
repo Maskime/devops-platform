@@ -61,8 +61,9 @@ Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, en `TLS_MOD
   tournent sur un réseau dédié où seul Traefik est joignable
   ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)).
 - **API Docker.** Traefik et Promtail ne montent pas le socket Docker : ils lisent l'API, en lecture
-  seule et sur une liste blanche d'endpoints, via le proxy filtrant `socket-proxy`, joignable
-  uniquement sur un réseau interne dédié. Détails et limites : [accès à l'API Docker](acces-docker.md).
+  seule et sur une liste blanche d'endpoints propre à chacun, via leur proxy filtrant
+  (`socket-proxy-traefik`, `socket-proxy-promtail`), joignable uniquement sur un réseau interne dédié
+  à chaque client. Traefik n'a pas accès aux logs des conteneurs. Détails et limites : [accès à l'API Docker](acces-docker.md).
 - **Portainer.** Le compte `admin` est créé dès le premier démarrage avec `PORTAINER_ADMIN_PASSWORD`
   (secret Compose, absent de `docker compose config` et de `docker inspect`) : aucun visiteur ne peut
   s'approprier l'instance avant l'opérateur. Ce mot de passe n'est appliqué qu'au premier démarrage
