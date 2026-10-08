@@ -1,5 +1,5 @@
 # =============================================================================
-# Brique socket-proxy : accès filtré, en lecture seule, à l'API Docker de l'hôte
+# Brique socket-proxy : accès filtré, en lecture seule, à l'API Docker de l'hôte (un proxy par client)
 # Inclus par compose.yml ; lancé seul, il est refusé par le garde-fou ci-dessous (voir l'en-tête
 # de compose.yml). Brique requise par proxy (Traefik) et observability (Promtail) : ne pas la
 # désactiver. Mécanisme, endpoints autorisés et limites : docs/acces-docker.md.
@@ -7,60 +7,84 @@
 # Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
 x-garde-fou-socket-proxy: "${PLATFORM_GARDE_FOU:?compose/socket-proxy.yml est un module de compose.yml et ne se lance pas seul (conteneurs en double sur les volumes de l'instance) : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
 
+# Configuration commune aux deux proxys (ancre locale à ce fichier). Root sans aucune capacité :
+# l'utilisateur de l'image (65534) ne peut pas lire le socket (root:docker 0660, GID docker propre à
+# chaque hôte) ; root en est propriétaire en Docker classique et correspond à l'utilisateur de l'hôte
+# en Docker rootless.
+x-socket-proxy: &socket-proxy
+  image: wollomatic/socket-proxy:${SOCKET_PROXY_VERSION:-1.13.1}
+  restart: unless-stopped
+  user: "0:0"
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  volumes:
+    - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+  healthcheck:
+    test: ["CMD", "/healthcheck"]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+    start_period: 5s
+
 services:
 
   # ---------------------------------------------------------------------------
-  # Socket proxy — seul de ces services à monter le socket Docker. Traefik (provider Docker) et
-  # Promtail (docker_sd_configs) l'interrogent sur tcp://socket-proxy:2375, par le réseau dédié
-  # socket-proxy (interne, sans port publié, inaccessible aux jobs CI).
-  # Hors périmètre : gitlab-runner (crée les conteneurs de jobs) et portainer (administration de
-  # Docker) montent toujours le socket.
+  # Un proxy par client, chacun avec sa liste blanche et sur son propre réseau interne (sans port
+  # publié, inaccessible aux jobs CI et à l'autre client) : seuls ces deux services de la plateforme
+  # montent le socket Docker. Hors périmètre : gitlab-runner (crée les conteneurs de jobs) et portainer
+  # (administration de Docker) montent toujours le socket.
+  # Listes blanches : tout ce qui n'est pas listé est refusé (403). Motifs ancrés automatiquement
+  # (^…$), comparés au chemin de la requête, avec ou sans préfixe de version d'API (/v1.NN/). Aucune
+  # méthode d'écriture (POST, PUT, DELETE…) : ni création, ni exec, ni arrêt de conteneur.
+  # Options communes : écoute sur toutes les interfaces du réseau dédié, sonde /healthcheck ; socket
+  # inaccessible (redémarrage du démon Docker) : arrêt, puis redémarrage par Docker.
   # ---------------------------------------------------------------------------
-  socket-proxy:
-    image: wollomatic/socket-proxy:${SOCKET_PROXY_VERSION:-1.13.1}
-    restart: unless-stopped
-    # Root sans aucune capacité : l'utilisateur de l'image (65534) ne peut pas lire le socket
-    # (root:docker 0660, GID docker propre à chaque hôte) ; root en est propriétaire en Docker
-    # classique et correspond à l'utilisateur de l'hôte en Docker rootless.
-    user: "0:0"
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    # Tout ce qui n'est pas listé est refusé (403). Motifs ancrés automatiquement (^…$), comparés au
-    # chemin de la requête, avec ou sans préfixe de version d'API (/v1.NN/). Aucune méthode
-    # d'écriture (POST, PUT, DELETE…) : ni création, ni exec, ni arrêt de conteneur.
-    # Lecture : version et ping (négociation de l'API), liste et inspection des conteneurs, logs
-    # (Promtail), réseaux (docker_sd_configs), événements (Traefik).
-    # Clients : seuls les hostnames traefik et promtail, résolus sur le réseau dédié à chaque requête.
+
+  # Traefik (provider Docker, tcp://socket-proxy-traefik:2375) : version et ping (négociation de
+  # l'API ; HEAD /_ping pour Traefik ≥ 3.6.1), liste et inspection des conteneurs, événements.
+  # Pas de logs.
+  socket-proxy-traefik:
+    <<: *socket-proxy
     command:
       - -listenip=0.0.0.0
-      - -allowfrom=traefik,promtail
-      - '-allowGET=/(v1\.[0-9]+/)?(_ping|version|containers/json|containers/[a-zA-Z0-9_.-]+/(json|logs)|networks|events)'
-      # HEAD /_ping : négociation de la version d'API par Traefik (≥ 3.6.1)
+      - -allowfrom=traefik
+      - '-allowGET=/(v1\.[0-9]+/)?(_ping|version|containers/json|containers/[a-zA-Z0-9_.-]+/json|events)'
       - '-allowHEAD=/(v1\.[0-9]+/)?_ping'
       - -allowhealthcheck
-      # Socket inaccessible (redémarrage du démon Docker) : arrêt, puis redémarrage par Docker
       - -watchdoginterval=60
       - -stoponwatchdog
       - -shutdowngracetime=5
-    volumes:
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
-    healthcheck:
-      test: ["CMD", "/healthcheck"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
     networks:
-      - socket-proxy
+      - socket-proxy-traefik
 
-# Réseau dédié au proxy et à ses seuls clients (traefik, promtail) : interne (aucun accès sortant ni
-# port publié), distinct du réseau de la plateforme partagé avec les jobs CI. Définition strictement
-# identique dans chaque module qui le déclare (compose refuse les définitions divergentes).
+  # Promtail (docker_sd_configs, tcp://socket-proxy-promtail:2375) : ping (négociation de l'API),
+  # liste et inspection des conteneurs, logs, réseaux (labels de docker_sd_configs). Pas d'événements.
+  socket-proxy-promtail:
+    <<: *socket-proxy
+    command:
+      - -listenip=0.0.0.0
+      - -allowfrom=promtail
+      - '-allowGET=/(v1\.[0-9]+/)?(_ping|containers/json|containers/[a-zA-Z0-9_.-]+/(json|logs)|networks)'
+      - '-allowHEAD=/(v1\.[0-9]+/)?_ping'
+      - -allowhealthcheck
+      - -watchdoginterval=60
+      - -stoponwatchdog
+      - -shutdowngracetime=5
+    networks:
+      - socket-proxy-promtail
+
+# Réseaux dédiés, un par proxy et son seul client : internes (aucun accès sortant ni port publié),
+# distincts du réseau de la plateforme partagé avec les jobs CI. Définition strictement identique dans
+# chaque module qui les déclare (compose refuse les définitions divergentes).
 networks:
-  socket-proxy:
-    name: devops-platform_socket-proxy
+  socket-proxy-traefik:
+    name: devops-platform_socket-proxy-traefik
+    driver: bridge
+    internal: true
+  socket-proxy-promtail:
+    name: devops-platform_socket-proxy-promtail
     driver: bridge
     internal: true
