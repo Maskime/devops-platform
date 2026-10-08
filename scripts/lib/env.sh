@@ -26,9 +26,9 @@ env_valeur() { # <fichier> <clé>
 
 # Réseau Docker des jobs CI (GITLAB_RUNNER_NETWORK, défaut devops-platform_ci), contrôlé : nom Docker
 # valide et distinct de tout réseau de la plateforme (compose/*.yml). Sur le réseau de la plateforme,
-# un job joindrait bases, Loki et nginx de GitLab ; sur socket-proxy, l'API Docker (variables
-# d'environnement, donc secrets, des conteneurs) ; sur gitlab-proxy, le sous-réseau auquel GitLab fait
-# confiance pour X-Forwarded-For. Nom sur stdout ; motif du refus sur stderr (code 1).
+# un job joindrait bases, Loki et nginx de GitLab ; sur un réseau socket-proxy* (proxys de socket, ancien
+# réseau commun compris), l'API Docker (variables d'environnement, donc secrets, des conteneurs) ; sur
+# gitlab-proxy, le sous-réseau auquel GitLab fait confiance pour X-Forwarded-For. Nom sur stdout ; motif du refus sur stderr (code 1).
 reseau_jobs() { # <fichier>
   local reseau plateforme
   reseau="$(env_valeur "$1" GITLAB_RUNNER_NETWORK)"
@@ -37,7 +37,7 @@ reseau_jobs() { # <fichier>
   plateforme="${plateforme:-devops-platform}"
   if [[ ! "$reseau" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
     echo "GITLAB_RUNNER_NETWORK invalide : $reseau (nom de réseau Docker attendu)." >&2
-  elif [[ "$reseau" == "$plateforme" || "$reseau" == devops-platform_socket-proxy \
+  elif [[ "$reseau" == "$plateforme" || "$reseau" == devops-platform_socket-proxy* \
     || "$reseau" == devops-platform_gitlab-proxy ]]; then
     echo "GITLAB_RUNNER_NETWORK invalide : $reseau est un réseau de la plateforme ; les jobs CI doivent" >&2
     echo "  tourner sur un réseau dédié (docs/gitlab-proxy.md, « Runner et jobs CI »)." >&2
