@@ -13,7 +13,7 @@ DEPLOY_SSH=ssh://deploy@devops.mondomaine.fr     # vide ou absente : moteur Dock
 |---|---|
 | `make deploy ENV=<env>` | Contrôles (`make check-env`), démarrage ou mise à jour, attente que tous les services soient healthy (15 min au plus), récapitulatif des URLs |
 | `make status ENV=<env>` | Cible, état de chaque service, récapitulatif des URLs |
-| `make down ENV=<env>` | Arrête l'instance : conteneurs et réseaux supprimés, **volumes conservés** |
+| `make down ENV=<env>` | Arrête l'instance : conteneurs et réseaux supprimés, **volumes conservés**. Instance distante : [confirmation](#arrêt) |
 
 `DEPLOY_SSH` et `DEPLOY_DIR` sont lues **dans le fichier uniquement** : contrairement aux autres
 variables, une valeur exportée dans le shell est ignorée, pour que la cible d'une commande ne dépende
@@ -32,13 +32,24 @@ que du fichier de l'instance.
 **Poste de l'opérateur** :
 
 - Docker (CLI, plugin Compose 2.24 minimum) **et un moteur Docker local** : `make check-env` valide la
-  configuration Loki dans un conteneur local (#94) ;
+  configuration Loki dans un conteneur, même pour une instance distante (voir ci-dessous) ;
 - client OpenSSH 7.7 minimum, bash 4 minimum (sur macOS : bash de Homebrew), `sha256sum` ou `shasum` ;
 - connexion SSH non interactive : `ssh <DEPLOY_SSH> docker version` doit répondre sans question
   (clé chargée ou déclarée dans `~/.ssh/config`, hôte déjà présent dans `known_hosts`).
 
 `make deploy` commence par ce test (`BatchMode`, 10 s maximum). En cas d'échec, il affiche l'erreur
 SSH et les points à vérifier, au lieu de rester bloqué sur une question.
+
+**Moteur local du contrôle Loki.** `make check-env` (préalable de `deploy`, `bootstrap`, `smoke`…) et
+`make verify` lancent Loki avec `-verify-config` sur un moteur **du poste**, quels que soient le
+contexte Docker courant (`docker context use`, `DOCKER_CONTEXT`) et `DOCKER_HOST` :
+
+- `DOCKER_HOST` (et `DOCKER_TLS_VERIFY`, `DOCKER_CERT_PATH`) est ignoré pour ce contrôle ;
+- le contexte courant est retenu s'il désigne un moteur local (`unix://`, `npipe://` : Docker Desktop,
+  Colima, OrbStack…) et répond, sinon le contexte `default` (`/var/run/docker.sock`) ;
+- si aucun ne répond, seuls les contrôles statiques sont faits (`-config.expand-env=true`, format et
+  minimum de `LOKI_RETENTION_PERIOD`) et un avertissement l'indique : la configuration n'est alors
+  validée par Loki qu'au démarrage, sur le serveur.
 
 ## Mécanisme
 
@@ -156,5 +167,17 @@ distroless) : il doit être démarré, et sa santé est couverte par celui de Pr
 - les volumes (données GitLab, SonarQube, Grafana…) sont conservés ;
 - les copies de configuration restent sur le serveur.
 
-`make deploy` relance l'instance à l'identique. Aucune confirmation n'est demandée, y compris pour une
-instance distante (#95).
+`make deploy` relance l'instance à l'identique.
+
+**Instance distante** (`DEPLOY_SSH` défini) : avant tout contact avec le serveur, `make down` affiche
+l'instance et son hôte, puis demande de **retaper le nom de l'instance** ; toute autre réponse annule.
+Hors terminal (script, CI), la confirmation passe par `CONFIRMER=1`, accepté seulement sur la ligne de
+commande (une variable exportée dans le shell est refusée) :
+
+```bash
+make down ENV=prod                # question : taper « prod » pour confirmer
+make down ENV=prod CONFIRMER=1    # sans question (obligatoire hors terminal)
+```
+
+Une instance locale s'arrête sans question. Les commandes manuelles
+(`scripts/instance.sh compose <env> down`, `stop`…) ne demandent pas de confirmation.
