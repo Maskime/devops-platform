@@ -43,6 +43,9 @@
     a.carte code { font-size: 0.8125rem; color: var(--doux); word-break: break-all; }
     h2 { margin: 40px 0 4px; font-size: 1.25rem; }
     section > p { margin: 0 0 16px; color: var(--doux); }
+    main a:not(.carte) { color: var(--accent); }
+    footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--bord); color: var(--doux);
+      font-size: 0.875rem; }
     div.carte { padding: 20px; border: 1px solid var(--bord); border-radius: 10px; background: var(--carte); }
     div.carte strong { display: block; font-size: 1.125rem; }
     div.carte span { display: block; color: var(--doux); font-size: 0.9375rem; }
@@ -80,7 +83,8 @@
     </ul>
     <section>
       <h2>Serveurs MCP</h2>
-      <p>Pour brancher un agent IA (Claude Code…) sur l'instance : voir docs/mcp.md du dépôt.</p>
+      <p>Pour brancher un agent IA (Claude Code…) sur l'instance : voir
+        <a href="https://github.com/Maskime/devops-platform/blob/main/docs/mcp.md">la documentation des serveurs MCP</a>.</p>
       <ul>
         <li><div class="carte">
           <strong>GitLab</strong>
@@ -96,6 +100,11 @@
             data-entete="Authorization: Bearer &lt;jeton&gt;"></code></div></li>
       </ul>
     </section>
+    <footer>
+      Plateforme déployée depuis le dépôt
+      <a href="https://github.com/Maskime/devops-platform">Maskime/devops-platform</a> (documentation d'exploitation dans
+      <a href="https://github.com/Maskime/devops-platform/tree/main/docs">docs/</a>).
+    </footer>
   </main>
   <script>
     // URLs complètes avec le schéma de la page (http ou https selon le TLS_MODE de l'instance)
