@@ -3,7 +3,9 @@
   Page d'accueil de la plateforme, servie par le service home (compose/tools.yml).
   Modèle rendu au démarrage du conteneur par l'image nginx (envsubst) : les variables ${…} sont les
   hostnames de l'instance, transmis par compose. Liens sans schéma (//hôte/) : ils reprennent celui
-  de la page, identique pour tous les services (TLS_MODE commun à l'instance).
+  de la page, identique pour tous les services (TLS_MODE commun à l'instance) ; les URLs MCP affichées
+  le reçoivent du script en fin de page. Serveur MCP SonarQube : SONARQUBE_MCP_ACTIF (1 ou 0), calculé
+  par scripts/instance.sh (docs/mcp.md).
 -->
 <html lang="fr">
 <head>
@@ -39,6 +41,13 @@
     a.carte strong { display: block; font-size: 1.125rem; color: var(--accent); }
     a.carte span { display: block; color: var(--doux); font-size: 0.9375rem; }
     a.carte code { font-size: 0.8125rem; color: var(--doux); word-break: break-all; }
+    h2 { margin: 40px 0 4px; font-size: 1.25rem; }
+    section > p { margin: 0 0 16px; color: var(--doux); }
+    div.carte { padding: 20px; border: 1px solid var(--bord); border-radius: 10px; background: var(--carte); }
+    div.carte strong { display: block; font-size: 1.125rem; }
+    div.carte span { display: block; color: var(--doux); font-size: 0.9375rem; }
+    div.carte code { display: block; margin-top: 8px; font-size: 0.8125rem; word-break: break-all; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -69,6 +78,39 @@
         <span>Génération de diagrammes.</span>
         <code>${PLANTUML_HOSTNAME}</code></a></li>
     </ul>
+    <section>
+      <h2>Serveurs MCP</h2>
+      <p>Pour brancher un agent IA (Claude Code…) sur l'instance : voir docs/mcp.md du dépôt.</p>
+      <ul>
+        <li><div class="carte">
+          <strong>GitLab</strong>
+          <span>Serveur intégré à GitLab. Authentification OAuth dans le navigateur, HTTPS obligatoire.</span>
+          <code data-url="//${GITLAB_HOSTNAME}/api/v4/mcp">${GITLAB_HOSTNAME}/api/v4/mcp</code>
+          <code data-commande="gitlab" data-url="//${GITLAB_HOSTNAME}/api/v4/mcp"></code></div></li>
+        <li><div class="carte" data-mcp-sonarqube="${SONARQUBE_MCP_ACTIF}">
+          <strong>SonarQube</strong>
+          <span class="actif">Authentification par jeton utilisateur SonarQube (en-tête Authorization: Bearer).</span>
+          <span class="inactif">Désactivé sur cette instance (SONARQUBE_MCP_ENABLED).</span>
+          <code class="actif" data-url="//${SONARQUBE_MCP_HOSTNAME}/mcp">${SONARQUBE_MCP_HOSTNAME}/mcp</code>
+          <code class="actif" data-commande="sonarqube" data-url="//${SONARQUBE_MCP_HOSTNAME}/mcp"
+            data-entete="Authorization: Bearer &lt;jeton&gt;"></code></div></li>
+      </ul>
+    </section>
   </main>
+  <script>
+    // URLs complètes avec le schéma de la page (http ou https selon le TLS_MODE de l'instance)
+    document.querySelectorAll("code[data-url]").forEach(function (e) {
+      var url = location.protocol + e.dataset.url;
+      if (!e.dataset.commande) { e.textContent = url; return; }
+      e.textContent = "claude mcp add --transport http " + e.dataset.commande + " " + url +
+        (e.dataset.entete ? ' --header "' + e.dataset.entete + '"' : "");
+    });
+    // Carte SonarQube : contenu selon l'activation du serveur MCP
+    document.querySelectorAll("[data-mcp-sonarqube]").forEach(function (c) {
+      var actif = c.dataset.mcpSonarqube === "1";
+      c.querySelectorAll(".actif").forEach(function (e) { e.hidden = !actif; });
+      c.querySelectorAll(".inactif").forEach(function (e) { e.hidden = actif; });
+    });
+  </script>
 </body>
 </html>

@@ -295,6 +295,19 @@ retirer_ancien_reseau_proxy() {
   fi
 }
 
+# Serveur MCP SonarQube désactivé (SONARQUBE_MCP_ENABLED, TLS_MODE=none) : hors des profils actifs,
+# son conteneur n'est plus géré par `up` et resterait exposé. Supprimé avant `up` (idempotent).
+retirer_sonarqube_mcp() {
+  local ids
+  ((mcp_sonar)) && return 0
+  ids="$(docker ps -aq --filter "label=com.docker.compose.project=$projet" \
+    --filter "label=com.docker.compose.service=sonarqube-mcp")"
+  [[ -n "$ids" ]] || return 0
+  echo "Serveur MCP SonarQube désactivé (SONARQUBE_MCP_ENABLED, TLS_MODE) : suppression du conteneur sonarqube-mcp."
+  # shellcheck disable=SC2086 # un identifiant par mot
+  docker rm -f $ids >/dev/null  # check-noms: id
+}
+
 # --- CA privée (TLS_MODE=custom) ------------------------------------------------------------------
 
 # Attend que chaque service soit healthy (après un restart, qui n'attend pas)
@@ -395,6 +408,21 @@ recapitulatif() {
   hote="$(env_valeur "$env_file" GITLAB_HOSTNAME)"
   port_ssh="$(env_valeur "$env_file" GITLAB_SSH_PORT)"
   printf '  %-10s ssh://git@%s:%s\n' "SSH GitLab" "${hote:-gitlab.localhost}" "${port_ssh:-2222}"
+  # Serveurs MCP (docs/mcp.md) : GitLab intégré (OAuth, exige HTTPS côté client), SonarQube s'il est actif
+  echo
+  echo "Serveurs MCP :"
+  if [[ "$schema" == https ]]; then
+    printf '  %-10s %s://%s/api/v4/mcp\n' GitLab "$schema" "${hote:-gitlab.localhost}"
+  else
+    printf '  %-10s %s://%s/api/v4/mcp (inutilisable en TLS_MODE=none : OAuth refusé en HTTP)\n' GitLab \
+      "$schema" "${hote:-gitlab.localhost}"
+  fi
+  if ((mcp_sonar)); then
+    hote="$(env_valeur "$env_file" SONARQUBE_MCP_HOSTNAME)"
+    printf '  %-10s %s://%s/mcp\n' SonarQube "$schema" "${hote:-sonarqube-mcp.localhost}"
+  else
+    printf '  %-10s désactivé (SONARQUBE_MCP_ENABLED, TLS_MODE=%s)\n' SonarQube "${tls_mode:-none}"
+  fi
 }
 
 # Arrêt d'une instance distante : confirmation avant tout contact avec le serveur. En terminal, le nom
@@ -431,6 +459,18 @@ else
   # vide ; recréé s'il a disparu, sinon `up` échouerait : « bind source path does not exist »)
   if [[ "$(env_valeur "$env_file" TLS_MODE)" == custom ]]; then mkdir -p config/certs/ca; fi
 fi
+# Serveur MCP SonarQube : profil Compose sonarqube-mcp, ajouté aux profils de l'instance s'il est actif
+# (scripts/lib/env.sh). Exporté : hérité par les scripts de bootstrap et de smoke test.
+mcp_sonar=0 code=0
+sonarqube_mcp_actif "$env_file" || code=$?
+case "$code" in
+  0) mcp_sonar=1 ;;
+  2) exit 1 ;;
+esac
+profils="$(env_valeur "$env_file" COMPOSE_PROFILES)"
+if ((mcp_sonar)); then export COMPOSE_PROFILES="${profils:+$profils,}sonarqube-mcp"; fi
+# Variable interne, lue par la page d'accueil (compose/tools.yml)
+export PLATFORM_SONARQUBE_MCP_ACTIF="$mcp_sonar"
 config="$("${compose[@]}" config)"
 projet="$(sed -n 's/^name: //p' <<<"$config" | head -n1)"
 
@@ -441,6 +481,7 @@ case "$action" in
     # Conteneurs en double (lancés hors compose.yml ou sous un autre projet) : refus avant `up`
     scripts/check-doublons.sh "$env_file"
     retirer_ancien_proxy
+    retirer_sonarqube_mcp
     # Compose reconnecte les conteneurs existants à un réseau renommé (PLATFORM_NETWORK) sans les
     # recréer : leur NetworkMode vise encore l'ancien réseau, supprimé, et ils ne redémarrent plus.
     # Dans ce cas, recréation forcée (volumes conservés). Un conteneur peut n'être que sur un réseau

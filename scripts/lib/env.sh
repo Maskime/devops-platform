@@ -64,3 +64,24 @@ sous_reseau_gitlab_proxy_valide() { # <fichier>
   echo "  Corriger dans $1 : GITLAB_PROXY_SUBNET=172.31.254.0/28 (ou commenter la ligne)" >&2
   return 1
 }
+
+# Serveur MCP SonarQube (service sonarqube-mcp, profil Compose du même nom) : SONARQUBE_MCP_ENABLED
+# vaut true ou false ; vide ou absente : actif sauf en TLS_MODE=none (jetons utilisateur en clair).
+# Code 0 si actif, 1 sinon, 2 si la valeur est invalide (motif sur stderr).
+sonarqube_mcp_actif() { # <fichier>
+  local valeur mode
+  valeur="$(env_valeur "$1" SONARQUBE_MCP_ENABLED)"
+  case "${valeur,,}" in
+    true) return 0 ;;
+    false) return 1 ;;
+    '')
+      mode="$(env_valeur "$1" TLS_MODE)"
+      [[ "${mode:-none}" != none ]] && return 0
+      return 1
+      ;;
+    *)
+      echo "SONARQUBE_MCP_ENABLED invalide : $valeur (true, false, ou absente : actif sauf en TLS_MODE=none)." >&2
+      return 2
+      ;;
+  esac
+}

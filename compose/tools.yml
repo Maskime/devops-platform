@@ -84,6 +84,9 @@ services:
       GRAFANA_HOSTNAME: ${GRAFANA_HOSTNAME:-grafana.localhost}
       PORTAINER_HOSTNAME: ${PORTAINER_HOSTNAME:-portainer.localhost}
       PLANTUML_HOSTNAME: ${PLANTUML_HOSTNAME:-plantuml.localhost}
+      SONARQUBE_MCP_HOSTNAME: ${SONARQUBE_MCP_HOSTNAME:-sonarqube-mcp.localhost}
+      # Serveur MCP SonarQube actif (1) ou non (0) : calculé par scripts/instance.sh (profil sonarqube-mcp)
+      SONARQUBE_MCP_ACTIF: ${PLATFORM_SONARQUBE_MCP_ACTIF:-0}
     labels:
       traefik.enable: "true"
       traefik.http.routers.home.rule: Host(`${HOME_HOSTNAME:-home.localhost}`)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap GitLab d'une instance déployée : attente de GitLab, jeton d'accès personnel (PAT)
 # d'administration renouvelé, variables CI d'instance SonarQube (SONAR_HOST_URL, SONAR_TOKEN), runner
-# d'instance enregistré. Aucune donnée de test créée ; idempotent.
+# d'instance enregistré, accès au serveur MCP intégré autorisé. Aucune donnée de test créée ; idempotent.
 # Lancé par `make bootstrap ENV=<env>` (scripts/instance.sh bootstrap), qui positionne la cible Docker
 # (contexte SSH d'une instance distante). Documentation : docs/bootstrap.md.
 #
@@ -565,6 +565,47 @@ attendre "Runner $courant en ligne" "$ATTENTE_EN_LIGNE" runner_en_ligne \
   || erreur "le runner $courant n'est pas en ligne après $ATTENTE_EN_LIGNE s (docker compose logs gitlab-runner)"
 verrou_tenu
 
+# --- 5. Serveur MCP --------------------------------------------------------------------------------
+
+etape "Serveur MCP de GitLab ($url/api/v4/mcp)"
+# Accès au serveur MCP intégré autorisé pour l'instance (réglage mcp_server_enabled, absent de l'API
+# des réglages : gitlab-rails). Enregistrement dynamique des clients OAuth (utilisé par Claude Code)
+# seulement contrôlé : le désactiver est un choix d'administration (docs/mcp.md).
+# shellcheck disable=SC2016 # code Ruby
+readonly CODE_MCP='
+s = ApplicationSetting.current_without_cache or abort("Réglages de l instance introuvables.")
+abort("Réglage mcp_server_enabled absent de cette version de GitLab.") unless s.respond_to?(:mcp_server_enabled)
+if s.mcp_server_enabled
+  puts "MCP=déjà autorisé"
+else
+  s.update!(mcp_server_enabled: true)
+  puts "MCP=autorisé"
+end
+puts "DCR=#{s.respond_to?(:dynamic_client_registration_enabled) ? s.dynamic_client_registration_enabled : "inconnu"}"
+'
+erreurs_mcp="$(mktemp)"
+if ! sortie_mcp="$(dc exec -T gitlab gitlab-rails runner "$CODE_MCP" 2> "$erreurs_mcp")"; then
+  cat "$erreurs_mcp" >&2
+  rm -f "$erreurs_mcp"
+  erreur "autorisation du serveur MCP de GitLab impossible (voir ci-dessus)"
+fi
+rm -f "$erreurs_mcp"
+etat_mcp="$(sed -n 's/^MCP=//p' <<<"$sortie_mcp" | tail -n1)"
+echo "    Accès au serveur MCP : ${etat_mcp:-?}."
+if [[ "$(sed -n 's/^DCR=//p' <<<"$sortie_mcp" | tail -n1)" != true ]]; then
+  {
+    echo "Attention : enregistrement dynamique des clients OAuth désactivé : les clients MCP (Claude Code)"
+    echo "  ne s'enregistrent pas d'eux-mêmes ; application OAuth à créer (scope mcp) : docs/mcp.md."
+  } >&2
+fi
+if [[ "$url" != https://* ]]; then
+  {
+    echo "Attention : $url en HTTP : les clients MCP refusent l'authentification OAuth hors HTTPS (sauf"
+    echo "  localhost) ; serveur MCP de GitLab inutilisable en TLS_MODE=none (docs/mcp.md)."
+  } >&2
+fi
+verrou_tenu
+
 echo
 echo "Bootstrap GitLab terminé ($env) :"
 echo "  Runner     : id=$courant, « $description », jobs sur le réseau $reseau (image $RUNNER_IMAGE)"
@@ -575,3 +616,4 @@ echo "  CI SonarQube : SONAR_HOST_URL $etat_sonar_url"
 echo "                 SONAR_TOKEN $etat_sonar_token"
 echo "  Jeton root : $PAT_NOM, scopes api et admin_mode, expire le $expiration (valeur non affichée)"
 echo "  Runners    : $url/admin/runners"
+echo "  MCP        : $url/api/v4/mcp (accès ${etat_mcp:-?})"

@@ -20,9 +20,12 @@ source "$ROOT/scripts/lib/tls.sh"
 # Clés des mots de passe générés (minuscules : pas de faux positif de check-secrets)
 cles_mdp=(GITLAB_ROOT_PASSWORD SONARQUBE_DB_PASSWORD SONARQUBE_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD
   PORTAINER_ADMIN_PASSWORD)
-services=(home gitlab sonarqube grafana portainer plantuml)
-declare -A noms=([home]="la page d'accueil" [gitlab]=GitLab [sonarqube]=SonarQube [grafana]=Grafana [portainer]=Portainer
-  [plantuml]=PlantUML)
+services=(home gitlab sonarqube sonarqube-mcp grafana portainer plantuml)
+declare -A noms=([home]="la page d'accueil" [gitlab]=GitLab [sonarqube]=SonarQube
+  [sonarqube-mcp]="SonarQube MCP" [grafana]=Grafana [portainer]=Portainer [plantuml]=PlantUML)
+
+# Clé du hostname d'un service : SONARQUBE_MCP_HOSTNAME pour sonarqube-mcp
+cle_hostname() { local c="${1^^}"; printf '%s_HOSTNAME' "${c//-/_}"; }
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
@@ -125,7 +128,7 @@ demander domaine "Domaine de base de l'instance" "$domaine_existant" valider_hos
 
 declare -A hostnames
 for s in "${services[@]}"; do
-  cle="${s^^}_HOSTNAME"
+  cle="$(cle_hostname "$s")"
   defaut="$s.$domaine"
   # Hostname existant proposé seulement si le domaine n'a pas changé
   if [[ "$domaine" == "$domaine_existant" ]]; then
@@ -190,7 +193,7 @@ done
 valeurs[TLS_MODE]="$tls_mode"
 valeurs[PLATFORM_PROFILE]="$profil"
 for s in "${services[@]}"; do
-  valeurs[${s^^}_HOSTNAME]="${hostnames[$s]}"
+  valeurs[$(cle_hostname "$s")]="${hostnames[$s]}"
 done
 
 # URLs publiques : hostname du service, servi par Traefik (contrôlé par scripts/check-env-urls.sh).
@@ -264,7 +267,7 @@ if ((existant)); then
   echo "  depuis la sauvegarde si besoin."
 fi
 for s in "${services[@]}"; do
-  printf '  %-23s %s\n' "${s^^}_HOSTNAME" "${hostnames[$s]}"
+  printf '  %-23s %s\n' "$(cle_hostname "$s")" "${hostnames[$s]}"
 done
 printf '  %-23s %s\n' TLS_MODE "$tls_mode" PLATFORM_PROFILE "$profil" \
   "GITLAB_EXTERNAL_URL" "$url_gitlab (dérivée)" \

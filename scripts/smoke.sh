@@ -3,7 +3,8 @@
 # root/devops-platform-smoke dans GitLab, y pousse scripts/smoke/projet/ (.gitlab-ci.yml avec un job
 # simple, un job d'isolation réseau et un job sonar-scanner) et la liste des cibles injoignables depuis
 # un job (ISOLATION_FICHIER), attend que le pipeline passe au vert et que l'analyse du commit
-# apparaisse dans SonarQube. NETTOYER=1 : projets de test GitLab et SonarQube supprimés après un succès.
+# apparaisse dans SonarQube, puis interroge les serveurs MCP (SonarQube s'il est actif, GitLab) avec des
+# jetons éphémères. NETTOYER=1 : projets de test GitLab et SonarQube supprimés après un succès.
 # Lancé par `make smoke ENV=<env>` (scripts/instance.sh smoke), qui positionne la cible Docker (contexte
 # SSH d'une instance distante). Documentation : docs/smoke-test.md.
 #
@@ -40,6 +41,10 @@ readonly SOURCES=scripts/smoke/projet
 readonly ISOLATION_FICHIER=isolation-cibles.txt
 # Nom du PAT root du smoke test, distinct de celui du bootstrap (qui révoque les jetons de son nom)
 readonly PAT_NOM=devops-platform-smoke
+# Serveurs MCP (docs/mcp.md) : jeton utilisateur SonarQube (compte admin) et application OAuth GitLab
+# éphémères, de ce nom, supprimés en fin d'étape ; serveur MCP SonarQube joint par le réseau de la plateforme
+readonly MCP_NOM=devops-platform-smoke-mcp
+readonly MCP_SONAR_URL=http://sonarqube-mcp:8080/mcp
 # Verrou de make bootstrap (scripts/instance.sh, scripts/bootstrap/gitlab.sh) : volume du runner
 readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
 # Premier pipeline : téléchargement de l'image du scanner compris
@@ -90,8 +95,14 @@ readonly CODE_REVOCATION='
 code, _ = api("delete", "/personal_access_tokens/self")
 abort("HTTP #{code}") unless code == 204
 '
+mcp_sonar_jeton=""
 terminer() {
   local code=$?
+  if [[ -n "$mcp_sonar_jeton" ]]; then
+    mcp_sonar_jeton=""
+    sonar_api POST /api/user_tokens/revoke "$admin" "name=$MCP_NOM" > /dev/null 2>&1 && [[ "$CODE" == 204 ]] \
+      || echo "Attention : jeton SonarQube $MCP_NOM (compte admin) non révoqué : le révoquer dans SonarQube." >&2
+  fi
   if [[ -n "$pat" ]]; then
     if gitlab_api "$CODE_REVOCATION" > /dev/null; then
       pat=""
@@ -410,7 +421,108 @@ attendre "Analyse" "$ATTENTE_ANALYSE" analyse_presente \
   || erreur "aucune analyse du commit ${sha:0:8} dans SonarQube après $((ATTENTE_ANALYSE / 60)) min ($sonar_url/dashboard?id=$SONAR_CLE)"
 echo "    Analyse présente : $sonar_url/dashboard?id=$SONAR_CLE"
 
-# --- 8. Nettoyage ---------------------------------------------------------------------------------
+# --- 8. Serveurs MCP -------------------------------------------------------------------------------
+
+etape "Serveurs MCP (docs/mcp.md)"
+verrou_tenu
+# Requête JSON-RPC au serveur MCP SonarQube depuis le conteneur sonarqube : <corps JSON>. Jeton dans la
+# configuration curl (entrée standard), jamais en argument. Positionne CODE et CORPS.
+mcp_sonar() {
+  local config sortie
+  config="url = $(cfg "$MCP_SONAR_URL")"$'\n'
+  config+="header = $(cfg "Authorization: Bearer $mcp_sonar_jeton")"$'\n'
+  config+='header = "Content-Type: application/json"'$'\n'
+  config+='header = "Accept: application/json, text/event-stream"'$'\n'
+  config+="data = $(cfg "$1")"$'\n'
+  CODE='' CORPS=''
+  sortie="$(dc exec -T sonarqube curl -sS -K - -w '\n%{http_code}' <<<"$config" 2>/dev/null)" || return 1
+  CODE="${sortie##*$'\n'}"
+  CORPS="${sortie%"$CODE"}"
+}
+readonly MCP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"devops-platform-smoke","version":"1"}}}'
+if [[ "$services" != *" sonarqube-mcp "* ]]; then
+  echo "    SonarQube : serveur MCP désactivé (SONARQUBE_MCP_ENABLED, TLS_MODE), non testé."
+else
+  [[ -n "$(dc ps -q --status running sonarqube-mcp)" ]] \
+    || erreur "service sonarqube-mcp arrêté : démarrer l'instance (make deploy ENV=$env)"
+  # Jeton utilisateur du compte admin (les jetons de projet ou globaux sont refusés par le serveur MCP),
+  # régénéré : un jeton du même nom laissé par une exécution interrompue est d'abord révoqué
+  sonar_api POST /api/user_tokens/revoke "$admin" "name=$MCP_NOM" || erreur "SonarQube injoignable"
+  sonar_api POST /api/user_tokens/generate "$admin" "name=$MCP_NOM" type=USER_TOKEN || erreur "SonarQube injoignable"
+  [[ "$CODE" == 200 ]] || erreur "HTTP $CODE à la création du jeton utilisateur $MCP_NOM"
+  mcp_sonar_jeton="$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' <<<"$CORPS")"
+  CORPS=''
+  [[ "$mcp_sonar_jeton" =~ $MOTIF_TOKEN_SONAR ]] || erreur "jeton utilisateur SonarQube absent de la réponse"
+  mcp_sonar "$MCP_INIT" || erreur "serveur MCP SonarQube injoignable depuis sonarqube"
+  [[ "$CODE" == 200 && "$CORPS" == *'"serverInfo"'* ]] || erreur "initialize refusé par le serveur MCP SonarQube : HTTP $CODE"
+  version_mcp="$(sed -n 's/.*"serverInfo":{[^}]*"version":"\([^"]*\)".*/\1/p' <<<"$CORPS")"
+  mcp_sonar '{"jsonrpc":"2.0","method":"notifications/initialized"}' || erreur "serveur MCP SonarQube injoignable"
+  mcp_sonar '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_my_sonarqube_projects","arguments":{}}}' \
+    || erreur "serveur MCP SonarQube injoignable"
+  [[ "$CODE" == 200 && "$CORPS" == *'"isError":false'* && "$CORPS" == *"$SONAR_CLE"* ]] \
+    || erreur "outil search_my_sonarqube_projects : projet $SONAR_CLE absent de la réponse (HTTP $CODE) : ${CORPS:0:300}"
+  echo "    SonarQube : serveur MCP ${version_mcp:-?}, projet $SONAR_CLE listé par search_my_sonarqube_projects."
+  sonar_api POST /api/user_tokens/revoke "$admin" "name=$MCP_NOM" || erreur "SonarQube injoignable"
+  [[ "$CODE" == 204 ]] || erreur "HTTP $CODE à la révocation du jeton utilisateur $MCP_NOM"
+  mcp_sonar_jeton=""
+fi
+
+# GitLab : application OAuth (scope mcp) et jeton d'accès de root créés par gitlab-rails, comme le
+# ferait un client MCP après autorisation dans le navigateur ; appels depuis le conteneur gitlab, jeton
+# jamais sorti du processus, application supprimée en fin d'appel (succès ou échec)
+# shellcheck disable=SC2016 # code Ruby
+readonly CODE_MCP_GITLAB='
+require "net/http"
+nom, chemin = ENV.fetch("MCP_NOM"), ENV.fetch("MCP_PROJET")
+root = User.find_by_username("root") or abort("Compte root introuvable.")
+abort("Accès au serveur MCP non autorisé : make bootstrap.") unless Gitlab::CurrentSettings.mcp_server_enabled?
+org = Organizations::Organization.default_organization.id
+Authn::OauthApplication.where(name: nom).find_each do |a|
+  Doorkeeper::AccessToken.where(application_id: a.id).delete_all
+  a.destroy!
+end
+app = Authn::OauthApplication.create!(name: nom, redirect_uri: "http://localhost/", scopes: "mcp",
+  confidential: false, organization_id: org)
+begin
+  t = Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: root.id, scopes: "mcp",
+    expires_in: 600, organization_id: org)
+  jeton = t.plaintext_token || t.token
+  appel = lambda do |corps|
+    uri = URI("http://localhost/api/v4/mcp")
+    req = Net::HTTP::Post.new(uri)
+    req["Authorization"] = "Bearer #{jeton}"
+    req["Content-Type"] = "application/json"
+    req["Accept"] = "application/json, text/event-stream"
+    req.body = JSON.generate(corps)
+    rep = Net::HTTP.start(uri.host, uri.port) { |h| h.request(req) }
+    abort("MCP GitLab #{corps[:method]} : HTTP #{rep.code} : #{rep.body.to_s[0, 300]}") unless rep.code == "200"
+    JSON.parse(rep.body)
+  end
+  r = appel.call(jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18",
+    capabilities: {}, clientInfo: { name: "devops-platform-smoke", version: "1" } })
+  puts "VERSION=#{r.dig("result", "serverInfo", "version")}"
+  r = appel.call(jsonrpc: "2.0", id: 2, method: "tools/call",
+    params: { name: "get_project", arguments: { project_id: chemin } })
+  texte = Array(r.dig("result", "content")).map { |c| c["text"] }.join
+  abort("Outil get_project : #{texte[0, 300]}") if r.dig("result", "isError") || !texte.include?(chemin)
+  puts "PROJET=#{chemin}"
+ensure
+  Doorkeeper::AccessToken.where(application_id: app.id).delete_all
+  app.destroy!
+end
+'
+erreurs="$(mktemp)"
+if ! sortie="$(dc exec -T -e MCP_NOM="$MCP_NOM" -e MCP_PROJET="root/$PROJET" gitlab gitlab-rails runner \
+    "$CODE_MCP_GITLAB" 2> "$erreurs")"; then
+  cat "$erreurs" >&2
+  rm -f "$erreurs"
+  erreur "serveur MCP de GitLab en échec (voir ci-dessus)"
+fi
+rm -f "$erreurs"
+[[ -n "$(sed -n 's/^PROJET=//p' <<<"$sortie")" ]] || erreur "réponse inattendue du serveur MCP de GitLab"
+echo "    GitLab : serveur MCP $(sed -n 's/^VERSION=//p' <<<"$sortie"), projet root/$PROJET lu par get_project."
+
+# --- 9. Nettoyage ---------------------------------------------------------------------------------
 
 if ((nettoyer)); then
   etape "Nettoyage des projets de test (NETTOYER=1)"
