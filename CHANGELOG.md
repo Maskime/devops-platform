@@ -13,6 +13,17 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   Portainer et PlantUML, servie par nginx derrière Traefik. Au prochain `make deploy`, le service
   `home` est créé ; pour une instance existante, ajouter son hostname au DNS (ou à `/etc/hosts`) et,
   en `TLS_MODE=custom`, au certificat.
+- Serveurs MCP pour les agents IA (Claude Code…), documentés dans `docs/mcp.md` :
+  - SonarQube : service `sonarqube-mcp` (image officielle `sonarsource/sonarqube-mcp`, licence SSAL),
+    sur `SONARQUBE_MCP_HOSTNAME` (défaut `sonarqube-mcp.<domaine>`), authentifié par le jeton
+    utilisateur de chaque client ; actif par défaut sauf en `TLS_MODE=none` (`SONARQUBE_MCP_ENABLED`) ;
+  - GitLab : serveur intégré (`/api/v4/mcp`, OAuth), dont `make bootstrap` autorise l'accès ;
+  - URLs affichées par `make status`, la page d'accueil et `outputs/<env>.env` (`GITLAB_MCP_URL`,
+    `SONARQUBE_MCP_URL`) ; vérifiées par `make smoke`.
+
+  Pour une instance existante en `TLS_MODE` `custom` ou `letsencrypt`, le serveur MCP SonarQube est
+  créé au prochain `make deploy` : ajouter `SONARQUBE_MCP_HOSTNAME` au DNS (ou à `/etc/hosts`) et, en
+  `custom`, au certificat ; sinon `SONARQUBE_MCP_ENABLED=false`.
 
 ## [0.2.0] - 2026-10-08
 

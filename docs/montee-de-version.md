@@ -30,6 +30,7 @@ perte de données.
 | `gitlab/gitlab-ce` | `GITLAB_VERSION` | [chemin de mise à jour](#gitlab-ce) obligatoire | [GitLab releases](https://about.gitlab.com/releases/categories/releases/) |
 | `gitlab/gitlab-runner` | `GITLAB_RUNNER_VERSION` | même `majeure.mineure` que GitLab | [gitlab-runner](https://gitlab.com/gitlab-org/gitlab-runner/-/releases) |
 | `mc1arke/sonarqube-with-community-branch-plugin` | `SONARQUBE_VERSION` | tag publié par mc1arke (plugin compatible embarqué) | [plugin community branch](https://github.com/mc1arke/sonarqube-community-branch-plugin/releases) |
+| `sonarsource/sonarqube-mcp` | `SONARQUBE_MCP_VERSION` | SonarQube Server ≥ 2025.1 ou Community Build ≥ 25.1 ; licence SSAL ([serveurs MCP](mcp.md)) | [sonarqube-mcp-server](https://github.com/SonarSource/sonarqube-mcp-server/releases) |
 | `postgres` (base SonarQube) | `SONARQUBE_DB_VERSION` | majeure supportée par SonarQube | [Docker Hub](https://hub.docker.com/_/postgres) |
 | `grafana/grafana` | `GRAFANA_VERSION` | — | [grafana](https://github.com/grafana/grafana/releases) |
 | `grafana/loki` | `LOKI_VERSION` | configuration `config/loki/` | [loki](https://github.com/grafana/loki/releases) |
@@ -199,6 +200,12 @@ dc rm -sf sonarqube
 dc exec -T sonarqube-db sh -c 'dropdb -U sonar sonar && createdb -U sonar sonar'
 dc exec -T sonarqube-db pg_restore -U sonar -d sonar < ~/sauvegardes/"$ENV"/sonar-<date>.dump
 ```
+
+## Serveur MCP SonarQube
+
+Sans état (aucun volume) : changer `SONARQUBE_MCP_VERSION` et `make deploy ENV=<env>`. Vérifier dans les
+notes de version la compatibilité avec la version de SonarQube déployée et le nom des outils (le smoke
+test appelle `search_my_sonarqube_projects`), puis `make smoke ENV=<env>`.
 
 ## PostgreSQL (base SonarQube)
 

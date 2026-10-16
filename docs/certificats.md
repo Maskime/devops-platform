@@ -16,7 +16,8 @@ Dans `config/certs/` à la racine du repo (contenu **non versionné**, sauf les 
 | `config/certs/ca/ca.pem` | **Facultatif.** Certificat de la CA qui a émis `cert.pem`, au format PEM : CA interne (racine, ou intermédiaire), ou `cert.pem` lui-même s'il est auto-signé. Voir [CA privée](#ca-privée) |
 
 - **Un seul certificat pour toute l'instance.** Il doit couvrir chaque `*_HOSTNAME` de
-  `envs/<env>.env` (page d'accueil, GitLab, SonarQube, Grafana, Portainer, PlantUML) par son extension
+  `envs/<env>.env` (page d'accueil, GitLab, SonarQube, serveur MCP SonarQube s'il est actif, Grafana, Portainer,
+  PlantUML) par son extension
   *subjectAltName* : noms explicites ou joker (`*.devops.exemple.org`). Le CN seul ne suffit pas, les
   navigateurs l'ignorent. Un joker de premier niveau (`*.localhost`, `*.org`) n'est accepté ni par
   OpenSSL ni par les navigateurs. Plusieurs certificats (un par hostname) ne sont pas gérés (#81).
