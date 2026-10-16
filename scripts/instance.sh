@@ -42,6 +42,10 @@ readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
 # propre copie et sa propre empreinte : un autre changement de config ne recrée pas ces services, et
 # seul ca.pem est copié (jamais une clé de CA déposée à côté).
 readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning home)
+# Service qui lit chaque élément de CONFIG_MONTEE à son démarrage (à garder synchronisé) : en local, le
+# montage pointe directement sur config/ et `up` ne le recrée pas après une modification (appliquer_config)
+declare -rA SERVICE_CONFIG=([loki/loki-config.yaml]=loki [promtail/promtail-config.yaml]=promtail
+  [grafana/provisioning]=grafana [home]=home)
 readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.pem)
 readonly CA_CUSTOM=config/certs/ca/ca.pem
 # Verrou de l'instance, dans le volume du runner (même fichier dans scripts/bootstrap/gitlab.sh et
@@ -310,18 +314,43 @@ retirer_sonarqube_mcp() {
 
 # --- CA privée (TLS_MODE=custom) ------------------------------------------------------------------
 
-# Attend que chaque service soit healthy (après un restart, qui n'attend pas)
+# Attend que chaque service soit healthy, ou en cours d'exécution s'il n'a pas de healthcheck (loki),
+# comme `up --wait` (après un restart, qui n'attend pas)
 attendre_sante() { # <service>...
   local fin=$((SECONDS + WAIT_TIMEOUT)) service id etat
   for service in "$@"; do
     while :; do
       id="$("${compose[@]}" ps -q "$service")"
-      etat="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2>/dev/null || true)"
-      [[ "$etat" == healthy ]] && break
+      # Sans healthcheck : « sans-healthcheck-<état> »
+      etat="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}sans-healthcheck-{{.State.Status}}{{end}}' "$id" 2>/dev/null || true)"
+      [[ "$etat" == healthy || "$etat" == sans-healthcheck-running ]] && break
       ((SECONDS < fin)) || erreur "$service n'est pas healthy après ${WAIT_TIMEOUT} s (état : ${etat:-absent}) : voir scripts/instance.sh compose $env logs $service"
       sleep 5
     done
   done
+}
+
+# Instance locale : les services de CONFIG_MONTEE lisent config/ directement, à leur démarrage ; un
+# conteneur démarré avant la dernière modification de sa configuration (ctime du fichier, ou de tout
+# fichier et répertoire de l'arborescence) est redémarré. Instance distante : rien à faire, la copie
+# config-<empreinte> change et `up` recrée ces services.
+appliquer_config() {
+  [[ -z "$deploy_ssh" ]] || return 0
+  local services chemin service id modif demarre a_redemarrer=()
+  services=" $("${compose[@]}" config --services | paste -sd ' ' -) "
+  for chemin in "${CONFIG_MONTEE[@]}"; do
+    service="${SERVICE_CONFIG[$chemin]}"
+    [[ "$services" == *" $service "* && -e "config/$chemin" ]] || continue
+    id="$("${compose[@]}" ps -q --status running "$service")"
+    [[ -n "$id" ]] || continue
+    modif="$(find "config/$chemin" -exec stat -c %Z {} + | sort -n | tail -n1)"
+    demarre="$(date -d "$(docker inspect -f '{{.State.StartedAt}}' "$id")" +%s)"
+    if ((modif > demarre)); then a_redemarrer+=("$service"); fi
+  done
+  ((${#a_redemarrer[@]})) || return 0
+  echo "Configuration modifiée depuis leur démarrage : ${a_redemarrer[*]} à redémarrer."
+  (set -x; "${compose[@]}" restart "${a_redemarrer[@]}")
+  attendre_sante "${a_redemarrer[@]}"
 }
 
 # gitlab-runner et sonarqube lisent la CA à leur démarrage : un changement de CA leur est appliqué ici
@@ -499,6 +528,7 @@ case "$action" in
     done
     (set -x; "${compose[@]}" up -d --wait --wait-timeout "$WAIT_TIMEOUT" "${options[@]}")
     retirer_ancien_reseau_proxy
+    appliquer_config
     appliquer_ca
     if [[ -n "$deploy_ssh" ]]; then nettoyer_config; fi
     "${compose[@]}" ps -a --format 'table {{.Service}}\t{{.Status}}'
