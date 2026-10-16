@@ -58,7 +58,8 @@ En local, choisir `small`. Sous WSL2, la mémoire disponible pour Docker est cel
 
 ### DNS
 
-Chaque service a son hostname, routé par Traefik : GitLab, SonarQube, Grafana, Portainer et PlantUML.
+Chaque service a son hostname, routé par Traefik : page d'accueil, GitLab, SonarQube, serveur MCP SonarQube
+(s'il est actif, voir [serveurs MCP](mcp.md)), Grafana, Portainer et PlantUML.
 Par défaut, `<service>.<domaine>` (par exemple `gitlab.devops.mondomaine.fr`).
 
 - **Serveur** : un enregistrement A (et/ou AAAA) par hostname, vers l'adresse du serveur, ou un

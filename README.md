@@ -6,8 +6,9 @@ Plateforme DevOps auto-hébergée, déployable à l'identique sur n'importe quel
 |---|---|
 | Forge, tickets, CI/CD | GitLab CE + GitLab Runner |
 | Analyse statique | SonarQube Community Edition (+ plugin community branch) |
+| Agents IA | Serveurs MCP de GitLab (intégré) et de SonarQube |
 | Logs | Grafana + Loki + Promtail |
-| Outils | Portainer, PlantUML |
+| Outils | Portainer, PlantUML, page d'accueil (liens vers les services) |
 | Exposition | Traefik (TLS Let's Encrypt, certificats fournis ou HTTP simple) |
 
 Chaque instance est entièrement décrite par un fichier `envs/<env>.env` : hostnames, mode TLS,
@@ -24,6 +25,7 @@ make smoke ENV=local                  # projet de test, pipeline et analyse Sona
 
 | Service | URL locale par défaut |
 |---|---|
+| Accueil (liens vers les services) | http://home.localhost |
 | GitLab | http://gitlab.localhost (SSH : port 2222) |
 | SonarQube | http://sonarqube.localhost |
 | Grafana | http://grafana.localhost |
@@ -92,6 +94,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Rétention des logs](docs/logs.md) | Durée de rétention Loki, délai de purge |
 | [Accès à l'API Docker](docs/acces-docker.md) | Proxys de socket filtrants de Traefik et Promtail : endpoints autorisés par client, isolement, limites |
 | [Garde-fous](docs/garde-fous.md) | Lancements compose en double, fuites de secrets (CI, hook pre-commit), images épinglées (CI) |
+| [Serveurs MCP](docs/mcp.md) | Agents IA (Claude Code…) : URLs, authentification, activation par `TLS_MODE`, CA privée, licence |
 | [Montée de version](docs/montee-de-version.md) | Procédure par image (chemin de mise à jour GitLab, migration SonarQube) |
 
 ## Avancement

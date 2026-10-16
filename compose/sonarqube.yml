@@ -1,5 +1,5 @@
 # =============================================================================
-# Brique SonarQube : analyse statique
+# Brique SonarQube : analyse statique et serveur MCP
 # Inclus par compose.yml ; lancé seul, il est refusé par le garde-fou ci-dessous (voir l'en-tête
 # de compose.yml).
 # =============================================================================
@@ -75,6 +75,42 @@ services:
       timeout: 10s
       retries: 20
       start_period: 120s
+    networks:
+      - platform
+
+  # ---------------------------------------------------------------------------
+  # Serveur MCP SonarQube (officiel SonarSource) — accès des agents IA à SonarQube
+  # URL : http(s)://${SONARQUBE_MCP_HOSTNAME}/mcp, servie par Traefik (HTTP interne 8080)
+  # Aucun jeton côté serveur : chaque client s'authentifie avec son propre jeton utilisateur SonarQube
+  # (Authorization: Bearer), les droits SonarQube s'appliquent. SonarQube joint par le réseau de la
+  # plateforme, sans TLS : aucune CA à monter, quel que soit le TLS_MODE.
+  # Profil sonarqube-mcp, activé par scripts/instance.sh selon SONARQUBE_MCP_ENABLED (défaut : actif
+  # sauf en TLS_MODE=none, jetons en clair). Image sous licence SSAL : docs/mcp.md.
+  # ---------------------------------------------------------------------------
+  sonarqube-mcp:
+    image: sonarsource/sonarqube-mcp:${SONARQUBE_MCP_VERSION:-1.29.0.4488}
+    profiles: [sonarqube-mcp]
+    restart: unless-stopped
+    depends_on:
+      - sonarqube
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SONARQUBE_URL: http://sonarqube:9000
+      SONARQUBE_TRANSPORT: http
+      SONARQUBE_HTTP_HOST: 0.0.0.0
+      SONARQUBE_HTTP_PORT: "8080"
+      TELEMETRY_DISABLED: "true"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.sonarqube-mcp.rule: Host(`${SONARQUBE_MCP_HOSTNAME:-sonarqube-mcp.localhost}`)
+      traefik.http.services.sonarqube-mcp.loadbalancer.server.port: "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - platform
 

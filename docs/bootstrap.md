@@ -52,9 +52,12 @@ Lancé directement, un script d'étape refuse une instance distante.
    absent de l'instance : ces deux variables sont retirées si elles sont gérées par la plateforme, et
    elles seules.
 4. **Runner d'instance** : voir ci-dessous. Le bootstrap attend enfin que le runner soit en ligne.
+5. **Serveur MCP** : accès au serveur MCP intégré autorisé pour l'instance (`mcp_server_enabled`), avec
+   un avertissement si l'enregistrement dynamique des clients OAuth est désactivé ou si GitLab est
+   servi en HTTP : voir [serveurs MCP](mcp.md).
 
-Le récapitulatif final affiche l'id du runner, son réseau, l'URL, l'expiration du jeton et l'état des
-variables CI.
+Le récapitulatif final affiche l'id du runner, son réseau, l'URL, l'expiration du jeton, l'état des
+variables CI et l'URL du serveur MCP.
 
 ## Jeton d'administration
 

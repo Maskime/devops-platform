@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fichier de sortie d'une instance pour les projets consommateurs : outputs/<env>.env (URLs publiques,
-# URL de l'API GitLab, token d'analyse SonarQube, réseau Docker des jobs pour les projets co-localisés).
+# URLs de l'API GitLab et des serveurs MCP, token d'analyse SonarQube, réseau Docker des jobs pour les
+# projets co-localisés).
 # Lit uniquement des fichiers locaux (envs/<env>.env, outputs/<env>.sonarqube-token), aucun appel Docker :
 # régénérer est toujours sans risque. Idempotent.
 # Lancé par `make bootstrap ENV=<env>` (scripts/instance.sh bootstrap) après chaque étape réussie.
@@ -80,7 +81,8 @@ if present gitlab; then
   port_ssh="$(env_valeur "$env_file" GITLAB_SSH_PORT)"
   port_ssh="${port_ssh:-2222}"
   [[ "$port_ssh" =~ ^[0-9]{1,5}$ ]] || erreur "GITLAB_SSH_PORT invalide : $port_ssh"
-  lignes+=("GITLAB_URL=$url" "GITLAB_API_URL=$url/api/v4" "GITLAB_SSH_URL=ssh://git@$hote:$port_ssh")
+  lignes+=("GITLAB_URL=$url" "GITLAB_API_URL=$url/api/v4" "GITLAB_SSH_URL=ssh://git@$hote:$port_ssh"
+    "GITLAB_MCP_URL=$url/api/v4/mcp")
 else
   lignes+=("# GitLab : service absent de l'instance.")
 fi
@@ -105,6 +107,13 @@ if present sonarqube; then
   fi
 else
   lignes+=("# SonarQube : service absent de l'instance.")
+fi
+# Serveur MCP SonarQube : présent seulement s'il est actif (profil sonarqube-mcp, docs/mcp.md)
+if present sonarqube-mcp; then
+  hote="$(env_valeur "$env_file" SONARQUBE_MCP_HOSTNAME)"
+  url="$(schema_tls "$tls_mode")://${hote:-sonarqube-mcp.localhost}/mcp"
+  [[ "$url" =~ $MOTIF_URL ]] || erreur "URL du serveur MCP SonarQube non exportable : $url"
+  lignes+=("SONARQUBE_MCP_URL=$url")
 fi
 
 if present grafana; then

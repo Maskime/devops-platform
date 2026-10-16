@@ -15,6 +15,8 @@
 #   - GITLAB_SSH_PORT : entier de 1 à 65535, hors 80 et 443 (ports de Traefik) ; 22 signalé.
 #   - GITLAB_RUNNER_NETWORK : nom Docker distinct des réseaux de la plateforme (isolation des jobs CI) ;
 #     GITLAB_PROXY_SUBNET : CIDR IPv4 de /16 à /29.
+#   - SONARQUBE_MCP_ENABLED : true, false ou absente ; serveur MCP SonarQube forcé en TLS_MODE=none
+#     signalé (jetons en clair). Son hostname n'est contrôlé (certificat, Let's Encrypt) que s'il est actif.
 #
 # Usage : scripts/check-env-urls.sh <fichier env>
 # Valeur effective, comme Compose : variable du shell prioritaire, sinon dernière affectation du
@@ -96,6 +98,18 @@ fi
 reseau_jobs "$fichier" > /dev/null || erreurs=1
 sous_reseau_gitlab_proxy_valide "$fichier" || erreurs=1
 
+# Serveur MCP SonarQube (scripts/lib/env.sh) : actif, inactif ou valeur invalide
+mcp_sonar=0 code=0
+sonarqube_mcp_actif "$fichier" || code=$?
+case "$code" in
+  0) mcp_sonar=1 ;;
+  2) erreurs=1 ;;
+esac
+if ((mcp_sonar)) && [[ "$tls_mode" == none ]]; then
+  echo "Attention : SONARQUBE_MCP_ENABLED=true en TLS_MODE=none : les jetons SonarQube des clients MCP" >&2
+  echo "  circulent en clair (docs/mcp.md). Réserver ce réglage au poste local." >&2
+fi
+
 if ((erreurs)); then
   echo "Exposition incohérente dans $fichier (voir ci-dessus)." >&2
   exit 1
@@ -103,8 +117,11 @@ fi
 
 # Hostnames effectifs des services exposés par Traefik
 hotes=()
-for service in gitlab sonarqube grafana portainer plantuml; do
-  hote="$(valeur_effective "${service^^}_HOSTNAME")"
+services_exposes=(home gitlab sonarqube grafana portainer plantuml)
+if ((mcp_sonar)); then services_exposes+=(sonarqube-mcp); fi
+for service in "${services_exposes[@]}"; do
+  cle="${service^^}"
+  hote="$(valeur_effective "${cle//-/_}_HOSTNAME")"
   hotes+=("${hote:-$service.localhost}")
 done
 

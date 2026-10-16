@@ -13,8 +13,10 @@ Le fichier est produit par `scripts/bootstrap/outputs.sh`.
 | `GITLAB_URL` | URL publique de GitLab |
 | `GITLAB_API_URL` | `${GITLAB_URL}/api/v4` |
 | `GITLAB_SSH_URL` | `ssh://git@<GITLAB_HOSTNAME>:<GITLAB_SSH_PORT>` (base des URLs de clone SSH) |
+| `GITLAB_MCP_URL` | `${GITLAB_URL}/api/v4/mcp` ([serveurs MCP](mcp.md)) |
 | `SONAR_HOST_URL` | URL publique de SonarQube |
 | `SONAR_TOKEN` | Token d'analyse SonarQube ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)) |
+| `SONARQUBE_MCP_URL` | URL du serveur MCP SonarQube, s'il est actif ([serveurs MCP](mcp.md)) |
 | `GRAFANA_URL` | URL publique de Grafana |
 | `DEVOPS_PLATFORM_CI_NETWORK` | Réseau Docker des jobs CI (`GITLAB_RUNNER_NETWORK`), à rejoindre par un [projet co-localisé](branchement-projet.md#projet-co-localisé) |
 

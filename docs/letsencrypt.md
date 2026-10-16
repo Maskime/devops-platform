@@ -13,7 +13,7 @@ Configuration : `compose/tls/letsencrypt.yml` (overlay de `compose/proxy.yml`) e
 ## Prérequis
 
 - **Serveur joignable depuis Internet**, avec un **nom public** par service : chaque `*_HOSTNAME`
-  (GitLab, SonarQube, Grafana, Portainer, PlantUML) doit résoudre (DNS, enregistrement A/AAAA) vers
+  (page d'accueil, GitLab, SonarQube, serveur MCP SonarQube s'il est actif, Grafana, Portainer, PlantUML) doit résoudre (DNS, enregistrement A/AAAA) vers
   le serveur. Let's Encrypt ne délivre pas de certificat pour `localhost`, `*.localhost` ni une
   adresse IP : `make deploy` les refuse (en local, rester en `TLS_MODE=none`).
 - **Port ouvert** selon le challenge (pare-feu, groupe de sécurité, redirection NAT) :

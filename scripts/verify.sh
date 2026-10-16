@@ -57,7 +57,8 @@ else
   ok "aucun fichier YAML"
 fi
 
-# 3. docker compose config pour chaque environnement (dont l'exemple), et pour chaque mode TLS
+# 3. docker compose config pour chaque environnement (dont l'exemple), et pour chaque mode TLS ; tous les
+#    profils actifs (--profile '*') : services à profil, comme sonarqube-mcp, contrôlés aussi
 section "docker compose config"
 shopt -s nullglob
 tls_modes=(compose/tls/*.yml)
@@ -72,11 +73,11 @@ if [[ -f compose.yml ]]; then
   shopt -u dotglob
   ((${#env_files[@]})) || ko "aucun fichier dans envs/"
   for f in "${env_files[@]}"; do
-    if docker compose --env-file "$f" -f compose.yml config -q; then ok "$f"; else ko "$f"; fi
+    if docker compose --env-file "$f" -f compose.yml --profile '*' config -q; then ok "$f"; else ko "$f"; fi
   done
   # Chaque overlay de mode TLS (compose/tls/<mode>.yml et compose/tls/<brique>/<mode>.yml), sur l'exemple
   for mode in "${tls_modes[@]}"; do
-    if env "${VARS_MODE_TLS[@]}" TLS_MODE="$mode" docker compose --env-file envs/.env.example -f compose.yml config -q; then
+    if env "${VARS_MODE_TLS[@]}" TLS_MODE="$mode" docker compose --env-file envs/.env.example -f compose.yml --profile '*' config -q; then
       ok "envs/.env.example, TLS_MODE=$mode"
     else
       ko "envs/.env.example, TLS_MODE=$mode"
@@ -162,7 +163,7 @@ PORTS_AUTORISES=(traefik:80:80 traefik:443:443 'gitlab:*:22')
 config_cible() {
   local env_file="${1%%|*}" variables=()
   [[ "$1" == *"|"* ]] && variables=(TLS_MODE="${1#*|}" "${VARS_MODE_TLS[@]}")
-  env "${variables[@]}" docker compose --env-file "$env_file" -f compose.yml config 2>/dev/null
+  env "${variables[@]}" docker compose --env-file "$env_file" -f compose.yml --profile '*' config 2>/dev/null
 }
 port_autorise() { # <service:publié:cible>
   local a
@@ -359,11 +360,14 @@ if [[ -f compose.yml && -f envs/.env.example ]]; then
   missing=0
   for v in "${compose_vars[@]}"; do
     # Variables internes : fournie par Compose / définie par le garde-fou de lancement (section 6 bis) /
-    # positionnées par scripts/instance.sh (copies de config/ et de la CA sur l'hôte d'une instance distante)
-    case "$v" in COMPOSE_PROJECT_NAME | PLATFORM_GARDE_FOU | PLATFORM_CONFIG_DIR | PLATFORM_CA_DIR) continue ;; esac
+    # positionnées par scripts/instance.sh (copies de config/ et de la CA sur l'hôte d'une instance distante,
+    # activation du serveur MCP SonarQube)
+    case "$v" in
+      COMPOSE_PROJECT_NAME | PLATFORM_GARDE_FOU | PLATFORM_CONFIG_DIR | PLATFORM_CA_DIR | PLATFORM_SONARQUBE_MCP_ACTIF) continue ;;
+    esac
     grep -qE "^#?${v}=" envs/.env.example || { ko "$v absente de envs/.env.example"; missing=1; }
   done
-  ((missing)) || ok "${#compose_vars[@]} variable(s) (dont 4 internes)"
+  ((missing)) || ok "${#compose_vars[@]} variable(s) (dont 5 internes)"
 else
   ok "pas encore de compose.yml"
 fi

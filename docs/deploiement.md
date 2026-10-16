@@ -107,8 +107,12 @@ autre partie de la configuration ne les recrée donc pas.
 
 **Prise en compte d'une modification** : un fichier modifié produit une nouvelle empreinte, donc un
 nouveau répertoire. `make deploy` recrée alors les services qui montent la configuration (Loki,
-Promtail, Grafana, et Traefik en `TLS_MODE=custom`), et eux seuls. Un changement de `ca.pem` recrée
-`gitlab-runner` et `sonarqube`, et eux seuls, par `make deploy` ou `make reload-certs`.
+Promtail, Grafana, page d'accueil, et Traefik en `TLS_MODE=custom`), et eux seuls. Un changement de
+`ca.pem` recrée `gitlab-runner` et `sonarqube`, et eux seuls, par `make deploy` ou `make reload-certs`.
+
+En local, les services montent `config/` directement : `make deploy` redémarre Loki, Promtail, Grafana ou
+la page d'accueil si leur configuration a été modifiée depuis leur démarrage (date de modification des
+fichiers), et eux seuls. Traefik relit ses certificats par `make reload-certs`.
 
 **Méthode de copie** : le transfert passe par le contexte Docker. Un conteneur `busybox` (sans réseau)
 extrait une archive tar envoyée depuis le poste. Il ne faut ni `rsync`, ni `scp`, ni `sudo`.

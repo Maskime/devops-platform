@@ -1,5 +1,5 @@
 # =============================================================================
-# Brique outils : gestion des conteneurs et génération de diagrammes
+# Brique outils : gestion des conteneurs, génération de diagrammes et page d'accueil
 # Inclus par compose.yml ; lancé seul, il est refusé par le garde-fou ci-dessous (voir l'en-tête
 # de compose.yml).
 # =============================================================================
@@ -61,6 +61,49 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    networks:
+      - platform
+
+  # ---------------------------------------------------------------------------
+  # Page d'accueil — liens vers les services de l'instance
+  # URL : http://${HOME_HOSTNAME}, servie par Traefik (HTTP interne 80)
+  # Page statique rendue au démarrage depuis config/home/index.html.template : l'entrypoint de
+  # l'image nginx y remplace les variables d'environnement (envsubst) et l'écrit dans la racine web.
+  # ---------------------------------------------------------------------------
+  home:
+    image: nginx:${HOME_VERSION:-1.30.5-alpine}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /usr/share/nginx/html
+      # Défauts identiques aux labels traefik.http.routers.<service>.rule des modules
+      GITLAB_HOSTNAME: ${GITLAB_HOSTNAME:-gitlab.localhost}
+      GITLAB_SSH_PORT: ${GITLAB_SSH_PORT:-2222}
+      SONARQUBE_HOSTNAME: ${SONARQUBE_HOSTNAME:-sonarqube.localhost}
+      GRAFANA_HOSTNAME: ${GRAFANA_HOSTNAME:-grafana.localhost}
+      PORTAINER_HOSTNAME: ${PORTAINER_HOSTNAME:-portainer.localhost}
+      PLANTUML_HOSTNAME: ${PLANTUML_HOSTNAME:-plantuml.localhost}
+      SONARQUBE_MCP_HOSTNAME: ${SONARQUBE_MCP_HOSTNAME:-sonarqube-mcp.localhost}
+      # Serveur MCP SonarQube actif (1) ou non (0) : calculé par scripts/instance.sh (profil sonarqube-mcp)
+      SONARQUBE_MCP_ACTIF: ${PLATFORM_SONARQUBE_MCP_ACTIF:-0}
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.home.rule: Host(`${HOME_HOSTNAME:-home.localhost}`)
+      traefik.http.services.home.loadbalancer.server.port: "80"
+    volumes:
+      - type: bind
+        source: ${PLATFORM_CONFIG_DIR:-../config}/home
+        target: /etc/nginx/templates
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks:
       - platform
 

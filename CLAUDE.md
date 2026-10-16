@@ -5,11 +5,13 @@ Ce fichier guide Claude Code (claude.ai/code) dans ce repo.
 ## Projet
 
 Plateforme DevOps auto-hébergée, déployable à l'identique sur des serveurs distincts : GitLab CE + Runner,
-SonarQube Community Edition (+ plugin community branch) avec PostgreSQL, Grafana + Loki + Promtail,
-Portainer, PlantUML, Traefik en reverse proxy. Extraite de l'infrastructure de *Software Factory*
-(`~/dev/actual-software-factory/infrastructure/`, source en **lecture seule**).
+SonarQube Community Edition (+ plugin community branch) avec PostgreSQL, serveurs MCP de GitLab (intégré)
+et de SonarQube, Grafana + Loki + Promtail, Portainer, PlantUML, page d'accueil, Traefik en reverse proxy.
+Extraite de l'infrastructure de *Software Factory* (`~/dev/actual-software-factory/infrastructure/`, source
+en **lecture seule**).
 
-Hors périmètre : Temporal, serveurs MCP, workers et tout ce qui est propre à Software Factory.
+Hors périmètre : Temporal, serveurs MCP propres à Software Factory, workers et tout ce qui est propre à
+Software Factory.
 
 ## Principes
 

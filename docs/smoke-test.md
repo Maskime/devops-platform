@@ -1,7 +1,7 @@
 # Smoke test d'une instance (`make smoke`)
 
 `make smoke ENV=<env>` vérifie de bout en bout une instance déployée et bootstrapée : forge, runner,
-pipeline CI et analyse SonarQube. Il crée pour cela des **données de test**, que `NETTOYER=1` supprime
+pipeline CI, analyse SonarQube et serveurs MCP. Il crée pour cela des **données de test**, que `NETTOYER=1` supprime
 à la fin ; `make bootstrap`, lui, n'en crée jamais.
 
 ```bash
@@ -27,7 +27,8 @@ non satisfaite, avec la cause et la commande à lancer.
 | 5 | Fichiers de `scripts/smoke/projet/` et liste des cibles d'isolation poussés sur `main` (un commit) | — |
 | 6 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs, service de la plateforme joignable depuis un job |
 | 7 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
-| 8 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
+| 8 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
+| 9 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
 
 Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
 
@@ -66,6 +67,7 @@ hôte sans accès à `registry.gitlab.com`) renvoie à `GITLAB_RUNNER_HELPER_IMA
 |---|---|---|
 | Projet GitLab | `root/devops-platform-smoke` | privé, Auto DevOps désactivé |
 | Projet SonarQube | `devops-platform-smoke` | privé |
+| Jeton utilisateur SonarQube (compte admin), application OAuth GitLab (scope `mcp`) | `devops-platform-smoke-mcp` | supprimés en fin d'étape 8, succès ou échec |
 
 - **Relance** : les projets sont réutilisés. Seuls les fichiers absents ou modifiés sont poussés ; s'ils
   sont tous à jour, un nouveau pipeline est lancé sur `main`. Un projet GitLab en attente de suppression
