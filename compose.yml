@@ -5,7 +5,7 @@
 #   compose/gitlab.yml         gitlab, gitlab-runner
 #   compose/sonarqube.yml      sonarqube, sonarqube-db
 #   compose/observability.yml  loki, promtail, grafana
-#   compose/tools.yml          portainer, plantuml
+#   compose/tools.yml          portainer, plantuml, home
 #   compose/proxy.yml          traefik (reverse proxy : seul point d'entrée HTTP, routage par hostname)
 #   compose/socket-proxy.yml   socket-proxy-traefik, socket-proxy-promtail (API Docker filtrée, en
 #                              lecture, un proxy et une liste blanche par client)

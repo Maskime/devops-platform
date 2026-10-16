@@ -1,0 +1,74 @@
+<!doctype html>
+<!--
+  Page d'accueil de la plateforme, servie par le service home (compose/tools.yml).
+  Modèle rendu au démarrage du conteneur par l'image nginx (envsubst) : les variables ${…} sont les
+  hostnames de l'instance, transmis par compose. Liens sans schéma (//hôte/) : ils reprennent celui
+  de la page, identique pour tous les services (TLS_MODE commun à l'instance).
+-->
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plateforme DevOps</title>
+  <style>
+    :root {
+      --fond: #f6f7f9; --carte: #ffffff; --texte: #1d2330; --doux: #5b6475;
+      --bord: #dde1e8; --accent: #2f5bd3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fond: #14171d; --carte: #1c2029; --texte: #e6e9ef; --doux: #9aa3b5;
+        --bord: #2c323e; --accent: #7fa2ff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--fond); color: var(--texte);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 48px 16px; }
+    h1 { margin: 0 0 4px; font-size: 1.75rem; }
+    header p { margin: 0 0 32px; color: var(--doux); }
+    ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    a.carte {
+      display: block; height: 100%; padding: 20px; border: 1px solid var(--bord); border-radius: 10px;
+      background: var(--carte); color: inherit; text-decoration: none;
+    }
+    a.carte:hover, a.carte:focus-visible { border-color: var(--accent); outline: none; }
+    a.carte strong { display: block; font-size: 1.125rem; color: var(--accent); }
+    a.carte span { display: block; color: var(--doux); font-size: 0.9375rem; }
+    a.carte code { font-size: 0.8125rem; color: var(--doux); word-break: break-all; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Plateforme DevOps</h1>
+      <p>Accès aux services de l'instance.</p>
+    </header>
+    <ul>
+      <li><a class="carte" href="//${GITLAB_HOSTNAME}/">
+        <strong>GitLab</strong>
+        <span>Forge, tickets, CI/CD. Clone SSH sur le port ${GITLAB_SSH_PORT}.</span>
+        <code>${GITLAB_HOSTNAME}</code></a></li>
+      <li><a class="carte" href="//${SONARQUBE_HOSTNAME}/">
+        <strong>SonarQube</strong>
+        <span>Analyse statique et qualité du code.</span>
+        <code>${SONARQUBE_HOSTNAME}</code></a></li>
+      <li><a class="carte" href="//${GRAFANA_HOSTNAME}/">
+        <strong>Grafana</strong>
+        <span>Logs de la plateforme (Loki).</span>
+        <code>${GRAFANA_HOSTNAME}</code></a></li>
+      <li><a class="carte" href="//${PORTAINER_HOSTNAME}/">
+        <strong>Portainer</strong>
+        <span>Gestion des conteneurs.</span>
+        <code>${PORTAINER_HOSTNAME}</code></a></li>
+      <li><a class="carte" href="//${PLANTUML_HOSTNAME}/">
+        <strong>PlantUML</strong>
+        <span>Génération de diagrammes.</span>
+        <code>${PLANTUML_HOSTNAME}</code></a></li>
+    </ul>
+  </main>
+</body>
+</html>

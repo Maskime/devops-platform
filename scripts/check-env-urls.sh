@@ -103,7 +103,7 @@ fi
 
 # Hostnames effectifs des services exposés par Traefik
 hotes=()
-for service in gitlab sonarqube grafana portainer plantuml; do
+for service in home gitlab sonarqube grafana portainer plantuml; do
   hote="$(valeur_effective "${service^^}_HOSTNAME")"
   hotes+=("${hote:-$service.localhost}")
 done

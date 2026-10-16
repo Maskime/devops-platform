@@ -7,7 +7,7 @@ Plateforme DevOps auto-hébergée, déployable à l'identique sur n'importe quel
 | Forge, tickets, CI/CD | GitLab CE + GitLab Runner |
 | Analyse statique | SonarQube Community Edition (+ plugin community branch) |
 | Logs | Grafana + Loki + Promtail |
-| Outils | Portainer, PlantUML |
+| Outils | Portainer, PlantUML, page d'accueil (liens vers les services) |
 | Exposition | Traefik (TLS Let's Encrypt, certificats fournis ou HTTP simple) |
 
 Chaque instance est entièrement décrite par un fichier `envs/<env>.env` : hostnames, mode TLS,
@@ -24,6 +24,7 @@ make smoke ENV=local                  # projet de test, pipeline et analyse Sona
 
 | Service | URL locale par défaut |
 |---|---|
+| Accueil (liens vers les services) | http://home.localhost |
 | GitLab | http://gitlab.localhost (SSH : port 2222) |
 | SonarQube | http://sonarqube.localhost |
 | Grafana | http://grafana.localhost |

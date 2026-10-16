@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+### Ajouté
+
+- Page d'accueil (`HOME_HOSTNAME`, défaut `home.<domaine>`) : liens vers GitLab, SonarQube, Grafana,
+  Portainer et PlantUML, servie par nginx derrière Traefik. Au prochain `make deploy`, le service
+  `home` est créé ; pour une instance existante, ajouter son hostname au DNS (ou à `/etc/hosts`) et,
+  en `TLS_MODE=custom`, au certificat.
+
 ## [0.2.0] - 2026-10-08
 
 Première version exploitable : instances paramétrées par environnement, déployables en local ou sur

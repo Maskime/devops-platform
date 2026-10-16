@@ -41,7 +41,7 @@ readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
 # par gitlab-runner et sonarqube (compose/tls/gitlab/custom.yml, compose/tls/sonarqube/custom.yml), a sa
 # propre copie et sa propre empreinte : un autre changement de config ne recrée pas ces services, et
 # seul ca.pem est copié (jamais une clé de CA déposée à côté).
-readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning)
+readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning home)
 readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.pem)
 readonly CA_CUSTOM=config/certs/ca/ca.pem
 # Verrou de l'instance, dans le volume du runner (même fichier dans scripts/bootstrap/gitlab.sh et
@@ -387,8 +387,8 @@ recapitulatif() {
   [[ "${tls_mode:-none}" != none ]] && schema=https
   echo
   echo "URLs de l'instance $env :"
-  for libelle in GitLab SonarQube Grafana Portainer PlantUML; do
-    service="${libelle,,}"
+  for libelle in Accueil:home GitLab SonarQube Grafana Portainer PlantUML; do
+    service="${libelle#*:}" service="${service,,}" libelle="${libelle%%:*}"
     hote="$(env_valeur "$env_file" "${service^^}_HOSTNAME")"
     printf '  %-10s %s://%s\n' "$libelle" "$schema" "${hote:-$service.localhost}"
   done

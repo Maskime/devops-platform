@@ -36,6 +36,7 @@ perte de données.
 | `grafana/promtail` | `PROMTAIL_VERSION` | déprécié, 3.6.x = dernière (#35) | [loki](https://github.com/grafana/loki/releases) |
 | `portainer/portainer-ce` | `PORTAINER_VERSION` | variante `-alpine` (healthcheck) | [portainer](https://github.com/portainer/portainer/releases) |
 | `plantuml/plantuml-server` | `PLANTUML_VERSION` | variante `jetty-` | [plantuml-server](https://github.com/plantuml/plantuml-server/releases) |
+| `nginx` (page d'accueil) | `HOME_VERSION` | variante `-alpine` (healthcheck) ; branche *stable* (version mineure paire) | [nginx](https://nginx.org/en/download.html) |
 | `traefik` | `TRAEFIK_VERSION` | ≥ 3.6.1 pour Docker Engine 29 ; préfixe `v` | [traefik](https://github.com/traefik/traefik/releases) |
 | `wollomatic/socket-proxy` | `SOCKET_PROXY_VERSION` | tag sans préfixe `v` ; listes blanches à revalider ([accès à l'API Docker](acces-docker.md)) | [socket-proxy](https://github.com/wollomatic/socket-proxy/releases) |
 
@@ -223,8 +224,10 @@ dc exec -T sonarqube-db pg_restore -U sonar -d sonar < ~/sauvegardes/"$ENV"/sona
   (`-config.expand-env=true` obligatoire : le fichier lit `LOKI_RETENTION_PERIOD`).
 - **Promtail** est déprécié par Grafana ; 3.6.x est la dernière version. Migration vers Alloy : #35.
 
-## Portainer, PlantUML
+## Portainer, PlantUML, page d'accueil
 
 - **Portainer** : garder la variante `-alpine` (le healthcheck exige `wget`). Sauvegarde à froid du volume
   `portainer_data` (migration de sa base au démarrage).
 - **PlantUML** : sans état ; garder la variante `jetty-`. Changer le tag et `make deploy ENV=<env>`.
+- **Page d'accueil** (`nginx`) : sans état ; garder la variante `-alpine`. Changer le tag et
+  `make deploy ENV=<env>`.

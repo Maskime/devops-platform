@@ -20,8 +20,9 @@ source "$ROOT/scripts/lib/tls.sh"
 # Clés des mots de passe générés (minuscules : pas de faux positif de check-secrets)
 cles_mdp=(GITLAB_ROOT_PASSWORD SONARQUBE_DB_PASSWORD SONARQUBE_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD
   PORTAINER_ADMIN_PASSWORD)
-services=(gitlab sonarqube grafana portainer plantuml)
-declare -A noms=([gitlab]=GitLab [sonarqube]=SonarQube [grafana]=Grafana [portainer]=Portainer [plantuml]=PlantUML)
+services=(home gitlab sonarqube grafana portainer plantuml)
+declare -A noms=([home]="la page d'accueil" [gitlab]=GitLab [sonarqube]=SonarQube [grafana]=Grafana [portainer]=Portainer
+  [plantuml]=PlantUML)
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 

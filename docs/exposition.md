@@ -8,6 +8,7 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
 
 | Service | URL locale par défaut | Variable |
 |---|---|---|
+| Accueil | http://home.localhost | `HOME_HOSTNAME` |
 | GitLab | http://gitlab.localhost (SSH : port 2222) | `GITLAB_HOSTNAME`, `GITLAB_SSH_PORT` |
 | SonarQube | http://sonarqube.localhost | `SONARQUBE_HOSTNAME` |
 | Grafana | http://grafana.localhost | `GRAFANA_HOSTNAME` |
@@ -17,7 +18,7 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
 - **Résolution des noms.** Sur un serveur, chaque hostname doit pointer vers lui (DNS). En local,
   `*.localhost` est résolu vers `127.0.0.1` par les navigateurs et curl, mais pas toujours par le
   système (git, wget…) : `make init` le détecte et indique la ligne à ajouter à `/etc/hosts`
-  (`127.0.0.1 gitlab.localhost sonarqube.localhost grafana.localhost portainer.localhost plantuml.localhost`).
+  (`127.0.0.1 home.localhost gitlab.localhost sonarqube.localhost grafana.localhost portainer.localhost plantuml.localhost`).
 - **URLs publiques.** L'hôte de `GITLAB_EXTERNAL_URL` (optionnelle, dérivée par défaut),
   `SONARQUBE_EXTERNAL_URL` et `GRAFANA_EXTERNAL_URL` doit être le hostname du service,
   sans port : `make deploy` (cible `check-env`) refuse une URL incohérente et indique la ligne à

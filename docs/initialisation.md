@@ -6,7 +6,7 @@ inventer ni à copier :
 | Question | Défaut |
 |---|---|
 | Domaine de base | `localhost` |
-| Hostname de chaque service (GitLab, SonarQube, Grafana, Portainer, PlantUML) | `<service>.<domaine>` |
+| Hostname de chaque service (page d'accueil, GitLab, SonarQube, Grafana, Portainer, PlantUML) | `<service>.<domaine>` |
 | `TLS_MODE` (`letsencrypt`, `custom`, `none`) | `none` pour un domaine local (`localhost`, `*.localhost`), sinon `letsencrypt` |
 | Profil de dimensionnement | `medium` |
 
