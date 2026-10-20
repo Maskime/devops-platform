@@ -5,7 +5,7 @@ Comment un projet utilise GitLab, le runner et SonarQube d'une instance. Trois s
 | Situation | Exemple | Ce qu'il faut |
 |---|---|---|
 | **Projet hébergé** sur le GitLab de l'instance | dépôt poussé dans GitLab, pipelines sur le runner d'instance | rien côté SonarQube : variables CI d'instance |
-| **Projet co-localisé** : conteneurs sur le même hôte Docker que l'instance | application, outil ou runner de projet lancé par `docker compose` sur le serveur de l'instance | rejoindre le réseau des jobs, URLs de `outputs/<env>.env` |
+| **Projet co-localisé** : conteneurs sur le même hôte Docker que l'instance | application, outil ou runner de projet lancé par `docker compose` sur le serveur de l'instance | rejoindre le réseau des consommateurs, URLs de `outputs/<env>.env` |
 | **Projet distant** : ailleurs (autre serveur, poste, autre GitLab ou autre CI) | pipeline d'un autre GitLab qui analyse dans SonarQube | URLs publiques et token de `outputs/<env>.env` |
 
 Un projet peut cumuler : hébergé sur l'instance et déployé à côté d'elle, par exemple.
@@ -13,15 +13,16 @@ Un projet peut cumuler : hébergé sur l'instance et déployé à côté d'elle,
 ## Le fichier `outputs/<env>.env`
 
 `make bootstrap ENV=<env>` écrit sur le poste qui le lance un fichier `outputs/<env>.env` : URLs
-publiques, URL de l'API GitLab, base des URLs SSH, token d'analyse SonarQube et réseau des jobs
-([contenu détaillé](sortie-instance.md)).
+publiques, URL de l'API GitLab, base des URLs SSH, token d'analyse SonarQube, réseaux des
+consommateurs et des jobs ([contenu détaillé](sortie-instance.md)).
 
 | Variable | Projet hébergé | Co-localisé | Distant |
 |---|---|---|---|
 | `GITLAB_URL`, `GITLAB_SSH_URL` | remote git | remote git (HTTPS) | remote git |
 | `GITLAB_API_URL` | appels API (jeton personnel) | appels API | appels API |
 | `SONAR_HOST_URL`, `SONAR_TOKEN` | déjà dans les pipelines | analyse ou appels SonarQube | variables CI du projet |
-| `DEVOPS_PLATFORM_CI_NETWORK` | — | réseau Docker à rejoindre | — |
+| `DEVOPS_PLATFORM_CONSUMER_NETWORK` | — | réseau Docker à rejoindre | — |
+| `DEVOPS_PLATFORM_CI_NETWORK` | — | réseau des jobs d'un runner de projet | — |
 
 Le fichier contient `SONAR_TOKEN` :
 
@@ -102,15 +103,21 @@ celles de la plateforme.
 
 ## Projet co-localisé
 
-Les conteneurs du projet rejoignent le **réseau des jobs** de l'instance (`DEVOPS_PLATFORM_CI_NETWORK`,
-valeur de `GITLAB_RUNNER_NETWORK`, défaut `devops-platform_ci`), déclaré comme réseau Docker externe.
-Traefik en est le seul membre côté plateforme et y porte les hostnames publics en alias : les URLs de
-`outputs/<env>.env` mènent à Traefik, avec le même certificat que pour un client externe, sans DNS ni
-hairpin NAT ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)).
+Les conteneurs du projet rejoignent le **réseau des consommateurs** de l'instance
+(`DEVOPS_PLATFORM_CONSUMER_NETWORK`, valeur de `CONSUMER_NETWORK`, défaut `devops-platform_consumers`),
+déclaré comme réseau Docker externe. Traefik en est le seul membre côté plateforme et y porte les
+hostnames publics en alias : les URLs de `outputs/<env>.env` mènent à Traefik, avec le même certificat
+que pour un client externe, sans DNS ni hairpin NAT ([réseau des projets
+co-localisés](gitlab-proxy.md#réseau-des-projets-co-localisés)).
 
-Ne **pas** rejoindre le réseau de la plateforme (`PLATFORM_NETWORK`, défaut `devops-platform`) : il
-relie `sonarqube-db`, Loki et le nginx de GitLab sans passer par Traefik, et `make deploy` le refuse à
-un autre projet Compose ([garde-fous](garde-fous.md)).
+Ce réseau est distinct du réseau des jobs CI : un job, donc tout utilisateur capable de lancer un
+pipeline, ne joint pas les conteneurs du projet, ni eux un job. Ne **pas** rejoindre :
+
+- le réseau des jobs (`DEVOPS_PLATFORM_CI_NETWORK`) : tous les jobs de l'instance y joindraient le
+  projet ;
+- le réseau de la plateforme (`PLATFORM_NETWORK`, défaut `devops-platform`) : il relie `sonarqube-db`,
+  Loki et le nginx de GitLab sans passer par Traefik, et `make deploy` le refuse à un autre projet
+  Compose ([garde-fous](garde-fous.md)).
 
 ```yaml
 # compose.yml du projet
@@ -128,12 +135,12 @@ services:
   db:
     image: postgres:<version>
     networks:
-      - default      # jamais sur le réseau des jobs
+      - default      # jamais sur le réseau des consommateurs
 
 networks:
   plateforme:
     external: true
-    name: ${DEVOPS_PLATFORM_CI_NETWORK:?outputs/<env>.env non chargé}
+    name: ${DEVOPS_PLATFORM_CONSUMER_NETWORK:?outputs/<env>.env non chargé}
 ```
 
 ```bash
@@ -144,7 +151,7 @@ docker compose --env-file .env --env-file /chemin/sûr/outputs/<env>.env up -d
   dernier fichier l'emporte.
 - Éviter `env_file: outputs/<env>.env` : il injecterait `SONAR_TOKEN` dans chaque conteneur, lisible
   par `docker inspect` et Portainer.
-- La plateforme doit tourner avant le projet : le réseau des jobs est créé par `make deploy`.
+- La plateforme doit tourner avant le projet : le réseau des consommateurs est créé par `make deploy`.
 
 ### URL à utiliser depuis un conteneur
 
@@ -161,28 +168,39 @@ CA fournie au système. Les poser dans `environment:` en lieu et place de la val
 
 ### Runner de projet sur le même hôte
 
-Un runner de projet ou de groupe installé sur le serveur de l'instance (exécuteur Docker) rejoint le même
-réseau : `network_mode = "<DEVOPS_PLATFORM_CI_NETWORK>"` dans `[runners.docker]` de son `config.toml`,
-URL de GitLab selon le tableau ci-dessus. Il surcharge `SONAR_HOST_URL` en variable de projet ou de
+Un runner de projet ou de groupe installé sur le serveur de l'instance (exécuteur Docker) sépare deux
+rôles :
+
+- **le conteneur du runner**, service durable du projet, rejoint le réseau des consommateurs
+  (`DEVOPS_PLATFORM_CONSUMER_NETWORK`), comme tout conteneur du projet ;
+- **ses jobs** tournent sur le réseau des jobs de l'instance : `network_mode =
+  "<DEVOPS_PLATFORM_CI_NETWORK>"` dans `[runners.docker]` de son `config.toml`. Ce sont des jobs CI,
+  lancés par quiconque peut lancer un pipeline du projet : sur le réseau des consommateurs, ils
+  joindraient les conteneurs des projets co-localisés.
+
+URL de GitLab selon le tableau ci-dessus, pour le runner comme pour ses jobs. Il surcharge `SONAR_HOST_URL` en variable de projet ou de
 groupe si l'URL de la variable d'instance ne lui convient pas.
 
 ### Limites
 
-- **Exposition aux jobs CI** : le réseau des jobs est partagé par tous les jobs de tous les projets de
-  l'instance. Un conteneur qui le rejoint est joignable par tout utilisateur qui peut lancer un pipeline,
-  et joint les conteneurs des jobs en cours. N'y attacher que le conteneur client, garder la base et les
-  services internes sur le réseau propre au projet
-  ([#156](https://github.com/Maskime/devops-platform/issues/156)).
+- **Entre projets co-localisés** : le réseau des consommateurs est partagé par tous les projets
+  co-localisés de l'instance, qui se joignent entre eux. N'y attacher que le conteneur client, garder
+  la base et les services internes sur le réseau propre au projet.
+- **Ports publiés sur l'hôte** : un port qu'un conteneur du projet publie sur l'hôte (`ports:`) reste
+  joignable par un job CI, par la passerelle de son réseau. Ne publier que le nécessaire.
 - **SSH GitLab** : le hostname de GitLab désigne Traefik, qui ne route pas SSH. Cloner en HTTPS, ou
   joindre le port SSH publié sur l'hôte (`extra_hosts: ["host.docker.internal:host-gateway"]`, puis
   `ssh://git@host.docker.internal:<GITLAB_SSH_PORT>/…`).
 - **Exposition du projet** : le Traefik de la plateforme ignore les conteneurs hors de son projet
   Compose ; des labels `traefik.*` sur les conteneurs du projet sont sans effet, et les ports 80 et
   443 de l'hôte sont pris.
-- **`make down` de la plateforme** : il laisse le réseau des jobs en place tant qu'un conteneur du
-  projet y est attaché (« Resource is still in use », sans erreur) ; `make deploy` le réutilise.
-- **Changement de `GITLAB_RUNNER_NETWORK`** : après `make deploy` et `make bootstrap`, recopier
-  `outputs/<env>.env` et relancer le projet (`up -d`) pour qu'il rejoigne le nouveau réseau.
+- **`make down` de la plateforme** : il laisse le réseau des consommateurs en place tant qu'un
+  conteneur du projet y est attaché (« Resource is still in use », sans erreur) ; `make deploy` le
+  réutilise. De même pour le réseau des jobs et un runner de projet.
+- **Changement de `CONSUMER_NETWORK`** (ou de `GITLAB_RUNNER_NETWORK` pour un runner de projet) : après
+  `make deploy` et `make bootstrap`, recopier `outputs/<env>.env` et relancer le projet
+  (`up -d --force-recreate`) pour qu'il rejoigne le nouveau réseau. L'ancien réseau reste en place :
+  le supprimer (`docker network rm <ancien nom>`) une fois vide.
 
 ## Projet distant
 

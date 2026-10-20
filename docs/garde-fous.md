@@ -37,10 +37,10 @@ depuis la racine du repo, **sans `-p` ni `-f`**. Pour valider un seul module :
 - `make deploy` lance en plus `scripts/check-doublons.sh` : refus si un volume de l'instance est monté
   par un conteneur d'un autre projet Compose (ou hors Compose), ou si un réseau de l'instance porte un
   conteneur d'un autre projet Compose. Les conteneurs sans label Compose sur un réseau
-  (`docker run --network`) sont légitimes et ignorés. Le réseau des jobs (`GITLAB_RUNNER_NETWORK`)
-  n'est pas contrôlé : les [projets co-localisés](branchement-projet.md#projet-co-localisé) le
-  rejoignent ; un doublon d'un service de la plateforme y est aussi sur un autre réseau de l'instance,
-  ou monte ses volumes. Contrôle en lecture seule.
+  (`docker run --network`) sont légitimes et ignorés. Les réseaux des jobs (`GITLAB_RUNNER_NETWORK`)
+  et des consommateurs (`CONSUMER_NETWORK`) ne sont pas contrôlés : les runners et les [projets
+  co-localisés](branchement-projet.md#projet-co-localisé) les rejoignent ; un doublon d'un service de
+  la plateforme y est aussi sur un autre réseau de l'instance, ou monte ses volumes. Contrôle en lecture seule.
 - `make verify` vérifie que le garde-fou refuse bien chaque module seul et un autre nom de projet.
 
 **Limites** : ce qui reste possible en contournant les cibles `make`, délibérément.

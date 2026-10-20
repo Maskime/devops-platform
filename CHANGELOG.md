@@ -7,6 +7,30 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+### Sécurité
+
+- Réseau dédié aux projets co-localisés (`CONSUMER_NETWORK`, défaut `devops-platform_consumers`),
+  créé par `make deploy` et exporté dans `outputs/<env>.env` (`DEVOPS_PLATFORM_CONSUMER_NETWORK`).
+  Traefik y est le seul membre de la plateforme, avec les mêmes alias que sur le réseau des jobs. Les
+  conteneurs d'un projet co-localisé ne partagent plus le réseau des jobs CI : un utilisateur capable
+  de lancer un pipeline ne les joint plus, et réciproquement. `make check-env` refuse un réseau égal à
+  `GITLAB_RUNNER_NETWORK` ou à un réseau de la plateforme ; `make smoke` vérifie l'isolation dans les
+  deux sens. Voir `docs/branchement-projet.md`.
+
+### Migration
+
+- Projets co-localisés (conteneurs d'autres projets sur l'hôte de l'instance) :
+  1. `make deploy ENV=<env>` : crée le réseau des consommateurs et recrée Traefik (brève coupure) ;
+  2. `make bootstrap ENV=<env>`, puis recopier `outputs/<env>.env` sur le serveur ;
+  3. dans le `compose.yml` de chaque projet, remplacer `DEVOPS_PLATFORM_CI_NETWORK` par
+     `DEVOPS_PLATFORM_CONSUMER_NETWORK`, puis `docker compose … up -d --force-recreate` ;
+  4. vérifier que le réseau des jobs ne porte plus que Traefik et des jobs :
+     `docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' devops-platform_ci`.
+
+  Rien ne casse avant la migration d'un projet (Traefik reste sur les deux réseaux), mais il reste
+  exposé aux jobs CI jusque-là. Runner de projet sur l'hôte : son conteneur passe sur le réseau des
+  consommateurs, ses jobs restent sur le réseau des jobs (`network_mode` inchangé).
+
 ## [0.3.0] - 2026-10-19
 
 Intégration des agents IA : page d'accueil de l'instance et serveurs MCP de GitLab et de SonarQube

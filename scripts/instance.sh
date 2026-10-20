@@ -24,11 +24,11 @@ cd "$ROOT"
 source "$ROOT/scripts/lib/env.sh"
 # shellcheck source=scripts/lib/verrou.sh
 source "$ROOT/scripts/lib/verrou.sh"
+# shellcheck source=scripts/lib/images.sh
+source "$ROOT/scripts/lib/images.sh"
 # Verrou hérité par scripts/bootstrap/gitlab.sh : jamais repris du shell de l'opérateur
 unset VERROU_PID_HERITE
 
-# Copie et nettoyage des fichiers de config sur l'hôte cible (dernière stable, tag figé par son digest)
-readonly BUSYBOX_IMAGE="busybox:1.38.0@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e"
 readonly DEPLOY_DIR_DEFAUT=/opt/devops-platform
 readonly ENGINE_MIN=25
 readonly WAIT_TIMEOUT=900
