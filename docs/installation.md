@@ -272,7 +272,7 @@ Les mots de passe ne sont jamais affichés : les lire dans `envs/<env>.env`.
 
 Les mots de passe de GitLab, Grafana et Portainer ne sont appliqués qu'au **premier démarrage** : une
 fois changés dans l'interface, le fichier ne fait plus foi pour eux. Mot de passe admin Grafana perdu :
-`docker compose --env-file envs/<env>.env exec grafana grafana cli admin reset-admin-password <nouveau>`.
+`scripts/instance.sh compose <env> exec grafana grafana cli admin reset-admin-password <nouveau>`.
 
 L'instance est prête. Pour la suite : [Branchement d'un projet](branchement-projet.md),
 [Analyse SonarQube depuis la CI](analyse-sonarqube.md),

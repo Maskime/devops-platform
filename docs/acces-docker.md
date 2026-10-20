@@ -78,7 +78,7 @@ supprime son conteneur avant de démarrer les nouveaux proxys, puis son réseau
 ## Diagnostic
 
 - **Requête refusée.** Chaque proxy journalise ses refus (niveau `WARN`), visibles dans
-  `docker compose --env-file envs/<env>.env logs socket-proxy-traefik` (ou `socket-proxy-promtail`) et
+  `scripts/instance.sh compose <env> logs socket-proxy-traefik` (ou `socket-proxy-promtail`) et
   dans Grafana (`{service=~"socket-proxy-.*"}`). Côté client : `403`/`405` dans les logs de Traefik ou
   de Promtail.
 - **Lister les appels réels d'un client** (après une montée de version de Traefik ou de Promtail, par

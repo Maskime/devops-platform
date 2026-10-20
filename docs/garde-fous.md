@@ -13,8 +13,8 @@ les mêmes volumes et le même réseau** : deux `sonarqube-db` sur les mêmes do
 `gitlab-runner` (jobs exécutés deux fois). Compose se contente d'un avertissement ; la plateforme les
 refuse.
 
-**Commande correcte :** `make deploy ENV=<env>`, ou `docker compose --env-file envs/<env>.env …`
-depuis la racine du repo, **sans `-p` ni `-f`**. Pour valider un seul module :
+**Commande correcte :** `make deploy ENV=<env>`, ou `scripts/instance.sh compose <env> …` depuis la
+racine du repo (instance locale ou distante), **sans `-p` ni `-f`**. Pour valider un seul module :
 `docker compose --env-file envs/<env>.env config <service>`.
 
 | Lancement | Refusé par | Message |
