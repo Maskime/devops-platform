@@ -337,5 +337,20 @@ if ((${#non_resolus[@]})); then
   echo "résolvent d'eux-mêmes). Pour git et les autres outils, ajouter à /etc/hosts :"
   echo "  127.0.0.1 ${non_resolus[*]}"
 fi
+# Étapes suivantes : préparation de l'hôte avant make deploy (docs/installation.md, étapes 4 à 7).
+# Hostnames tous locaux : instance locale ; sinon, serveur distant à piloter par DEPLOY_SSH.
+tous_locaux=1
+for s in "${services[@]}"; do
+  est_hostname_local "${hostnames[$s]}" || tous_locaux=0
+done
 echo
-echo "Étape suivante : make deploy ENV=$env_nom"
+echo "Étapes suivantes (docs/installation.md) :"
+if ((tous_locaux)); then
+  echo "  - instance locale : hôte préparé une fois (scripts/host-prereqs.sh, ou vm.max_map_count"
+  echo "    sous Docker Desktop : docs/installation.md, étape 4) ;"
+else
+  echo "  - instance distante : décommenter DEPLOY_SSH dans $fichier_rel (ssh://utilisateur@hôte),"
+  echo "    puis préparer le serveur : scripts/host-prereqs.sh, utilisateur de déploiement dans le"
+  echo "    groupe docker (docs/installation.md, étape 4) ;"
+fi
+echo "  - puis make deploy ENV=$env_nom, make bootstrap ENV=$env_nom et make smoke ENV=$env_nom."

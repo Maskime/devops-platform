@@ -135,8 +135,8 @@ Compléter ensuite le fichier à la main :
   DEPLOY_SSH=ssh://deploy@devops.mondomaine.fr
   ```
 
-  `make init` termine par « Étape suivante : make deploy » : pour un serveur, passer d'abord par les
-  étapes 4 et 5.
+  `make init` termine par les étapes suivantes : pour un serveur, préparation (étape 4), puis
+  `make deploy` (étape 5).
 - **Port SSH de GitLab** : `GITLAB_SSH_PORT` si 2222 ne convient pas.
 - **`TLS_MODE=custom`** : déposer les certificats dans `config/certs/` (voir étape 2).
 
