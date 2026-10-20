@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Pilote une instance, locale ou distante : make deploy, down, status, reload-certs, bootstrap
-# (qui régénère aussi le fichier de sortie outputs/<env>.env), smoke (scripts/smoke.sh).
+# (qui régénère aussi le fichier de sortie outputs/<env>.env), smoke (scripts/smoke.sh), backup et
+# restore (scripts/sauvegarde.sh).
 #   - DEPLOY_SSH vide ou absente de envs/<env>.env : moteur Docker courant du poste (comme avant) ;
 #   - DEPLOY_SSH=ssh://[user@]hôte[:port] : contexte Docker SSH devops-platform-<env> (créé ou mis à
 #     jour), fichiers de config montés par les services copiés sur l'hôte dans
@@ -11,11 +12,12 @@
 #
 # Usage : scripts/instance.sh <deploy|down|status|reload-certs|smoke> <env>
 #         scripts/instance.sh bootstrap <env> [sonarqube] [gitlab]   (défaut : toutes les étapes)
+#         scripts/instance.sh backup <env>   |   scripts/instance.sh restore <env> <répertoire>
 #         scripts/instance.sh compose <env> <arguments docker compose…>   (commande manuelle)
 # Garde-fous de configuration (make check-env) : appliqués par le Makefile avant deploy et reload-certs.
 # Variables transmises par le Makefile : FORCER=1 (garde-fou de l'hôte), ROTATION=1 (bootstrap : token
 # d'analyse SonarQube remplacé, voir scripts/bootstrap/sonarqube.sh), CONFIRMER=1 (down d'une instance
-# distante sans question, obligatoire hors terminal).
+# distante sans question, obligatoire hors terminal), DESTINATION et AVEC_LOKI (backup).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -57,6 +59,8 @@ erreur() { echo "Erreur : $*" >&2; exit 1; }
 usage() {
   echo "Usage : $0 <deploy|down|status|reload-certs|smoke> <env>" >&2
   echo "        $0 bootstrap <env> $(printf '[%s] ' "${ETAPES_BOOTSTRAP[@]}")" >&2
+  echo "        $0 backup <env>" >&2
+  echo "        $0 restore <env> <répertoire de sauvegarde>" >&2
   echo "        $0 compose <env> <arguments docker compose…>" >&2
   exit 1
 }
@@ -65,7 +69,8 @@ usage() {
 action="$1" env="$2"
 shift 2
 case "$action" in
-  deploy | down | status | reload-certs | smoke) (($# == 0)) || usage ;;
+  deploy | down | status | reload-certs | smoke | backup) (($# == 0)) || usage ;;
+  restore) (($# == 1)) || usage ;;
   bootstrap)
     # Étapes demandées (toutes par défaut), dédoublonnées et remises dans l'ordre d'exécution
     demandees=" ${*:-${ETAPES_BOOTSTRAP[*]}} "
@@ -594,6 +599,20 @@ case "$action" in
     afficher_cible
     if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
     scripts/smoke.sh "$env_file"
+    ;;
+  backup)
+    # Sauvegarde à froid (docs/sauvegarde.md) : cible préparée comme pour smoke ; DESTINATION et
+    # AVEC_LOKI transmis par l'environnement
+    afficher_cible
+    if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
+    scripts/sauvegarde.sh sauvegarder "$env_file"
+    ;;
+  restore)
+    # Restauration des volumes ; make restore enchaîne make deploy. Garde-fou de l'hôte écrit, comme
+    # pour deploy : la restauration installe l'instance sur un serveur neuf.
+    afficher_cible
+    if [[ -n "$deploy_ssh" ]]; then verifier_instance 1; fi
+    scripts/sauvegarde.sh restaurer "$env_file" "$1"
     ;;
   compose)
     # Commande manuelle (exec, logs, restart…) avec la cible et les montages de l'instance

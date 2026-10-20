@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-images check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke
+.PHONY: help verify check-images check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke backup restore
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -149,3 +149,21 @@ smoke: check-env ## [ENV] Smoke test : projet de test, pipeline avec analyse Son
 	  echo "NETTOYER hérité du shell refusé : le passer explicitement, make smoke ENV=$(ENV) NETTOYER=1" >&2; exit 1; \
 	fi
 	@FORCER="$(FORCER)" NETTOYER="$(NETTOYER)" scripts/instance.sh smoke "$(ENV)"
+
+# Sauvegarde à froid des volumes à état, écrite sur le poste (docs/sauvegarde.md). Variables acceptées
+# seulement sur la ligne de commande, comme FORCER
+backup: check-env-file ## [ENV] Sauvegarde à froid (instance arrêtée le temps de l'archivage) sur le poste ; DESTINATION=<répertoire>, AVEC_LOKI=1
+	@for v in "DESTINATION:$(origin DESTINATION)" "AVEC_LOKI:$(origin AVEC_LOKI)"; do \
+	  if [[ "$${v#*:}" == "environment" ]]; then \
+	    echo "$${v%%:*} hérité du shell refusé : le passer explicitement, make backup ENV=$(ENV) $${v%%:*}=…" >&2; exit 1; \
+	  fi; \
+	done
+	@FORCER="$(FORCER)" DESTINATION="$(DESTINATION)" AVEC_LOKI="$(AVEC_LOKI)" scripts/instance.sh backup "$(ENV)"
+
+# Restauration d'une sauvegarde, puis make deploy. FORCER=1 : volumes non vides remplacés
+restore: check-env ## [ENV] Restaure SAUVEGARDE=<répertoire> (empreintes, versions, architecture contrôlées) puis déploie ; FORCER=1 si volumes non vides
+	@if [[ "$(origin SAUVEGARDE)" != "command line" ]]; then \
+	  echo "SAUVEGARDE à passer sur la ligne de commande : make restore ENV=$(ENV) SAUVEGARDE=<répertoire>" >&2; exit 1; \
+	fi
+	@FORCER="$(FORCER)" scripts/instance.sh restore "$(ENV)" "$(SAUVEGARDE)"
+	@FORCER="$(FORCER)" scripts/instance.sh deploy "$(ENV)"
