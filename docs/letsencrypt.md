@@ -41,7 +41,7 @@ Configuration : `compose/tls/letsencrypt.yml` (overlay de `compose/proxy.yml`) e
 4. Contrôler le certificat présenté (émetteur Let's Encrypt, échéance) :
    `openssl s_client -connect <hostname>:443 -servername <hostname> < /dev/null | openssl x509 -noout -issuer -enddate`.
    En cas d'échec, Traefik sert son certificat auto-signé par défaut (`TRAEFIK DEFAULT CERT`) : la
-   cause est dans ses logs (`docker compose --env-file envs/<env>.env logs traefik | grep -i acme`, ou
+   cause est dans ses logs (`scripts/instance.sh compose <env> logs traefik | grep -i acme`, ou
    Grafana) — DNS, port fermé, limite atteinte.
 
 ## Contrôles au déploiement
@@ -72,7 +72,15 @@ sans coupure ni action de l'opérateur.
 - **Staging → production** : Traefik ne lie pas `acme.json` à l'annuaire ACME. Après un essai en
   staging, retirer `ACME_CA_SERVER`, puis vider le stockage avant de redéployer, sinon les certificats
   de staging restent servis jusqu'à leur renouvellement (#74) :
-  `docker compose --env-file envs/<env>.env rm -sf traefik && docker volume rm devops-platform_traefik_acme && make deploy ENV=<env>`.
+
+  ```bash
+  scripts/instance.sh compose <env> rm -sf traefik
+  docker --context devops-platform-<env> volume rm devops-platform_traefik_acme   # instance distante
+  docker volume rm devops-platform_traefik_acme                                   # instance locale
+  make deploy ENV=<env>
+  ```
+
 - **Changement de mode** : en repassant en `none` ou `custom`, le volume est conservé, inutilisé.
-  Piloter toujours la plateforme avec `--env-file` (ou `make`) : sans lui, `TLS_MODE` vaut `none` et un
-  `docker compose up` retirerait le HTTPS de Traefik.
+  Piloter toujours la plateforme avec `make` ou `scripts/instance.sh compose <env> …` : sans le
+  fichier de l'instance, `TLS_MODE` vaut `none` et un `docker compose up` retirerait le HTTPS de
+  Traefik.

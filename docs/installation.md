@@ -339,7 +339,8 @@ légitime. Sur une instance qui a des données, ne jamais supprimer le volume `s
 
   ```bash
   scripts/instance.sh compose <env> rm -sf traefik
-  docker --context devops-platform-<env> volume rm devops-platform_traefik_acme   # en local : sans --context
+  docker --context devops-platform-<env> volume rm devops-platform_traefik_acme   # instance distante
+  docker volume rm devops-platform_traefik_acme                                   # instance locale
   make deploy ENV=<env>
   ```
 
