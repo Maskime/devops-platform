@@ -39,8 +39,9 @@ client a besoin : Traefik ne lit pas les logs, Promtail ne suit pas les événem
   `devops-platform_socket-proxy-traefik`, `socket-proxy-promtail` que sur
   `devops-platform_socket-proxy-promtail` (`internal: true` : aucun accès sortant, aucun port publié),
   chacun partagé avec son seul client. Traefik ne joint donc pas le proxy de Promtail (le nom n'y est
-  même pas résolu), ni l'inverse : un client ne peut pas se faire passer pour l'autre. Les jobs CI,
-  lancés sur leur propre réseau (`GITLAB_RUNNER_NETWORK`), ne voient aucun des deux proxys. Les
+  même pas résolu), ni l'inverse : un client ne peut pas se faire passer pour l'autre. Les jobs CI
+  et les projets co-localisés, sur leurs propres réseaux (`GITLAB_RUNNER_NETWORK`,
+  `CONSUMER_NETWORK`), ne voient aucun des deux proxys. Les
   réseaux internes n'ayant pas de passerelle, ports publiés et accès sortant de Traefik (ACME) et de
   Promtail passent toujours par le réseau de la plateforme.
 - **Durcissement des conteneurs.** Système de fichiers en lecture seule, aucune capacité Linux,

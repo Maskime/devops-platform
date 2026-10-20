@@ -1,7 +1,7 @@
 # Smoke test d'une instance (`make smoke`)
 
 `make smoke ENV=<env>` vérifie de bout en bout une instance déployée et bootstrapée : forge, runner,
-pipeline CI, analyse SonarQube et serveurs MCP. Il crée pour cela des **données de test**, que `NETTOYER=1` supprime
+isolation réseau, pipeline CI, analyse SonarQube et serveurs MCP. Il crée pour cela des **données de test**, que `NETTOYER=1` supprime
 à la fin ; `make bootstrap`, lui, n'en crée jamais.
 
 ```bash
@@ -24,11 +24,12 @@ non satisfaite, avec la cause et la commande à lancer.
 | 2 | Jeton d'accès personnel root éphémère créé | — |
 | 3 | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN` présentes, `SONAR_TOKEN` accepté par SonarQube, au moins un runner d'instance en ligne | `make bootstrap` non lancé, token révoqué |
 | 4 | Projet GitLab `root/devops-platform-smoke` et projet SonarQube `devops-platform-smoke` créés, ou réutilisés | — |
-| 5 | Fichiers de `scripts/smoke/projet/` et liste des cibles d'isolation poussés sur `main` (un commit) | — |
-| 6 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs, service de la plateforme joignable depuis un job |
-| 7 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
-| 8 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
-| 9 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
+| 5 | Isolation des projets co-localisés : Traefik seul membre de la plateforme sur le réseau des consommateurs ; deux [sentinelles](#sentinelles), l'une sur ce réseau, l'autre sur le réseau des jobs, joignent Traefik mais pas l'autre ; la première ne joint aucun service interne | instance déployée avant ce réseau (`make deploy`), service rattaché par erreur |
+| 6 | Fichiers de `scripts/smoke/projet/` et liste des cibles d'isolation poussés sur `main` (un commit) | — |
+| 7 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs, service de la plateforme ou sentinelle joignable depuis un job |
+| 8 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
+| 9 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
+| 10 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
 
 Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
 
@@ -36,12 +37,31 @@ Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
 - **`isolation-reseau`** : image par défaut ; vérifie d'abord qu'il joint Traefik par l'hôte de
   `CI_REPOSITORY_URL` (contrôle positif de l'outil, `nc -z`), puis que `gitlab:80`, `sonarqube-db:5432` et `loki:3100` sont
   **injoignables**, par nom et par leurs IP sur les réseaux de la plateforme
-  ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)). Les IP sont relevées par `make smoke` et
+  ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)), de même que la sentinelle du réseau des
+  consommateurs (`smoke-consommateur:8080`). Les IP sont relevées par `make smoke` et
   poussées dans le fichier `isolation-cibles.txt` du projet de test ; Loki, facultatif, n'est testé
   que par son nom s'il ne tourne pas ;
 - **`sonar-scanner`** : `sonarsource/sonar-scanner-cli` (version épinglée, celle de
   [l'exemple de job](analyse-sonarqube.md#exemple-de-job)), qui n'utilise que les variables CI
   d'instance : il valide `SONAR_HOST_URL` et `SONAR_TOKEN` tels que les reçoit tout projet hébergé.
+
+### Sentinelles
+
+L'étape 5 lance deux conteneurs `busybox` (image épinglée de `scripts/lib/images.sh`), hors Compose
+comme un job ou un conteneur d'un autre projet, à l'écoute sur le port 8080 :
+
+| Sentinelle | Réseau | Alias |
+|---|---|---|
+| consommateur | `CONSUMER_NETWORK` ([réseau des projets co-localisés](gitlab-proxy.md#réseau-des-projets-co-localisés)) | `smoke-consommateur` |
+| job | `GITLAB_RUNNER_NETWORK` ([réseau des jobs](gitlab-proxy.md#réseau-des-jobs)) | `smoke-job` |
+
+Contrôles positifs (outil et rattachement valides) : chacune se joint par son alias ; le consommateur
+joint Traefik par les hostnames de GitLab et de SonarQube (port 80) et par les noms
+`*.devops-platform.internal` (port 8000) ; le job joint Traefik par le hostname de GitLab. Contrôles
+négatifs : aucune ne joint l'autre, par alias ni par IP ; le consommateur ne joint ni `gitlab:80`, ni
+`sonarqube-db:5432`, ni `loki:3100`. Les sentinelles portent le label `devops-platform.smoke=<env>` ;
+elles sont supprimées après le pipeline, en échec comme en succès, et une exécution interrompue laisse
+les siennes au smoke test suivant, qui les supprime.
 
 Le job ne demande pas la quality gate (`sonar.qualitygate.wait`) : le résultat de l'analyse d'un code
 d'exemple ne dit rien de l'instance. Seule compte la présence de l'analyse.
@@ -67,7 +87,8 @@ hôte sans accès à `registry.gitlab.com`) renvoie à `GITLAB_RUNNER_HELPER_IMA
 |---|---|---|
 | Projet GitLab | `root/devops-platform-smoke` | privé, Auto DevOps désactivé |
 | Projet SonarQube | `devops-platform-smoke` | privé |
-| Jeton utilisateur SonarQube (compte admin), application OAuth GitLab (scope `mcp`) | `devops-platform-smoke-mcp` | supprimés en fin d'étape 8, succès ou échec |
+| Jeton utilisateur SonarQube (compte admin), application OAuth GitLab (scope `mcp`) | `devops-platform-smoke-mcp` | supprimés en fin d'étape 9, succès ou échec |
+| Conteneurs [sentinelles](#sentinelles) | label `devops-platform.smoke=<env>` | supprimés après le pipeline, succès ou échec |
 
 - **Relance** : les projets sont réutilisés. Seuls les fichiers absents ou modifiés sont poussés ; s'ils
   sont tous à jour, un nouveau pipeline est lancé sur `main`. Un projet GitLab en attente de suppression
