@@ -48,7 +48,7 @@ Images d'outillage, épinglées en dur dans les scripts (variables `*_IMAGE`, co
 | `koalaman/shellcheck` | `scripts/verify.sh` | lint des scripts |
 | `cytopia/yamllint` | `scripts/verify.sh` | lint YAML (aucun tag versionné publié : figé par digest) |
 | `alpine` | `scripts/bootstrap/gitlab.sh` | image par défaut des jobs du runner d'instance |
-| `busybox` | `scripts/lib/images.sh` | lecture et écriture du marqueur d'instance sur l'hôte (`scripts/instance.sh`), sentinelles de l'isolation des projets co-localisés (`make smoke`) |
+| `busybox` | `scripts/lib/images.sh` | lecture et écriture du marqueur d'instance sur l'hôte (`scripts/instance.sh`), sentinelles de l'isolation des projets co-localisés (`make smoke`), copie des volumes par `make backup` et `make restore` (`scripts/sauvegarde.sh`) |
 
 `sonarsource/sonar-scanner-cli` est épinglée dans le pipeline du smoke test
 (`scripts/smoke/projet/.gitlab-ci.yml`) et dans l'exemple de [`analyse-sonarqube.md`](analyse-sonarqube.md) :
@@ -60,26 +60,23 @@ Les exemples se lancent depuis la racine du repo, avec :
 
 ```bash
 ENV=<env>
-dc() { docker compose --env-file "envs/$ENV.env" "$@"; }
+# Commandes Compose sur l'instance, locale ou distante (DEPLOY_SSH) : docs/deploiement.md
+dc() { scripts/instance.sh compose "$ENV" "$@"; }
+# Commandes Docker sur l'hôte de l'instance : moteur local, ou contexte créé par make deploy
+DK=(docker)                                 # distante : DK=(docker --context "devops-platform-$ENV")
 SONARQUBE_URL=http://sonarqube.localhost   # SONARQUBE_EXTERNAL_URL de l'instance
+SAUVEGARDES=~/sauvegardes/"$ENV"           # dumps PostgreSQL, sur le poste
 ```
+
+Les redirections (`> fichier`, `< fichier`) lisent et écrivent sur le poste, y compris pour une
+instance distante.
 
 1. **Choisir la version.** Dernière version stable de l'éditeur (Docker Hub, releases GitHub), en lisant
    les notes de version de **chaque** version intermédiaire (ruptures, migrations, configuration).
    Respecter les contraintes de l'[inventaire](#inventaire) et les sections propres à chaque brique
    ci-dessous.
-2. **Sauvegarder à froid.** Une archive prise pendant que le service écrit est incohérente : arrêter le
-   service, archiver ses volumes, le redémarrer. Le nom d'un volume est `devops-platform_<volume>`.
-
-   ```bash
-   mkdir -p ~/sauvegardes/"$ENV"
-   dc stop grafana
-   docker run --rm -v devops-platform_grafana_data:/source:ro -v ~/sauvegardes/"$ENV":/dest \
-     alpine:3.24.2 tar czf "/dest/grafana_data-$(date +%F).tgz" -C /source .
-   dc start grafana
-   ```
-
-   GitLab et la base SonarQube ont en plus leur outil de sauvegarde dédié (voir plus bas).
+2. **Sauvegarder à froid** : `make backup ENV=<env>` (instance arrêtée le temps de l'archivage, puis
+   redémarrée ; [Sauvegarde et restauration](sauvegarde.md)). Noter le répertoire affiché.
 3. **Changer la version.**
    - Une instance seulement : modifier la variable dans `envs/<env>.env`.
    - Défaut du repo : modifier le défaut dans `compose/<module>.yml` **et** dans `envs/.env.example`, noter
@@ -91,13 +88,11 @@ SONARQUBE_URL=http://sonarqube.localhost   # SONARQUBE_EXTERNAL_URL de l'instanc
 
 **Retour arrière.** Une version qui a migré des données (schéma GitLab, SonarQube, `grafana.db`,
 Portainer…) ne peut pas être redescendue en changeant simplement le tag. Le retour arrière consiste à
-remettre l'**ancien** tag **et** à restaurer la sauvegarde :
+remettre l'**ancien** tag (dans `envs/<env>.env` ou le compose) **et** à restaurer la sauvegarde, qui
+refuse toute autre version que celle qu'elle a enregistrée :
 
 ```bash
-dc stop grafana
-docker run --rm -v devops-platform_grafana_data:/cible -v ~/sauvegardes/"$ENV":/source:ro \
-  alpine:3.24.2 sh -c 'rm -rf /cible/* /cible/..?* /cible/.[!.]* ; tar xzf /source/grafana_data-<date>.tgz -C /cible'
-make deploy ENV=<env>   # avec l'ancien tag remis dans envs/<env>.env ou le compose
+make restore ENV=<env> SAUVEGARDE=<répertoire affiché par make backup> FORCER=1   # puis make deploy, enchaîné
 ```
 
 ## GitLab CE
@@ -118,16 +113,9 @@ GitLab impose un **chemin de mise à jour** : on ne saute pas de versions arbitr
 
    Les deux commandes doivent afficher `0` (vue équivalente : *Admin → Monitoring → Background migrations*).
    Sinon, attendre ; ne jamais enchaîner une étape tant qu'il en reste.
-3. **Sauvegarder.** Une sauvegarde GitLab ne se restaure que sur **exactement** la version qui l'a produite.
-
-   ```bash
-   dc exec gitlab gitlab-backup create
-   # Les archives sont écrites dans le volume gitlab_data : les copier hors de celui-ci
-   dc cp gitlab:/var/opt/gitlab/backups ~/sauvegardes/"$ENV"/gitlab-backups
-   # Secrets (chiffrement des données en base) et configuration : non inclus dans gitlab-backup
-   dc cp gitlab:/etc/gitlab/gitlab-secrets.json ~/sauvegardes/"$ENV"/
-   dc cp gitlab:/etc/gitlab/gitlab.rb ~/sauvegardes/"$ENV"/
-   ```
+3. **Sauvegarder** : `make backup ENV=<env>`. La sauvegarde comprend la configuration et les secrets
+   (`gitlab-secrets.json`, volume `gitlab_config`) et ne se restaure que sur **exactement** la version
+   qui l'a produite (contrôlé par `make restore`).
 
 4. **Monter d'un arrêt** : `GITLAB_VERSION=<arrêt suivant>` puis `make deploy ENV=<env>`. Les migrations
    de schéma tournent au démarrage et peuvent être longues : suivre `dc logs -f gitlab`, **ne pas
@@ -144,8 +132,7 @@ GitLab impose un **chemin de mise à jour** : on ne saute pas de versions arbitr
    éventuel doit publier le tag `v<version>` correspondant ([bootstrap](bootstrap.md#image-auxiliaire-des-jobs)).
 
 **Retour arrière** : remettre la version de l'arrêt précédent, puis restaurer la sauvegarde prise à cette
-version ([Restore GitLab](https://docs.gitlab.com/administration/backup_restore/restore_gitlab/)) avec
-`gitlab-secrets.json`.
+version : `make restore ENV=<env> SAUVEGARDE=<répertoire> FORCER=1`.
 
 ## SonarQube
 
@@ -158,11 +145,14 @@ section *Server upgrade and maintenance*).
 - **Base PostgreSQL.** Vérifier que la version de PostgreSQL utilisée est supportée par la version cible
   (voir [PostgreSQL](#postgresql-base-sonarqube)).
 
-1. **Sauvegarder la base** (SonarQube arrêté pour une copie cohérente) :
+1. **Sauvegarder** : `make backup ENV=<env>` (base, données et versions d'image). Si une montée de
+   version **majeure** de PostgreSQL suit, prendre en plus un dump logique de la base (SonarQube arrêté
+   pour une copie cohérente), seul format relu par une autre majeure :
 
    ```bash
+   mkdir -p -m 700 "$SAUVEGARDES"
    dc stop sonarqube
-   dc exec -T sonarqube-db pg_dump -U sonar -Fc sonar > ~/sauvegardes/"$ENV"/sonar-$(date +%F).dump
+   dc exec -T sonarqube-db pg_dump -U sonar -Fc sonar > "$SAUVEGARDES/sonar-$(date +%F).dump"
    ```
 
 2. **Renouveler le volume `sonarqube_extensions`.** Le plugin (`extensions/plugins/sonarqube-community-branch-plugin.jar`,
@@ -174,10 +164,10 @@ section *Server upgrade and maintenance*).
 
    ```bash
    dc rm -sf sonarqube
-   docker volume rm devops-platform_sonarqube_extensions
+   "${DK[@]}" volume rm devops-platform_sonarqube_extensions
    ```
 
-   Suppression structurelle de ce volume : #56.
+   `make restore` fait de même. Suppression structurelle de ce volume : #56.
 3. **Changer `SONARQUBE_VERSION`**, puis démarrer SonarQube **sans** `make deploy` : tant que le schéma
    n'est pas migré, SonarQube reste en `DB_MIGRATION_NEEDED`, le healthcheck échoue et `make deploy`
    tomberait en erreur.
@@ -193,12 +183,15 @@ section *Server upgrade and maintenance*).
 5. **Finaliser** : `make deploy ENV=<env>` une fois le statut `UP`. Les index Elasticsearch sont reconstruits
    au démarrage (`sonarqube_data`), ce qui peut prendre du temps sur une grosse instance.
 
-**Retour arrière** : ancien tag, renouvellement de `sonarqube_extensions`, puis restauration de la base :
+**Retour arrière** : ancien tag, puis `make restore ENV=<env> SAUVEGARDE=<répertoire> FORCER=1`
+(base, données, et `sonarqube_extensions` renouvelé). Sans sauvegarde `make backup`, depuis le dump
+logique : renouveler `sonarqube_extensions` (point 2), puis :
 
 ```bash
 dc rm -sf sonarqube
 dc exec -T sonarqube-db sh -c 'dropdb -U sonar sonar && createdb -U sonar sonar'
-dc exec -T sonarqube-db pg_restore -U sonar -d sonar < ~/sauvegardes/"$ENV"/sonar-<date>.dump
+dc exec -T sonarqube-db pg_restore -U sonar -d sonar < "$SAUVEGARDES/sonar-<date>.dump"
+make deploy ENV=<env>
 ```
 
 ## Serveur MCP SonarQube
@@ -211,10 +204,14 @@ test appelle `search_my_sonarqube_projects`), puis `make smoke ENV=<env>`.
 
 - **Version mineure** (`17.11` → `17.12`) : changer `SONARQUBE_DB_VERSION`, `make deploy ENV=<env>`.
 - **Version majeure** (`17` → `18`) : le répertoire de données n'est **pas** compatible entre majeures.
+  Une sauvegarde `make backup` ne franchit pas une majeure (fichiers de données incompatibles, version
+  refusée par `make restore`) : elle sert au retour arrière, le passage se fait par dump logique.
   Procédure : vérifier que la version de SonarQube la supporte (PostgreSQL 18 : SonarQube 26.8 et plus),
-  `pg_dump` (voir SonarQube, point 1), arrêter la pile SonarQube, supprimer le volume `sonarqube_db`
-  **après** contrôle du dump, changer la version, démarrer `sonarqube-db` seul, `pg_restore`, puis
-  `make deploy ENV=<env>`.
+  `make backup`, `pg_dump` (voir SonarQube, point 1), arrêter la pile SonarQube
+  (`dc rm -sf sonarqube sonarqube-db`), supprimer le volume (`"${DK[@]}" volume rm
+  devops-platform_sonarqube_db`) **après** contrôle du dump, changer la version, démarrer
+  `sonarqube-db` seul (`dc up -d sonarqube-db`), `pg_restore` (voir le retour arrière de SonarQube),
+  puis `make deploy ENV=<env>`.
 - **PostgreSQL 18 et plus** : l'image stocke ses données sous `/var/lib/postgresql/<majeure>/docker` et
   déclare le volume sur `/var/lib/postgresql`. Le montage actuel (`sonarqube_db:/var/lib/postgresql/data`
   dans `compose/sonarqube.yml`) doit passer à `sonarqube_db:/var/lib/postgresql` lors de cette montée.
@@ -222,19 +219,20 @@ test appelle `search_my_sonarqube_projects`), puis `make smoke ENV=<env>`.
 ## Grafana, Loki, Promtail
 
 - **Grafana** migre sa base (`grafana.db`, volume `grafana_data`) au démarrage, sans retour possible :
-  sauvegarde à froid du volume obligatoire. Le provisioning (`config/grafana/`) est relu à chaque démarrage.
+  `make backup` obligatoire avant la montée. Le provisioning (`config/grafana/`) est relu à chaque démarrage.
 - **Loki** : les notes de version peuvent imposer des changements de `config/loki/loki-config.yaml`
   (`schema_config`, options retirées). Valider la configuration avec la nouvelle image avant de déployer :
   `LOKI_VERSION=<version> scripts/check-loki-config.sh envs/<env>.env` (image et rétention de
   l'instance), ou à la main :
   `docker run --rm -v "$PWD/config/loki:/etc/loki:ro" grafana/loki:<version> -config.file=/etc/loki/loki-config.yaml -config.expand-env=true -verify-config`
-  (`-config.expand-env=true` obligatoire : le fichier lit `LOKI_RETENTION_PERIOD`).
+  (`-config.expand-env=true` obligatoire : le fichier lit `LOKI_RETENTION_PERIOD`). Les logs ne sont
+  sauvegardés qu'avec `make backup ENV=<env> AVEC_LOKI=1`.
 - **Promtail** est déprécié par Grafana ; 3.6.x est la dernière version. Migration vers Alloy : #35.
 
 ## Portainer, PlantUML, page d'accueil
 
-- **Portainer** : garder la variante `-alpine` (le healthcheck exige `wget`). Sauvegarde à froid du volume
-  `portainer_data` (migration de sa base au démarrage).
+- **Portainer** : garder la variante `-alpine` (le healthcheck exige `wget`). `make backup` avant la
+  montée (migration de sa base, volume `portainer_data`, au démarrage).
 - **PlantUML** : sans état ; garder la variante `jetty-`. Changer le tag et `make deploy ENV=<env>`.
 - **Page d'accueil** (`nginx`) : sans état ; garder la variante `-alpine`. Changer le tag et
   `make deploy ENV=<env>`.

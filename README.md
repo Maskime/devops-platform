@@ -64,6 +64,8 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make bootstrap ENV=<env>` | Configure SonarQube puis GitLab : compte admin, compte et token d'analyse, runner d'instance (idempotent) ; `ROTATION=1` remplace le token d'analyse |
 | `make bootstrap-sonarqube ENV=<env>` / `bootstrap-gitlab` | Une seule étape de `make bootstrap` |
 | `make smoke ENV=<env>` | Smoke test de bout en bout : projet de test, pipeline, analyse SonarQube ; `NETTOYER=1` le supprime |
+| `make backup ENV=<env>` | Sauvegarde à froid des données de l'instance sur le poste (instance arrêtée le temps de l'archivage) |
+| `make restore ENV=<env> SAUVEGARDE=<répertoire>` | Restaure une sauvegarde (versions et empreintes contrôlées) puis redéploie ; `FORCER=1` si les volumes ne sont pas vides |
 | `make reload-certs ENV=<env>` | Recharge les certificats de `config/certs/` (`TLS_MODE=custom`) |
 | `make verify` | Vérifications statiques : shellcheck, yamllint, compose, images, secrets (Docker requis) |
 | `make check-images` | Contrôle d'épinglage des images (sans Docker) |
@@ -95,6 +97,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Accès à l'API Docker](docs/acces-docker.md) | Proxys de socket filtrants de Traefik et Promtail : endpoints autorisés par client, isolement, limites |
 | [Garde-fous](docs/garde-fous.md) | Lancements compose en double, fuites de secrets (CI, hook pre-commit), images épinglées (CI) |
 | [Serveurs MCP](docs/mcp.md) | Agents IA (Claude Code…) : URLs, authentification, activation par `TLS_MODE`, CA privée, licence |
+| [Sauvegarde et restauration](docs/sauvegarde.md) | `make backup` / `make restore` : volumes sauvegardés, manifeste, contrôles, retour arrière, limites |
 | [Montée de version](docs/montee-de-version.md) | Procédure par image (chemin de mise à jour GitLab, migration SonarQube) |
 
 ## Avancement

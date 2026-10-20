@@ -14,6 +14,7 @@ DEPLOY_SSH=ssh://deploy@devops.mondomaine.fr     # vide ou absente : moteur Dock
 | `make deploy ENV=<env>` | Contrôles (`make check-env`), démarrage ou mise à jour, attente que tous les services soient healthy (15 min au plus), récapitulatif des URLs |
 | `make status ENV=<env>` | Cible, état de chaque service, récapitulatif des URLs |
 | `make down ENV=<env>` | Arrête l'instance : conteneurs et réseaux supprimés, **volumes conservés**. Instance distante : [confirmation](#arrêt) |
+| `make backup ENV=<env>` / `make restore ENV=<env> SAUVEGARDE=<répertoire>` | Sauvegarde des données sur le poste, restauration : [Sauvegarde et restauration](sauvegarde.md) |
 
 `DEPLOY_SSH` et `DEPLOY_DIR` sont lues **dans le fichier uniquement** : contrairement aux autres
 variables, une valeur exportée dans le shell est ignorée, pour que la cible d'une commande ne dépende
@@ -168,6 +169,9 @@ Pour l'éviter, le premier `make deploy` écrit le nom de l'instance dans `${DEP
 commandes suivantes refusent une autre instance sur ce serveur. Pour remplacer volontairement
 l'instance du serveur, passer `FORCER=1` sur la ligne de commande (une valeur héritée du shell est
 refusée).
+
+`make restore` applique la même règle aux données : il refuse de remplacer des volumes non vides sans
+`FORCER=1` ([Sauvegarde et restauration](sauvegarde.md#restauration)).
 
 ## Commandes manuelles sur une instance distante
 
