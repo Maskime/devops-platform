@@ -7,16 +7,6 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
-### Sécurité
-
-- Réseau dédié aux projets co-localisés (`CONSUMER_NETWORK`, défaut `devops-platform_consumers`),
-  créé par `make deploy` et exporté dans `outputs/<env>.env` (`DEVOPS_PLATFORM_CONSUMER_NETWORK`).
-  Traefik y est le seul membre de la plateforme, avec les mêmes alias que sur le réseau des jobs. Les
-  conteneurs d'un projet co-localisé ne partagent plus le réseau des jobs CI : un utilisateur capable
-  de lancer un pipeline ne les joint plus, et réciproquement. `make check-env` refuse un réseau égal à
-  `GITLAB_RUNNER_NETWORK` ou à un réseau de la plateforme ; `make smoke` vérifie l'isolation dans les
-  deux sens. Voir `docs/branchement-projet.md`.
-
 ### Migration
 
 - Projets co-localisés (conteneurs d'autres projets sur l'hôte de l'instance) :
@@ -30,6 +20,25 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   Rien ne casse avant la migration d'un projet (Traefik reste sur les deux réseaux), mais il reste
   exposé aux jobs CI jusque-là. Runner de projet sur l'hôte : son conteneur passe sur le réseau des
   consommateurs, ses jobs restent sur le réseau des jobs (`network_mode` inchangé).
+
+### Corrigé
+
+- `make init` termine par les étapes suivantes, dont la préparation du serveur (`DEPLOY_SSH`,
+  `scripts/host-prereqs.sh`, groupe `docker`) pour une instance distante.
+- Documentation : les commandes manuelles visent le serveur de l'instance (`scripts/instance.sh
+  compose <env>`, contexte Docker `devops-platform-<env>`) et non le moteur Docker du poste, dont le
+  passage du staging à la production de Let's Encrypt (`docs/letsencrypt.md`). Une modification de
+  `config/loki/loki-config.yaml` s'applique par `make deploy`.
+
+### Sécurité
+
+- Réseau dédié aux projets co-localisés (`CONSUMER_NETWORK`, défaut `devops-platform_consumers`),
+  créé par `make deploy` et exporté dans `outputs/<env>.env` (`DEVOPS_PLATFORM_CONSUMER_NETWORK`).
+  Traefik y est le seul membre de la plateforme, avec les mêmes alias que sur le réseau des jobs. Les
+  conteneurs d'un projet co-localisé ne partagent plus le réseau des jobs CI : un utilisateur capable
+  de lancer un pipeline ne les joint plus, et réciproquement. `make check-env` refuse un réseau égal à
+  `GITLAB_RUNNER_NETWORK` ou à un réseau de la plateforme ; `make smoke` vérifie l'isolation dans les
+  deux sens. Voir `docs/branchement-projet.md`.
 
 ## [0.3.0] - 2026-10-19
 

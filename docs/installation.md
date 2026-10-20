@@ -135,8 +135,8 @@ Compléter ensuite le fichier à la main :
   DEPLOY_SSH=ssh://deploy@devops.mondomaine.fr
   ```
 
-  `make init` termine par « Étape suivante : make deploy » : pour un serveur, passer d'abord par les
-  étapes 4 et 5.
+  `make init` termine par les étapes suivantes : pour un serveur, préparation (étape 4), puis
+  `make deploy` (étape 5).
 - **Port SSH de GitLab** : `GITLAB_SSH_PORT` si 2222 ne convient pas.
 - **`TLS_MODE=custom`** : déposer les certificats dans `config/certs/` (voir étape 2).
 
@@ -272,7 +272,7 @@ Les mots de passe ne sont jamais affichés : les lire dans `envs/<env>.env`.
 
 Les mots de passe de GitLab, Grafana et Portainer ne sont appliqués qu'au **premier démarrage** : une
 fois changés dans l'interface, le fichier ne fait plus foi pour eux. Mot de passe admin Grafana perdu :
-`docker compose --env-file envs/<env>.env exec grafana grafana cli admin reset-admin-password <nouveau>`.
+`scripts/instance.sh compose <env> exec grafana grafana cli admin reset-admin-password <nouveau>`.
 
 L'instance est prête. Pour la suite : [Branchement d'un projet](branchement-projet.md),
 [Analyse SonarQube depuis la CI](analyse-sonarqube.md),
@@ -339,7 +339,8 @@ légitime. Sur une instance qui a des données, ne jamais supprimer le volume `s
 
   ```bash
   scripts/instance.sh compose <env> rm -sf traefik
-  docker --context devops-platform-<env> volume rm devops-platform_traefik_acme   # en local : sans --context
+  docker --context devops-platform-<env> volume rm devops-platform_traefik_acme   # instance distante
+  docker volume rm devops-platform_traefik_acme                                   # instance locale
   make deploy ENV=<env>
   ```
 

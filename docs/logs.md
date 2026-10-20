@@ -12,9 +12,9 @@ par défaut**. Sans rétention, le volume `loki_data` croîtrait sans limite.
   n'expire qu'avec sa dernière entrée ; le compacteur le marque à sa passe suivante (toutes les 10 min)
   et ne le supprime du disque qu'après `retention_delete_delay` (2h). L'espace des index est libéré par
   table journalière.
-- **Prise en compte** : `make deploy ENV=<env>` après modification de `envs/<env>.env` (le conteneur
-  `loki` est recréé) ; `docker compose --env-file envs/<env>.env restart loki` après modification de
-  `config/loki/loki-config.yaml`. Les logs déjà hors délai sont purgés dans les heures qui suivent.
+- **Prise en compte** : `make deploy ENV=<env>` après modification de `envs/<env>.env` ou de
+  `config/loki/loki-config.yaml` : le conteneur `loki` est recréé ou redémarré ; pour une instance
+  distante, la configuration est d'abord copiée sur le serveur. Les logs déjà hors délai sont purgés dans les heures qui suivent.
 - **Validation** : `make check-env` (préalable de `make deploy`) et `make verify` refusent une durée mal
   formée ou inférieure à 24h — Loki l'accepterait sans erreur — et passent la configuration résolue à
   `loki -verify-config` (`scripts/check-loki-config.sh`).
