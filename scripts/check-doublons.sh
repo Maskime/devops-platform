@@ -4,10 +4,10 @@
 # ce contrôle repère les doublons créés en le contournant (ou avant sa mise en place) :
 #   - volume de l'instance monté par un conteneur d'un autre projet Compose, ou hors Compose ;
 #   - réseau de l'instance utilisé par un conteneur d'un autre projet Compose. Les conteneurs sans
-#     label Compose (jobs CI du runner, `docker run --network`) y sont légitimes et ignorés. Le réseau
-#     des jobs (GITLAB_RUNNER_NETWORK) n'est pas contrôlé : les projets co-localisés le rejoignent
-#     (docs/branchement-projet.md), et un doublon d'un service de la plateforme reste repéré par ses
-#     volumes ou par les autres réseaux de l'instance.
+#     label Compose (jobs CI du runner, `docker run --network`) y sont légitimes et ignorés. Les réseaux
+#     des jobs (GITLAB_RUNNER_NETWORK) et des consommateurs (CONSUMER_NETWORK) ne sont pas contrôlés :
+#     les runners et les projets co-localisés les rejoignent (docs/branchement-projet.md), et un doublon
+#     d'un service de la plateforme reste repéré par ses volumes ou par les autres réseaux de l'instance.
 # Lecture seule : aucun conteneur n'est modifié.
 #
 # Usage : scripts/check-doublons.sh <fichier env>   (depuis la racine du repo ou ailleurs)
@@ -30,6 +30,7 @@ projet="$(sed -n 's/^name: //p' <<<"$config" | head -n1)"
 mapfile -t volumes < <(sed -n '/^volumes:/,/^[^ ]/ s/^    name: //p' <<<"$config")
 mapfile -t reseaux < <(sed -n '/^networks:/,/^[^ ]/ s/^    name: //p' <<<"$config")
 reseau_ci="$(reseau_jobs "$env_file")" || exit 1
+reseau_consommateurs="$(reseau_consommateurs "$env_file")" || exit 1
 
 # Doublons indexés par identifiant (un conteneur peut monter plusieurs volumes)
 declare -A doublons=()
@@ -43,7 +44,7 @@ for v in "${volumes[@]}"; do
   done < <(docker ps -a --filter "volume=$v" --format "$format")
 done
 for r in "${reseaux[@]}"; do
-  [[ "$r" != "$reseau_ci" ]] || continue
+  [[ "$r" != "$reseau_ci" && "$r" != "$reseau_consommateurs" ]] || continue
   while read -r id nom proj; do
     [[ -z "$proj" || "$proj" == "$projet" || -n "${doublons[$id]:-}" ]] || signaler "$id" "$nom" "$proj" "réseau $r"
   done < <(docker ps -a --filter "network=$r" --format "$format")

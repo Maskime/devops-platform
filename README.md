@@ -89,7 +89,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
 | [Let's Encrypt](docs/letsencrypt.md) | `TLS_MODE=letsencrypt` : prérequis, challenge, stockage, renouvellement |
-| [GitLab derrière le proxy](docs/gitlab-proxy.md) | URL publique, nginx interne, SSH, runner |
+| [GitLab derrière le proxy](docs/gitlab-proxy.md) | URL publique, nginx interne, SSH, runner, réseaux des jobs et des projets co-localisés |
 | [Dimensionnement](docs/dimensionnement.md) | Profils `small` / `medium` / `large` : ressources minimales et réglages |
 | [Rétention des logs](docs/logs.md) | Durée de rétention Loki, délai de purge |
 | [Accès à l'API Docker](docs/acces-docker.md) | Proxys de socket filtrants de Traefik et Promtail : endpoints autorisés par client, isolement, limites |

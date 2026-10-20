@@ -25,8 +25,8 @@ isolation-reseau:
       esac
       nc -z -w 5 "$hote" "$port" || { echo "Contrôle positif en échec : $hote:$port (Traefik) injoignable par nc"; exit 1; }
       echo "Traefik joignable : $hote:$port"
-    # Services de la plateforme injoignables, par nom et par IP : isolation-cibles.txt (« service port
-    # ip… »), généré par make smoke avec les IP courantes
+    # Services de la plateforme et sentinelle du réseau des projets co-localisés injoignables, par nom
+    # et par IP : isolation-cibles.txt (« service port ip… »), généré par make smoke avec les IP courantes
     - |
       test -s isolation-cibles.txt || { echo "isolation-cibles.txt absent ou vide"; exit 1; }
       echec=0

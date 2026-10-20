@@ -95,8 +95,24 @@ job : libcurl (donc git) résout tout `*.localhost` vers `127.0.0.1` sans consul
 `/etc/hosts`, et la JVM du scanner SonarQube n'utilise pas la CA fournie aux jobs (#144).
 
 `make check-env` et `make bootstrap` refusent un `GITLAB_RUNNER_NETWORK` égal à un réseau de la
-plateforme (`PLATFORM_NETWORK`, `devops-platform_socket-proxy*`, `devops-platform_gitlab-proxy`). Le
-smoke test vérifie l'isolation depuis un job ([smoke test](smoke-test.md)).
+plateforme (`PLATFORM_NETWORK`, `devops-platform_socket-proxy*`, `devops-platform_gitlab-proxy`) ou au
+réseau des projets co-localisés (`CONSUMER_NETWORK`). Le smoke test vérifie l'isolation depuis un job
+([smoke test](smoke-test.md)).
+
+### Réseau des projets co-localisés
+
+Les conteneurs d'autres projets installés sur le même hôte ([projets
+co-localisés](branchement-projet.md#projet-co-localisé)) joignent GitLab et SonarQube par un second
+réseau dédié, `CONSUMER_NETWORK` (défaut `devops-platform_consumers`), créé par `make deploy` et
+exporté dans `outputs/<env>.env` (`DEVOPS_PLATFORM_CONSUMER_NETWORK`). Comme sur le réseau des jobs,
+**Traefik est le seul membre de la plateforme**, avec les **mêmes alias** : hostnames publics et
+`*.devops-platform.internal` (entrypoint `interne`). Les URLs du tableau ci-dessus s'y appliquent.
+
+Réseau des jobs et réseau des consommateurs sont deux ponts Docker distincts : Docker bloque le trafic
+entre eux, dans les deux sens. Un job ne joint pas les conteneurs d'un projet co-localisé, ni eux un
+job, et aucun des deux ne joint les services internes de la plateforme. `make check-env` refuse un
+`CONSUMER_NETWORK` égal à `GITLAB_RUNNER_NETWORK` ou à un réseau de la plateforme ; `make smoke` vérifie
+l'isolation par des conteneurs sentinelles ([smoke test](smoke-test.md)).
 
 Après un changement de hostname, de `TLS_MODE` ou de `GITLAB_RUNNER_NETWORK`, `make bootstrap`
 ré-enregistre le runner et supprime l'ancien ([bootstrap](bootstrap.md)). Le runner lui-même reste sur
@@ -110,9 +126,12 @@ Limites :
 - **Entre jobs** : tous les jobs, et leurs `services:`, partagent le réseau des jobs et se joignent
   entre eux (un service PostgreSQL d'un job est visible d'un autre job). Le trafic de l'entrypoint
   `interne` y circule en HTTP clair.
-- **Passerelle de Traefik** : Traefik est sur deux réseaux non internes (plateforme et jobs) ; avant
-  Docker Engine 28, sa route par défaut (accès sortant, ACME) suit l'ordre alphabétique de leurs noms
-  (#145). Avec les noms par défaut, c'est le réseau de la plateforme.
+- **Passerelle de Traefik** : Traefik est sur trois réseaux non internes (plateforme, jobs,
+  consommateurs) ; avant Docker Engine 28, sa route par défaut (accès sortant, ACME) suit l'ordre
+  alphabétique de leurs noms (#145). Avec les noms par défaut, c'est le réseau de la plateforme.
+- **Ports publiés sur l'hôte** : l'isolation entre réseaux ne couvre pas les ports publiés sur l'hôte.
+  Un job ou un projet co-localisé joint, par la passerelle de son réseau, tout port qu'un conteneur
+  publie sur l'hôte (Traefik, SSH de GitLab, ports d'un projet co-localisé).
 - **Mise à jour** : entre le `make deploy` qui crée le réseau des jobs et le `make bootstrap` qui y
   ré-enregistre le runner, les jobs tournent encore sur le réseau de la plateforme : enchaîner les deux
   commandes.

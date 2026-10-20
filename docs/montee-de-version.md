@@ -48,7 +48,7 @@ Images d'outillage, épinglées en dur dans les scripts (variables `*_IMAGE`, co
 | `koalaman/shellcheck` | `scripts/verify.sh` | lint des scripts |
 | `cytopia/yamllint` | `scripts/verify.sh` | lint YAML (aucun tag versionné publié : figé par digest) |
 | `alpine` | `scripts/bootstrap/gitlab.sh` | image par défaut des jobs du runner d'instance |
-| `busybox` | `scripts/instance.sh` | lecture et écriture du marqueur d'instance sur l'hôte |
+| `busybox` | `scripts/lib/images.sh` | lecture et écriture du marqueur d'instance sur l'hôte (`scripts/instance.sh`), sentinelles de l'isolation des projets co-localisés (`make smoke`) |
 
 `sonarsource/sonar-scanner-cli` est épinglée dans le pipeline du smoke test
 (`scripts/smoke/projet/.gitlab-ci.yml`) et dans l'exemple de [`analyse-sonarqube.md`](analyse-sonarqube.md) :

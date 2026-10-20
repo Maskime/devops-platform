@@ -18,7 +18,8 @@ Le fichier est produit par `scripts/bootstrap/outputs.sh`.
 | `SONAR_TOKEN` | Token d'analyse SonarQube ([token d'analyse](bootstrap-sonarqube.md#token-danalyse)) |
 | `SONARQUBE_MCP_URL` | URL du serveur MCP SonarQube, s'il est actif ([serveurs MCP](mcp.md)) |
 | `GRAFANA_URL` | URL publique de Grafana |
-| `DEVOPS_PLATFORM_CI_NETWORK` | Réseau Docker des jobs CI (`GITLAB_RUNNER_NETWORK`), à rejoindre par un [projet co-localisé](branchement-projet.md#projet-co-localisé) |
+| `DEVOPS_PLATFORM_CONSUMER_NETWORK` | Réseau Docker des projets co-localisés (`CONSUMER_NETWORK`), à rejoindre par leurs conteneurs ([projet co-localisé](branchement-projet.md#projet-co-localisé)) |
+| `DEVOPS_PLATFORM_CI_NETWORK` | Réseau Docker des jobs CI (`GITLAB_RUNNER_NETWORK`), réservé aux jobs d'un [runner de projet sur le même hôte](branchement-projet.md#runner-de-projet-sur-le-même-hôte) |
 
 `SONAR_HOST_URL` et `SONAR_TOKEN` portent les noms attendus par les scanners SonarQube.
 

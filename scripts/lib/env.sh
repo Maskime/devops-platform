@@ -24,29 +24,47 @@ env_valeur() { # <fichier> <clé>
   if [[ -n "${!2+x}" ]]; then printf '%s' "${!2}"; else env_valeur_fichier "$1" "$2"; fi
 }
 
-# Réseau Docker des jobs CI (GITLAB_RUNNER_NETWORK, défaut devops-platform_ci), contrôlé : nom Docker
-# valide et distinct de tout réseau de la plateforme (compose/*.yml). Sur le réseau de la plateforme,
-# un job joindrait bases, Loki et nginx de GitLab ; sur un réseau socket-proxy* (proxys de socket, ancien
-# réseau commun compris), l'API Docker (variables d'environnement, donc secrets, des conteneurs) ; sur
-# gitlab-proxy, le sous-réseau auquel GitLab fait confiance pour X-Forwarded-For. Nom sur stdout ; motif du refus sur stderr (code 1).
-reseau_jobs() { # <fichier>
-  local reseau plateforme
-  reseau="$(env_valeur "$1" GITLAB_RUNNER_NETWORK)"
-  reseau="${reseau:-devops-platform_ci}"
+# Réseau Docker dédié <clé> (défaut <défaut>), contrôlé : nom Docker valide, distinct de tout réseau de
+# la plateforme (compose/*.yml) et de l'autre réseau dédié (<clé autre>, défaut <défaut autre>). Sur le
+# réseau de la plateforme, un job ou un projet co-localisé joindrait bases, Loki et nginx de GitLab ; sur
+# un réseau socket-proxy* (proxys de socket, ancien réseau commun compris), l'API Docker (variables
+# d'environnement, donc secrets, des conteneurs) ; sur gitlab-proxy, le sous-réseau auquel GitLab fait
+# confiance pour X-Forwarded-For ; confondus, réseau des jobs et réseau des consommateurs exposeraient
+# les projets co-localisés aux jobs CI. Nom sur stdout ; motif du refus sur stderr (code 1).
+reseau_dedie_valide() { # <fichier> <clé> <défaut> <clé autre> <défaut autre>
+  local reseau autre plateforme
+  reseau="$(env_valeur "$1" "$2")"
+  reseau="${reseau:-$3}"
+  autre="$(env_valeur "$1" "$4")"
+  autre="${autre:-$5}"
   plateforme="$(env_valeur "$1" PLATFORM_NETWORK)"
   plateforme="${plateforme:-devops-platform}"
   if [[ ! "$reseau" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
-    echo "GITLAB_RUNNER_NETWORK invalide : $reseau (nom de réseau Docker attendu)." >&2
+    echo "$2 invalide : $reseau (nom de réseau Docker attendu)." >&2
   elif [[ "$reseau" == "$plateforme" || "$reseau" == devops-platform_socket-proxy* \
     || "$reseau" == devops-platform_gitlab-proxy ]]; then
-    echo "GITLAB_RUNNER_NETWORK invalide : $reseau est un réseau de la plateforme ; les jobs CI doivent" >&2
-    echo "  tourner sur un réseau dédié (docs/gitlab-proxy.md, « Runner et jobs CI »)." >&2
+    echo "$2 invalide : $reseau est un réseau de la plateforme ; jobs CI et projets co-localisés" >&2
+    echo "  doivent être sur des réseaux dédiés (docs/gitlab-proxy.md, « Runner et jobs CI »)." >&2
+  elif [[ "$reseau" == "$autre" ]]; then
+    echo "$2 invalide : $reseau est aussi le réseau $4 ; jobs CI et projets co-localisés" >&2
+    echo "  doivent être sur des réseaux distincts (docs/gitlab-proxy.md, « Runner et jobs CI »)." >&2
   else
     printf '%s' "$reseau"
     return 0
   fi
-  echo "  Corriger dans $1 : GITLAB_RUNNER_NETWORK=devops-platform_ci (ou commenter la ligne)" >&2
+  echo "  Corriger dans $1 : $2=$3 (ou commenter la ligne)" >&2
   return 1
+}
+
+# Réseau des jobs CI (GITLAB_RUNNER_NETWORK, défaut devops-platform_ci), contrôlé par reseau_dedie_valide
+reseau_jobs() { # <fichier>
+  reseau_dedie_valide "$1" GITLAB_RUNNER_NETWORK devops-platform_ci CONSUMER_NETWORK devops-platform_consumers
+}
+
+# Réseau des projets co-localisés (CONSUMER_NETWORK, défaut devops-platform_consumers), contrôlé par
+# reseau_dedie_valide
+reseau_consommateurs() { # <fichier>
+  reseau_dedie_valide "$1" CONSUMER_NETWORK devops-platform_consumers GITLAB_RUNNER_NETWORK devops-platform_ci
 }
 
 # Sous-réseau du lien Traefik → GitLab (GITLAB_PROXY_SUBNET, défaut 172.31.254.0/28) : CIDR IPv4,

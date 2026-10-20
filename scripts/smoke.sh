@@ -2,7 +2,8 @@
 # Smoke test d'une instance bootstrapée (make bootstrap) : crée (ou réutilise) le projet de test
 # root/devops-platform-smoke dans GitLab, y pousse scripts/smoke/projet/ (.gitlab-ci.yml avec un job
 # simple, un job d'isolation réseau et un job sonar-scanner) et la liste des cibles injoignables depuis
-# un job (ISOLATION_FICHIER), attend que le pipeline passe au vert et que l'analyse du commit
+# un job (ISOLATION_FICHIER), vérifie l'isolation entre le réseau des projets co-localisés et celui des
+# jobs (conteneurs sentinelles), attend que le pipeline passe au vert et que l'analyse du commit
 # apparaisse dans SonarQube, puis interroge les serveurs MCP (SonarQube s'il est actif, GitLab) avec des
 # jetons éphémères. NETTOYER=1 : projets de test GitLab et SonarQube supprimés après un succès.
 # Lancé par `make smoke ENV=<env>` (scripts/instance.sh smoke), qui positionne la cible Docker (contexte
@@ -29,6 +30,8 @@ source "$ROOT/scripts/lib/gitlab.sh"
 source "$ROOT/scripts/lib/sonarqube.sh"
 # shellcheck source=scripts/lib/verrou.sh
 source "$ROOT/scripts/lib/verrou.sh"
+# shellcheck source=scripts/lib/images.sh
+source "$ROOT/scripts/lib/images.sh"
 
 # Projet de test : chemin GitLab (espace de noms root) et clé SonarQube, la seconde reprise dans
 # scripts/smoke/projet/.gitlab-ci.yml
@@ -39,6 +42,9 @@ readonly SOURCES=scripts/smoke/projet
 # Cibles qu'un job ne doit pas joindre (« service port ip… » par ligne), générées ici avec les IP
 # courantes et lues par le job isolation-reseau de scripts/smoke/projet/.gitlab-ci.yml
 readonly ISOLATION_FICHIER=isolation-cibles.txt
+# Sentinelles de l'isolation des projets co-localisés : conteneurs hors Compose (comme un job ou un
+# conteneur d'un autre projet), marqués de ce label (valeur : l'instance), à l'écoute sur ce port
+readonly SENTINELLE_LABEL=devops-platform.smoke SENTINELLE_PORT=8080
 # Nom du PAT root du smoke test, distinct de celui du bootstrap (qui révoque les jetons de son nom)
 readonly PAT_NOM=devops-platform-smoke
 # Serveurs MCP (docs/mcp.md) : jeton utilisateur SonarQube (compte admin) et application OAuth GitLab
@@ -95,9 +101,22 @@ readonly CODE_REVOCATION='
 code, _ = api("delete", "/personal_access_tokens/self")
 abort("HTTP #{code}") unless code == 204
 '
-mcp_sonar_jeton=""
+mcp_sonar_jeton="" sentinelles=0
+# Sentinelles de l'instance supprimées (identifiants : exception au contrôle de verify.sh)
+retirer_sentinelles() {
+  local ids
+  ids="$(docker ps -aq --filter "label=$SENTINELLE_LABEL=$env")" || return 1
+  [[ -z "$ids" ]] && return 0
+  # shellcheck disable=SC2086 # un identifiant par mot
+  docker rm -f $ids > /dev/null  # check-noms: id
+}
 terminer() {
   local code=$?
+  if ((sentinelles)); then
+    sentinelles=0
+    retirer_sentinelles \
+      || echo "Attention : sentinelles non supprimées : docker ps -a --filter label=$SENTINELLE_LABEL=$env" >&2
+  fi
   if [[ -n "$mcp_sonar_jeton" ]]; then
     mcp_sonar_jeton=""
     sonar_api POST /api/user_tokens/revoke "$admin" "name=$MCP_NOM" > /dev/null 2>&1 && [[ "$CODE" == 204 ]] \
@@ -254,9 +273,11 @@ else
   echo "    SonarQube : projet créé (privé)."
 fi
 
-# --- 5. Envoi du .gitlab-ci.yml -------------------------------------------------------------------
+# --- 5. Isolation des projets co-localisés --------------------------------------------------------
 
-etape "Envoi de $SOURCES/ sur la branche $BRANCHE"
+reseau_ci="$(reseau_jobs "$env_file")" || exit 1
+reseau_conso="$(reseau_consommateurs "$env_file")" || exit 1
+etape "Isolation des projets co-localisés ($reseau_conso) et des jobs CI ($reseau_ci)"
 # Cibles de l'isolation réseau : nom de service (sans point, qu'aucun domaine de recherche ne complète)
 # et IP sur les réseaux de la plateforme, pour vérifier aussi l'absence de route, pas seulement de nom.
 # Loki est facultatif (brique observability désactivable) : nom seul s'il ne tourne pas.
@@ -272,6 +293,75 @@ for cible in gitlab:80 sonarqube-db:5432 loki:3100; do
   [[ -n "$ips" || "$cible" == loki:* ]] || erreur "IP du service ${cible%:*} introuvable"
   cibles+="${cible%:*} ${cible#*:} ${ips% }"$'\n'
 done
+
+# Membres de la plateforme sur le réseau des consommateurs : Traefik seul
+projet_compose="$(dc config | sed -n 's/^name: //p' | head -n1)"
+membres="$(docker ps --filter "network=$reseau_conso" --filter "label=com.docker.compose.project=$projet_compose" \
+  --format '{{.Label "com.docker.compose.service"}}' | LC_ALL=C sort | paste -sd ' ' -)"
+[[ "$membres" == traefik ]] \
+  || erreur "membres de la plateforme sur $reseau_conso : « $membres » (attendu : traefik seul ; make deploy ENV=$env)"
+echo "    Réseau $reseau_conso : Traefik seul membre de la plateforme."
+
+# Deux sentinelles à l'écoute : un « projet co-localisé » sur le réseau des consommateurs et un « job »
+# sur le réseau des jobs (même situation qu'un conteneur lancé par le runner). Restes d'une exécution
+# interrompue supprimés (verrou de l'instance tenu : aucun autre smoke test en cours).
+retirer_sentinelles || erreur "suppression des sentinelles d'une exécution précédente impossible"
+sentinelles=1
+lancer_sentinelle() { # <réseau> <alias> : identifiant sur stdout
+  docker run -d --rm --label "$SENTINELLE_LABEL=$env" --network "$1" --network-alias "$2" \
+    "$BUSYBOX_IMAGE" nc -lk -p "$SENTINELLE_PORT" -e true
+}
+ip_sur_reseau() { # <identifiant> <réseau>
+  docker inspect -f "{{(index .NetworkSettings.Networks \"$2\").IPAddress}}" "$1" 2> /dev/null
+}
+conso="$(lancer_sentinelle "$reseau_conso" smoke-consommateur)" || erreur "sentinelle de $reseau_conso non démarrée"
+job="$(lancer_sentinelle "$reseau_ci" smoke-job)" || erreur "sentinelle de $reseau_ci non démarrée"
+ip_conso="$(ip_sur_reseau "$conso" "$reseau_conso")" && [[ -n "$ip_conso" ]] \
+  || erreur "IP de la sentinelle sur $reseau_conso introuvable"
+ip_job="$(ip_sur_reseau "$job" "$reseau_ci")" && [[ -n "$ip_job" ]] \
+  || erreur "IP de la sentinelle sur $reseau_ci introuvable"
+
+joint() { docker exec "$1" nc -z -w 3 "$2" "$3" 2> /dev/null; }  # check-noms: id
+echecs=()
+attendu() { # <joignable|injoignable> <sentinelle> <libellé> <hôte> <port>
+  local resultat=injoignable
+  joint "$2" "$4" "$5" && resultat=joignable
+  if [[ "$resultat" == "$1" ]]; then
+    echo "    ${resultat^} depuis $3 : $4:$5"
+  else
+    echo "    ${resultat^^} depuis $3 : $4:$5 (attendu : $1)"
+    echecs+=("$3 → $4:$5 $resultat")
+  fi
+}
+gitlab_hote="$(env_valeur "$env_file" GITLAB_HOSTNAME)"
+sonar_hote="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
+# Contrôles positifs : écoute, résolution des alias et accès à Traefik (sinon un nc inutilisable ou une
+# sentinelle mal rattachée ferait passer les contrôles négatifs)
+attendu joignable "$conso" consommateur smoke-consommateur "$SENTINELLE_PORT"
+attendu joignable "$job" job smoke-job "$SENTINELLE_PORT"
+for cible in "${gitlab_hote:-gitlab.localhost}:80" "${sonar_hote:-sonarqube.localhost}:80" \
+  gitlab.devops-platform.internal:8000 sonarqube.devops-platform.internal:8000; do
+  attendu joignable "$conso" consommateur "${cible%:*}" "${cible##*:}"
+done
+attendu joignable "$job" job "${gitlab_hote:-gitlab.localhost}" 80
+# Contrôles négatifs : aucun trafic entre les deux réseaux, ni du consommateur vers les services internes
+attendu injoignable "$conso" consommateur smoke-job "$SENTINELLE_PORT"
+attendu injoignable "$conso" consommateur "$ip_job" "$SENTINELLE_PORT"
+attendu injoignable "$job" job smoke-consommateur "$SENTINELLE_PORT"
+attendu injoignable "$job" job "$ip_conso" "$SENTINELLE_PORT"
+while read -r service port ips; do
+  for cible in $service $ips; do attendu injoignable "$conso" consommateur "$cible" "$port"; done
+done <<<"${cibles%$'\n'}"
+if ((${#echecs[@]})); then
+  printf '    En défaut : %s\n' "${echecs[@]}" >&2
+  erreur "isolation des projets co-localisés en défaut (docs/gitlab-proxy.md, « Réseau des projets co-localisés »)"
+fi
+# Le job isolation-reseau du pipeline vérifie aussi, depuis un vrai job, que la sentinelle est injoignable
+cibles+="smoke-consommateur $SENTINELLE_PORT $ip_conso"$'\n'
+
+# --- 6. Envoi du .gitlab-ci.yml -------------------------------------------------------------------
+
+etape "Envoi de $SOURCES/ sur la branche $BRANCHE"
 echo "    Cibles injoignables attendues depuis un job :"
 while IFS= read -r ligne; do echo "      $ligne"; done <<<"${cibles%$'\n'}"
 # Fichiers « chemin=contenu en base64 » en arguments (contenu versionné, non secret ; IP internes pour
@@ -322,7 +412,7 @@ else
   echo "    Commit ${sha:0:8} : $(sed -n 's/^COMMIT=//p' <<<"$sortie")."
 fi
 
-# --- 6. Pipeline ----------------------------------------------------------------------------------
+# --- 7. Pipeline ----------------------------------------------------------------------------------
 
 etape "Pipeline du commit ${sha:0:8}"
 # shellcheck disable=SC2016 # code Ruby
@@ -397,10 +487,13 @@ if [[ -n "${statut_final:-}" ]]; then
   fi
   erreur "pipeline $pipeline : $statut_final ($pipeline_url)"
 fi
+# Sentinelles inutiles une fois le job isolation-reseau passé
+retirer_sentinelles || erreur "suppression des sentinelles impossible"
+sentinelles=0
 
 verrou_tenu
 
-# --- 7. Analyse SonarQube -------------------------------------------------------------------------
+# --- 8. Analyse SonarQube -------------------------------------------------------------------------
 
 etape "Analyse SonarQube du commit ${sha:0:8}"
 # Analyse de la branche, postérieure à la création du pipeline, portant la révision du commit. Elle
@@ -421,7 +514,7 @@ attendre "Analyse" "$ATTENTE_ANALYSE" analyse_presente \
   || erreur "aucune analyse du commit ${sha:0:8} dans SonarQube après $((ATTENTE_ANALYSE / 60)) min ($sonar_url/dashboard?id=$SONAR_CLE)"
 echo "    Analyse présente : $sonar_url/dashboard?id=$SONAR_CLE"
 
-# --- 8. Serveurs MCP -------------------------------------------------------------------------------
+# --- 9. Serveurs MCP -------------------------------------------------------------------------------
 
 etape "Serveurs MCP (docs/mcp.md)"
 verrou_tenu
@@ -522,7 +615,7 @@ rm -f "$erreurs"
 [[ -n "$(sed -n 's/^PROJET=//p' <<<"$sortie")" ]] || erreur "réponse inattendue du serveur MCP de GitLab"
 echo "    GitLab : serveur MCP $(sed -n 's/^VERSION=//p' <<<"$sortie"), projet root/$PROJET lu par get_project."
 
-# --- 9. Nettoyage ---------------------------------------------------------------------------------
+# --- 10. Nettoyage --------------------------------------------------------------------------------
 
 if ((nettoyer)); then
   etape "Nettoyage des projets de test (NETTOYER=1)"
