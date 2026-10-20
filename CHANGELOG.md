@@ -7,6 +7,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+### Ajouté
+
+- `make backup ENV=<env>` : sauvegarde à froid des volumes à état de l'instance, locale ou distante,
+  dans un répertoire du poste (`~/.local/share/devops-platform/sauvegardes/<env>/` par défaut), avec un
+  manifeste (versions d'image, architecture, empreintes). `make restore ENV=<env> SAUVEGARDE=<répertoire>`
+  contrôle la sauvegarde, restaure les volumes et redéploie (`docs/sauvegarde.md`).
+
 ### Migration
 
 - Projets co-localisés (conteneurs d'autres projets sur l'hôte de l'instance) :
@@ -23,6 +30,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Corrigé
 
+- `docs/montee-de-version.md` : sauvegarde et retour arrière par `make backup` / `make restore`, commandes
+  manuelles par `scripts/instance.sh compose <env>` et le contexte Docker de l'instance, valables pour
+  une instance distante (#187).
 - `make init` termine par les étapes suivantes, dont la préparation du serveur (`DEPLOY_SSH`,
   `scripts/host-prereqs.sh`, groupe `docker`) pour une instance distante.
 - Documentation : les commandes manuelles visent le serveur de l'instance (`scripts/instance.sh
