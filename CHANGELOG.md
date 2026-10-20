@@ -7,6 +7,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+### Corrigé
+
+- `make init` termine par les étapes suivantes, dont la préparation du serveur (`DEPLOY_SSH`,
+  `scripts/host-prereqs.sh`, groupe `docker`) pour une instance distante.
+- Documentation : les commandes manuelles visent le serveur de l'instance (`scripts/instance.sh
+  compose <env>`, contexte Docker `devops-platform-<env>`) et non le moteur Docker du poste, dont le
+  passage du staging à la production de Let's Encrypt (`docs/letsencrypt.md`). Une modification de
+  `config/loki/loki-config.yaml` s'applique par `make deploy`.
+
 ## [0.3.0] - 2026-10-19
 
 Intégration des agents IA : page d'accueil de l'instance et serveurs MCP de GitLab et de SonarQube
