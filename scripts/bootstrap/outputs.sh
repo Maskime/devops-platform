@@ -123,8 +123,11 @@ else
   lignes+=("# Grafana : service absent de l'instance.")
 fi
 
-# Réseau des jobs CI, créé par compose/proxy.yml quels que soient les services : à rejoindre par un
-# projet co-localisé (docs/branchement-projet.md). Même validation que make check-env.
+# Réseaux créés par compose/proxy.yml quels que soient les services (docs/branchement-projet.md) : celui
+# des projets co-localisés, à rejoindre par leurs conteneurs, et celui des jobs CI, réservé aux jobs d'un
+# runner de projet installé sur l'hôte. Même validation que make check-env.
+reseau="$(reseau_consommateurs "$env_file")" || erreur "réseau des projets co-localisés non exportable"
+lignes+=("DEVOPS_PLATFORM_CONSUMER_NETWORK=$reseau")
 reseau="$(reseau_jobs "$env_file")" || erreur "réseau des jobs non exportable"
 lignes+=("DEVOPS_PLATFORM_CI_NETWORK=$reseau")
 
