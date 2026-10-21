@@ -30,6 +30,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Corrigé
 
+- `make backup` et `make restore` ne refusent plus une instance saine en lisant l'image de GitLab pour
+  `gitlab-runner` (image d'un service lue dans sa propre définition, pas dans celles de ses dépendances).
 - `docs/montee-de-version.md` : sauvegarde et retour arrière par `make backup` / `make restore`, commandes
   manuelles par `scripts/instance.sh compose <env>` et le contexte Docker de l'instance, valables pour
   une instance distante (#187).

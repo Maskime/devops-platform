@@ -100,8 +100,15 @@ while read -r cle nom; do NOM_VOLUME[$cle]="$nom"; done < <(awk '
   dans && /^  [A-Za-z0-9_.-]+:$/ { cle = $1; sub(/:$/, "", cle) }
   dans && /^    name: / { print cle, $2 }' <<< "$config")
 
-# Image configurée d'un service (celle que make deploy lancerait)
-image_config() { dc config --images "$1" | head -n1; }
+# Image configurée d'un service (celle que make deploy lancerait), lue dans sa propre définition :
+# `config --images <service>` liste aussi les images de ses dépendances (depends_on), triées par nom
+image_config() {
+  awk -v service="  $1:" '
+    /^services:/ { dans = 1; next }
+    dans && /^[^ ]/ { dans = 0 }
+    dans && /^  [^ ]/ { courant = ($0 == service) }
+    dans && courant && /^    image: / { print $2; exit }' <<< "$config"
+}
 
 # --- Sauvegarde ----------------------------------------------------------------------------------
 
