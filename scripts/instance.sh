@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pilote une instance, locale ou distante : make deploy, down, status, reload-certs, bootstrap
+# Pilote une instance, locale ou distante : make deploy, stop, down, status, reload-certs, bootstrap
 # (qui régénère aussi le fichier de sortie outputs/<env>.env), smoke (scripts/smoke.sh), backup et
 # restore (scripts/sauvegarde.sh).
 #   - DEPLOY_SSH vide ou absente de envs/<env>.env : moteur Docker courant du poste (comme avant) ;
@@ -10,14 +10,14 @@
 # DEPLOY_SSH et DEPLOY_DIR sont lues dans le fichier uniquement (jamais depuis le shell) : la cible
 # d'une commande ne dépend que du fichier de l'instance. Documentation : docs/deploiement.md.
 #
-# Usage : scripts/instance.sh <deploy|down|status|reload-certs|smoke> <env>
+# Usage : scripts/instance.sh <deploy|stop|down|status|reload-certs|smoke> <env>
 #         scripts/instance.sh bootstrap <env> [sonarqube] [gitlab]   (défaut : toutes les étapes)
 #         scripts/instance.sh backup <env>   |   scripts/instance.sh restore <env> <répertoire>
 #         scripts/instance.sh compose <env> <arguments docker compose…>   (commande manuelle)
 # Garde-fous de configuration (make check-env) : appliqués par le Makefile avant deploy et reload-certs.
 # Variables transmises par le Makefile : FORCER=1 (garde-fou de l'hôte), ROTATION=1 (bootstrap : token
-# d'analyse SonarQube remplacé, voir scripts/bootstrap/sonarqube.sh), CONFIRMER=1 (down d'une instance
-# distante sans question, obligatoire hors terminal), DESTINATION et AVEC_LOKI (backup).
+# d'analyse SonarQube remplacé, voir scripts/bootstrap/sonarqube.sh), CONFIRMER=1 (stop ou down d'une
+# instance distante sans question, obligatoire hors terminal), DESTINATION et AVEC_LOKI (backup).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -57,7 +57,7 @@ readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 
 usage() {
-  echo "Usage : $0 <deploy|down|status|reload-certs|smoke> <env>" >&2
+  echo "Usage : $0 <deploy|stop|down|status|reload-certs|smoke> <env>" >&2
   echo "        $0 bootstrap <env> $(printf '[%s] ' "${ETAPES_BOOTSTRAP[@]}")" >&2
   echo "        $0 backup <env>" >&2
   echo "        $0 restore <env> <répertoire de sauvegarde>" >&2
@@ -69,7 +69,7 @@ usage() {
 action="$1" env="$2"
 shift 2
 case "$action" in
-  deploy | down | status | reload-certs | smoke | backup) (($# == 0)) || usage ;;
+  deploy | stop | down | status | reload-certs | smoke | backup) (($# == 0)) || usage ;;
   restore) (($# == 1)) || usage ;;
   bootstrap)
     # Étapes demandées (toutes par défaut), dédoublonnées et remises dans l'ordre d'exécution
@@ -467,9 +467,10 @@ confirmer_arret() {
     '') ;;
     *) erreur "CONFIRMER invalide : $CONFIRMER (attendu : 1)" ;;
   esac
-  [[ -t 0 ]] || erreur "arrêt de l'instance distante $env ($deploy_ssh) : confirmation requise hors terminal, make down ENV=$env CONFIRMER=1"
-  local reponse=""
-  echo "Arrêt de l'instance $env sur $deploy_ssh : conteneurs supprimés (volumes conservés), services indisponibles." >&2
+  [[ -t 0 ]] || erreur "arrêt de l'instance distante $env ($deploy_ssh) : confirmation requise hors terminal, make $action ENV=$env CONFIRMER=1"
+  local reponse="" effet="conteneurs supprimés (volumes conservés)"
+  if [[ "$action" == stop ]]; then effet="conteneurs arrêtés (non supprimés)"; fi
+  echo "Arrêt de l'instance $env sur $deploy_ssh : $effet, services indisponibles." >&2
   read -r -p "Taper le nom de l'instance ($env) pour confirmer : " reponse || true
   [[ "$reponse" == "$env" ]] || erreur "arrêt annulé (réponse différente de « $env »)."
 }
@@ -477,7 +478,7 @@ confirmer_arret() {
 # --- Actions -------------------------------------------------------------------------------------
 
 if [[ -n "$deploy_ssh" ]]; then
-  if [[ "$action" == down ]]; then confirmer_arret; fi
+  if [[ "$action" == stop || "$action" == down ]]; then confirmer_arret; fi
   preparer_contexte_distant
   empreinte="$(empreinte_config)"
   export PLATFORM_CONFIG_DIR="$deploy_dir/config-$empreinte"
@@ -538,6 +539,12 @@ case "$action" in
     if [[ -n "$deploy_ssh" ]]; then nettoyer_config; fi
     "${compose[@]}" ps -a --format 'table {{.Service}}\t{{.Status}}'
     recapitulatif
+    ;;
+  stop)
+    afficher_cible
+    if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
+    "${compose[@]}" stop
+    echo "Instance $env arrêtée : conteneurs conservés à l'arrêt (make deploy ENV=$env pour la relancer)."
     ;;
   down)
     afficher_cible

@@ -1,6 +1,6 @@
 # Déploiement local ou distant
 
-`make deploy`, `make down` et `make status` pilotent une instance depuis le poste de l'opérateur, sur
+`make deploy`, `make stop`, `make down` et `make status` pilotent une instance depuis le poste de l'opérateur, sur
 le moteur Docker local ou sur un serveur distant. La cible est définie dans `envs/<env>.env` :
 
 ```bash
@@ -13,6 +13,7 @@ DEPLOY_SSH=ssh://deploy@devops.mondomaine.fr     # vide ou absente : moteur Dock
 |---|---|
 | `make deploy ENV=<env>` | Contrôles (`make check-env`), démarrage ou mise à jour, attente que tous les services soient healthy (15 min au plus), récapitulatif des URLs |
 | `make status ENV=<env>` | Cible, état de chaque service, récapitulatif des URLs |
+| `make stop ENV=<env>` | Arrête les conteneurs **sans les supprimer** ; `make deploy` les relance. Instance distante : [confirmation](#arrêt) |
 | `make down ENV=<env>` | Arrête l'instance : conteneurs et réseaux supprimés, **volumes conservés**. Instance distante : [confirmation](#arrêt) |
 | `make backup ENV=<env>` / `make restore ENV=<env> SAUVEGARDE=<répertoire>` | Sauvegarde des données sur le poste, restauration : [Sauvegarde et restauration](sauvegarde.md) |
 
@@ -146,7 +147,7 @@ Cela vaut pour toute recréation ou tout arrêt du runner :
 
 - `make deploy` (nouvelle version, configuration modifiée, CA privée changée) ;
 - `make reload-certs` (CA privée changée) ;
-- `make down`.
+- `make stop` et `make down`.
 
 Ces commandes attendent donc la fin des jobs en cours. Pendant l'attente, aucun nouveau job ne
 démarre ; les jobs en attente reprennent avec le nouveau runner.
@@ -199,6 +200,10 @@ distroless) : il doit être démarré, et sa santé est couverte par celui de Pr
 
 ## Arrêt
 
+`make stop ENV=<env>` exécute `docker compose stop` : les conteneurs sont arrêtés mais conservés, avec
+leurs réseaux et leurs volumes. C'est l'arrêt le plus simple, par exemple pour libérer les ressources du
+poste ; `make deploy` redémarre les mêmes conteneurs.
+
 `make down ENV=<env>` exécute `docker compose down`, **sans `-v`** :
 
 - les conteneurs et les réseaux sont supprimés ;
@@ -207,8 +212,9 @@ distroless) : il doit être démarré, et sa santé est couverte par celui de Pr
 
 `make deploy` relance l'instance à l'identique.
 
-**Instance distante** (`DEPLOY_SSH` défini) : avant tout contact avec le serveur, `make down` affiche
-l'instance et son hôte, puis demande de **retaper le nom de l'instance** ; toute autre réponse annule.
+**Instance distante** (`DEPLOY_SSH` défini) : avant tout contact avec le serveur, `make stop` et
+`make down` affichent l'instance et son hôte, puis demandent de **retaper le nom de l'instance** ; toute
+autre réponse annule.
 Hors terminal (script, CI), la confirmation passe par `CONFIRMER=1`, accepté seulement sur la ligne de
 commande (une variable exportée dans le shell est refusée) :
 
