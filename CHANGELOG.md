@@ -9,6 +9,8 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- `make stop ENV=<env>` : arrête les conteneurs de l'instance sans les supprimer (`docker compose stop`) ;
+  `make deploy` les relance. Instance distante : même confirmation que `make down` (`docs/deploiement.md`).
 - `make backup ENV=<env>` : sauvegarde à froid des volumes à état de l'instance, locale ou distante,
   dans un répertoire du poste (`~/.local/share/devops-platform/sauvegardes/<env>/` par défaut), avec un
   manifeste (versions d'image, architecture, empreintes). `make restore ENV=<env> SAUVEGARDE=<répertoire>`

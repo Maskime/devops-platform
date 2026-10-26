@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-images check-secrets install-hooks init check-env-name check-env-file check-env deploy down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke backup restore
+.PHONY: help verify check-images check-secrets install-hooks init check-env-name check-env-file check-env deploy stop down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke backup restore
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -112,6 +112,12 @@ deploy: check-env ## [ENV] Démarre l'instance ENV (locale ou distante) et atten
 
 # Instance distante : confirmation demandée (terminal) ou CONFIRMER=1, accepté seulement sur la ligne de
 # commande, comme NETTOYER
+stop: check-env-file ## [ENV] Arrête les conteneurs de l'instance ENV sans les supprimer ; distante : confirmation, ou CONFIRMER=1
+	@if [[ "$(origin CONFIRMER)" == "environment" ]]; then \
+	  echo "CONFIRMER hérité du shell refusé : le passer explicitement, make stop ENV=$(ENV) CONFIRMER=1" >&2; exit 1; \
+	fi
+	@FORCER="$(FORCER)" CONFIRMER="$(CONFIRMER)" scripts/instance.sh stop "$(ENV)"
+
 down: check-env-file ## [ENV] Arrête l'instance ENV : conteneurs supprimés, volumes conservés ; distante : confirmation, ou CONFIRMER=1
 	@if [[ "$(origin CONFIRMER)" == "environment" ]]; then \
 	  echo "CONFIRMER hérité du shell refusé : le passer explicitement, make down ENV=$(ENV) CONFIRMER=1" >&2; exit 1; \

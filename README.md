@@ -60,6 +60,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | `make init ENV=<env>` | Génère `envs/<env>.env` (questions, secrets aléatoires) ; `FORCE=1` pour régénérer |
 | `make deploy ENV=<env>` | Démarre l'instance, locale ou distante, et attend que tous les services soient healthy |
 | `make status ENV=<env>` | État des services et URLs de l'instance |
+| `make stop ENV=<env>` | Arrête les conteneurs sans les supprimer (`make deploy` les relance) |
 | `make down ENV=<env>` | Arrête l'instance (volumes conservés) |
 | `make bootstrap ENV=<env>` | Configure SonarQube puis GitLab : compte admin, compte et token d'analyse, runner d'instance (idempotent) ; `ROTATION=1` remplace le token d'analyse |
 | `make bootstrap-sonarqube ENV=<env>` / `bootstrap-gitlab` | Une seule étape de `make bootstrap` |
@@ -80,7 +81,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 |---|---|
 | [Installation pas à pas](docs/installation.md) | Instance vierge de bout en bout : prérequis (serveur, DNS, ports, ressources), choix du `TLS_MODE`, `init` → `host-prereqs` → `deploy` → `bootstrap` → `smoke`, dépannage |
 | [Préparation d'un serveur](docs/serveur.md) | `scripts/host-prereqs.sh` : Docker, `vm.max_map_count`, `daemon.json`, pare-feu, nettoyage Docker planifié |
-| [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
+| [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `stop` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`) |
 | [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance, image auxiliaire), idempotence |
 | [Analyse SonarQube depuis la CI](docs/analyse-sonarqube.md) | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN`, exemple de job `sonar-scanner` |
