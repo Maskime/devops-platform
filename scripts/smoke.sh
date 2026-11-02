@@ -6,8 +6,8 @@
 # jobs (conteneurs sentinelles), attend que le pipeline passe au vert et que l'analyse du commit
 # apparaisse dans SonarQube, puis interroge les serveurs MCP (SonarQube s'il est actif, GitLab) avec des
 # jetons éphémères, et vérifie la passerelle d'authentification (redirection vers GitLab sans session,
-# accès avec une session de root, en-têtes d'identité forgés sans effet). NETTOYER=1 : projets de test
-# GitLab et SonarQube supprimés après un succès.
+# accès avec une session de root, arrivée connectée de root dans SonarQube, en-têtes d'identité forgés
+# sans effet). NETTOYER=1 : projets de test GitLab et SonarQube supprimés après un succès.
 # Lancé par `make smoke ENV=<env>` (scripts/instance.sh smoke), qui positionne la cible Docker (contexte
 # SSH d'une instance distante). Documentation : docs/smoke-test.md.
 #
@@ -67,9 +67,12 @@ readonly SSO_HOSTNAMES=(HOME_HOSTNAME:home.localhost PLANTUML_HOSTNAME:plantuml.
 readonly SSO_SCOPES_PASSERELLE="openid profile email"
 readonly SSO_COOKIE=_devops_platform_sso
 readonly SSO_JAR=/tmp/devops-platform-smoke-sso.jar
-# En-têtes d'identité forgés par le « client » (docs/sso.md, « Usurpation »)
-readonly SSO_FORGES=("X-Auth-Request-User: root" "X-Auth-Request-Email: admin@example.com"
-  "X-Auth-Request-Groups: admins" "X-Auth-Request-Preferred-Username: root")
+# En-têtes d'identité forgés par le « client » (docs/sso.md, « Usurpation ») : compte admin local de
+# SonarQube et groupe de ses administrateurs
+readonly SSO_FORGES=("X-Auth-Request-User: admin" "X-Auth-Request-Email: admin@example.com"
+  "X-Auth-Request-Groups: sonar-administrators" "X-Auth-Request-Preferred-Username: admin")
+# Routeur interne de SonarQube (entrypoint interne de Traefik, labels de compose/sonarqube.yml)
+readonly SONAR_INTERNE_HOTE=sonarqube.devops-platform.internal SONAR_INTERNE_PORT=8000
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -673,11 +676,21 @@ done
 # d'autorisation et cookies jamais en argument) ; sortie : en-têtes de réponse, corps,
 # puis « CODE=<code HTTP> ».
 requete() {
-  local hote="$1" chemin="$2" config ligne
+  local hote="$1" chemin="$2"
   shift 2
-  config="url = $(cfg "$schema://$hote$chemin")"$'\n'
-  config+="resolve = $(cfg "$hote:$port:$ip_traefik")"$'\n'
-  [[ -n "$ca_sso" ]] && config+="cacert = $(cfg "$ca_sso")"$'\n'
+  requete_vers "$schema" "$hote" "$port" "$chemin" "$@"
+}
+# Même requête vers un schéma et un port donnés : <schéma> <hôte> <port> <chemin> [ligne…] (routeur
+# interne des jobs)
+requete_vers() {
+  local schema_req="$1" hote="$2" port_req="$3" chemin="$4" url="$1://$2" config ligne
+  shift 4
+  if ! [[ ("$schema_req" == http && "$port_req" == 80) || ("$schema_req" == https && "$port_req" == 443) ]]; then
+    url+=":$port_req"
+  fi
+  config="url = $(cfg "$url$chemin")"$'\n'
+  config+="resolve = $(cfg "$hote:$port_req:$ip_traefik")"$'\n'
+  [[ -n "$ca_sso" && "$schema_req" == https ]] && config+="cacert = $(cfg "$ca_sso")"$'\n'
   for ligne in "$@"; do config+="$ligne"$'\n'; done
   # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
   dc exec -T gitlab-runner sh -c 'curl -sS -K - -D - -w "\nCODE=%{http_code}\n" || true' <<<"$config"
@@ -706,16 +719,10 @@ done
 
 # b. Session de root : demande d'autorisation (cookie CSRF, state, défi PKCE), code d'autorisation créé
 #    par gitlab-rails pour root (comme après une connexion GitLab), callback de la passerelle sur le
-#    hostname de la page d'accueil, puis accès authentifié et identité lue par /oauth2/userinfo
-h_sso="${hotes_sso[0]}"
-sso_jar=1
-rep="$(requete "$h_sso" "/smoke?origine=1" "cookie-jar = $(cfg "$SSO_JAR")")"
-loc="$(entete_de "$rep" location)"
-[[ "$(code_de "$rep")" == 302 && "$loc" == "$gitlab_url/oauth/authorize?"* ]] \
-  || erreur "$h_sso : redirection vers GitLab attendue, HTTP $(code_de "$rep")"
-param() { sed -n "s/.*[?&]$1=\([^&]*\).*/\1/p" <<<"$loc"; }
-state="$(param state)" defi="$(param code_challenge)"
-[[ -n "$state" && -n "$defi" ]] || erreur "state ou code_challenge absent de la redirection vers GitLab"
+#    hostname demandé (d'abord celui de la page d'accueil), puis accès authentifié et identité lue par
+#    /oauth2/userinfo. La sortie de gitlab-rails donne aussi l'e-mail de root et son appartenance à
+#    SSO_GROUPE_ADMIN (groupes au sens de GitLab : membres d'un groupe parent compris, comme le claim
+#    groups transmis par la passerelle).
 # shellcheck disable=SC2016 # code Ruby
 readonly CODE_GRANT='
 app = Authn::OauthApplication.find_by(uid: ENV.fetch("SSO_CLIENT_ID")) or abort("Application OAuth de la passerelle introuvable : make bootstrap.")
@@ -728,41 +735,98 @@ if Doorkeeper::AccessGrant.column_names.include?("organization_id")
 end
 g = Doorkeeper::AccessGrant.create!(attrs)
 puts "CODE=#{g.plaintext_token || g.token}"
+puts "EMAIL=#{root.email}"
+admin = ENV.fetch("SSO_GROUPE_ADMIN", "").downcase
+membre = !admin.empty? && root.membership_groups.any? { |gr| gr.full_path.downcase == admin }
+puts "ADMIN=#{membre ? 1 : 0}"
 '
 sso_debut="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-erreurs="$(mktemp)"
-if ! sortie="$(dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_ID)" \
-    -e SSO_URI="$schema://$h_sso/oauth2/callback" -e SSO_SCOPES="$SSO_SCOPES_PASSERELLE" -e SSO_DEFI="$defi" \
-    gitlab gitlab-rails runner "$CODE_GRANT" 2> "$erreurs")"; then
-  cat "$erreurs" >&2
+sso_jar=1
+root_email="" root_admin=""
+# Session de root sur <hôte> (cookie dans SSO_JAR, partagé par les hostnames) ; positionne root_email et
+# root_admin
+ouvrir_session() { # <hôte>
+  local h="$1" rep loc state defi sortie code_auth cookie attribut erreurs
+  rep="$(requete "$h" "/smoke?origine=1" "cookie = $(cfg "$SSO_JAR")" "cookie-jar = $(cfg "$SSO_JAR")")"
+  loc="$(entete_de "$rep" location)"
+  [[ "$(code_de "$rep")" == 302 && "$loc" == "$gitlab_url/oauth/authorize?"* ]] \
+    || erreur "$h : redirection vers GitLab attendue, HTTP $(code_de "$rep")"
+  state="$(sed -n 's/.*[?&]state=\([^&]*\).*/\1/p' <<<"$loc")"
+  defi="$(sed -n 's/.*[?&]code_challenge=\([^&]*\).*/\1/p' <<<"$loc")"
+  [[ -n "$state" && -n "$defi" ]] || erreur "$h : state ou code_challenge absent de la redirection vers GitLab"
+  erreurs="$(mktemp)"
+  if ! sortie="$(dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_ID)" \
+      -e SSO_URI="$schema://$h/oauth2/callback" -e SSO_SCOPES="$SSO_SCOPES_PASSERELLE" -e SSO_DEFI="$defi" \
+      -e SSO_GROUPE_ADMIN="$(env_valeur "$env_file" SSO_GROUPE_ADMIN)" \
+      gitlab gitlab-rails runner "$CODE_GRANT" 2> "$erreurs")"; then
+    cat "$erreurs" >&2
+    rm -f "$erreurs"
+    erreur "code d'autorisation de test impossible à créer (voir ci-dessus)"
+  fi
   rm -f "$erreurs"
-  erreur "code d'autorisation de test impossible à créer (voir ci-dessus)"
-fi
-rm -f "$erreurs"
-code_auth="$(sed -n 's/^CODE=//p' <<<"$sortie" | tail -n1)"
-[[ -n "$code_auth" ]] || erreur "code d'autorisation absent de la sortie de gitlab-rails"
-rep="$(requete "$h_sso" "/oauth2/callback?code=$code_auth&state=$state" "cookie = $(cfg "$SSO_JAR")" \
-  "cookie-jar = $(cfg "$SSO_JAR")")"
-code_auth=""
-loc="$(entete_de "$rep" location)"
-[[ "$(code_de "$rep")" == 302 && "$loc" == */smoke\?origine=1 ]] \
-  || erreur "callback de la passerelle : HTTP $(code_de "$rep") ${loc:+vers $loc} (attendu : 302 vers /smoke?origine=1)"
-cookie="$(grep -i "^set-cookie: $SSO_COOKIE=" <<<"$rep" | tail -n1)"
-[[ -n "$cookie" ]] || erreur "cookie de session $SSO_COOKIE absent de la réponse du callback"
-if [[ "$schema" == https ]]; then
-  [[ "${cookie,,}" == *"; secure"* ]] || erreur "cookie de session sans attribut Secure en HTTPS"
-  attribut="Secure"
-else
-  [[ "${cookie,,}" != *"; secure"* ]] || erreur "cookie de session marqué Secure en TLS_MODE=none (inutilisable en HTTP)"
-  attribut="sans Secure"
-fi
-echo "    $h_sso : session de root ouverte par le callback, retour sur l'URL demandée, cookie $attribut."
+  code_auth="$(sed -n 's/^CODE=//p' <<<"$sortie" | tail -n1)"
+  root_email="$(sed -n 's/^EMAIL=//p' <<<"$sortie" | tail -n1)"
+  root_admin="$(sed -n 's/^ADMIN=//p' <<<"$sortie" | tail -n1)"
+  [[ -n "$code_auth" ]] || erreur "code d'autorisation absent de la sortie de gitlab-rails"
+  rep="$(requete "$h" "/oauth2/callback?code=$code_auth&state=$state" "cookie = $(cfg "$SSO_JAR")" \
+    "cookie-jar = $(cfg "$SSO_JAR")")"
+  code_auth=""
+  loc="$(entete_de "$rep" location)"
+  [[ "$(code_de "$rep")" == 302 && "$loc" == */smoke\?origine=1 ]] \
+    || erreur "$h : callback de la passerelle : HTTP $(code_de "$rep") ${loc:+vers $loc} (attendu : 302 vers /smoke?origine=1)"
+  cookie="$(grep -i "^set-cookie: $SSO_COOKIE=" <<<"$rep" | tail -n1)"
+  [[ -n "$cookie" ]] || erreur "$h : cookie de session $SSO_COOKIE absent de la réponse du callback"
+  if [[ "$schema" == https ]]; then
+    [[ "${cookie,,}" == *"; secure"* ]] || erreur "$h : cookie de session sans attribut Secure en HTTPS"
+    attribut="Secure"
+  else
+    [[ "${cookie,,}" != *"; secure"* ]] || erreur "$h : cookie de session marqué Secure en TLS_MODE=none (inutilisable en HTTP)"
+    attribut="sans Secure"
+  fi
+  echo "    $h : session de root ouverte par le callback, retour sur l'URL demandée, cookie $attribut."
+}
+h_sso="${hotes_sso[0]}"
+ouvrir_session "$h_sso"
 rep="$(requete "$h_sso" "/" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
 [[ "$(code_de "$rep")" == 200 ]] || erreur "$h_sso : accès authentifié refusé (HTTP $(code_de "$rep"))"
 rep="$(requete "$h_sso" "/oauth2/userinfo" "cookie = $(cfg "$SSO_JAR")")"
 [[ "$(code_de "$rep")" == 200 && "$rep" == *'"preferredUsername":"root"'* ]] \
   || erreur "$h_sso/oauth2/userinfo : identité de root attendue (HTTP $(code_de "$rep"))"
 echo "    $h_sso : accès authentifié (HTTP 200), identité transmise : root."
+
+# c. Arrivée connectée dans SonarQube (connexion automatique, relais sonarqube-sso) : session de root sur
+#    le hostname de SonarQube, puis compte SSO de root (créé à la première visite) malgré des en-têtes
+#    d'identité forgés (admin, sonar-administrators), groupes réécrits par le relais
+sonar_hote="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
+sonar_hote="${sonar_hote:-sonarqube.localhost}"
+if [[ "$services" == *" sonarqube-sso "* ]]; then
+  [[ "$(dc ps --format '{{.Health}}' sonarqube-sso 2> /dev/null)" == healthy ]] \
+    || erreur "relais sonarqube-sso arrêté ou non healthy (make deploy ENV=$env)"
+  ouvrir_session "$sonar_hote"
+  rep="$(requete "$sonar_hote" "/api/users/current" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
+  [[ "$(code_de "$rep")" == 200 && "$rep" == *'"isLoggedIn":true'* ]] \
+    || erreur "$sonar_hote/api/users/current : utilisateur connecté attendu (HTTP $(code_de "$rep")) : connexion automatique inactive"
+  [[ "$rep" == *'"login":"root"'* ]] \
+    || erreur "$sonar_hote : connecté sous un autre compte que root (en-têtes d'identité forgés acceptés ?)"
+  [[ "$rep" == *'"local":false'* && "$rep" == *'"externalProvider":"sonarqube"'* ]] \
+    || erreur "$sonar_hote : compte root attendu non local, créé par la connexion automatique (fournisseur sonarqube)"
+  [[ -z "$root_email" || "$rep" == *"\"email\":\"$root_email\""* ]] \
+    || erreur "$sonar_hote : e-mail de root ($root_email) non repris de GitLab"
+  [[ "$rep" == *'"sonar-users"'* ]] \
+    || erreur "$sonar_hote : root absent du groupe sonar-users (en-tête des groupes non réécrit par le relais ?)"
+  if [[ "$root_admin" == 1 ]]; then
+    [[ "$rep" == *'"sonar-administrators"'* ]] \
+      || erreur "$sonar_hote : root, membre de SSO_GROUPE_ADMIN, absent du groupe sonar-administrators"
+    statut_admin="membre de sonar-administrators (SSO_GROUPE_ADMIN)"
+  else
+    [[ "$rep" != *'"sonar-administrators"'* ]] \
+      || erreur "$sonar_hote : root, hors de SSO_GROUPE_ADMIN, membre de sonar-administrators (groupe forgé accepté ?)"
+    statut_admin="hors de sonar-administrators (non membre de SSO_GROUPE_ADMIN)"
+  fi
+  echo "    $sonar_hote : root connecté automatiquement (compte SSO, e-mail GitLab), en-têtes forgés sans effet, $statut_admin."
+else
+  echo "Attention : relais sonarqube-sso absent de l'instance : connexion automatique à SonarQube non vérifiée." >&2
+fi
 dc exec -T gitlab-runner rm -f "$SSO_JAR" > /dev/null 2>&1 || true
 sso_jar=0
 # Jetons émis pour root par l'échange du code de test révoqués (la session de la passerelle n'en dépend pas)
@@ -778,19 +842,28 @@ dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_
   gitlab gitlab-rails runner "$CODE_JETONS" > /dev/null 2>&1 \
   || echo "Attention : jetons OAuth de test de root non révoqués (Admin > Applications)." >&2
 
-# c. Usurpation sur les routeurs hors passerelle : en-têtes d'identité forgés sans effet
+# d. Usurpation sur les routeurs hors passerelle : en-têtes d'identité forgés sans effet
 rep="$(requete "$gitlab_hote" "/api/v4/user" "${forges[@]}")"
 [[ "$(code_de "$rep")" == 401 ]] \
   || erreur "GitLab /api/v4/user avec en-têtes d'identité forgés : HTTP $(code_de "$rep") (attendu : 401)"
 echo "    $gitlab_hote : en-têtes d'identité forgés sans effet (API GitLab : 401)."
 if [[ "$services" == *" sonarqube "* ]]; then
-  sonar_hote="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
-  sonar_hote="${sonar_hote:-sonarqube.localhost}"
+  # API publique hors passerelle : jeton invalide et en-têtes d'identité forgés → refusé
   rep="$(requete "$sonar_hote" "/api/authentication/validate" "${forges[@]}" \
     "header = $(cfg "Authorization: Bearer squ_jeton_factice_du_smoke_test")")"
   [[ "$(code_de "$rep")" == 200 && "$rep" == *'"valid":false'* ]] \
     || erreur "SonarQube /api (hors passerelle) avec en-têtes d'identité forgés : HTTP $(code_de "$rep"), session non refusée"
-  echo "    $sonar_hote : API hors passerelle (jeton), en-têtes d'identité forgés sans effet (valid:false)."
+  echo "    $sonar_hote : API hors passerelle (jeton invalide), en-têtes d'identité forgés sans effet (valid:false)."
+  # Routeur interne des jobs (sans passerelle) : sans jeton, en-têtes d'identité forgés → non connecté
+  rep="$(requete_vers http "$SONAR_INTERNE_HOTE" "$SONAR_INTERNE_PORT" "/api/users/current" "${forges[@]}")"
+  [[ "$(code_de "$rep")" == 401 || ("$(code_de "$rep")" == 200 && "$rep" == *'"isLoggedIn":false'*) ]] \
+    || erreur "SonarQube, routeur interne ($SONAR_INTERNE_HOTE) avec en-têtes d'identité forgés : HTTP $(code_de "$rep"), utilisateur connecté"
+  echo "    $SONAR_INTERNE_HOTE : routeur interne, en-têtes d'identité forgés sans effet (non connecté)."
+  # Compte admin local : toujours accepté par l'API publique (authentification Basic, hors passerelle)
+  rep="$(requete "$sonar_hote" "/api/authentication/validate" "user = $(cfg "$admin")")"
+  [[ "$(code_de "$rep")" == 200 && "$rep" == *'"valid":true'* ]] \
+    || erreur "SonarQube : compte admin local refusé sur l'API publique (HTTP $(code_de "$rep"))"
+  echo "    $sonar_hote : compte admin local accepté par l'API publique (Basic, hors passerelle)."
 fi
 
 # --- 11. Nettoyage --------------------------------------------------------------------------------

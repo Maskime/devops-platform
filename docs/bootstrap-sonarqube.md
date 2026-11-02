@@ -46,7 +46,11 @@ au compte `admin`.
 - **Permissions.** Permissions globales directes ramenées à *Execute Analysis* (`scan`) et *Create
   Projects* (`provisioning`) : celles qui manquent sont ajoutées, toute autre est retirée. Les
   permissions globales des groupes `sonar-users` (dont le compte est membre, comme tout compte) et
-  `Anyone` sont contrôlées : une permission autre que ces deux-là est signalée, pas modifiée.
+  `Anyone` sont contrôlées : une permission autre que ces deux-là est signalée, pas modifiée. Avec la
+  [connexion automatique](sso.md#sonarqube), `sonar-users` regroupe aussi tous les utilisateurs GitLab
+  admis par la passerelle : une permission ajoutée à ce groupe vaut pour eux tous.
+- **Connexion automatique.** Le login `devops-platform-analyse` est refusé par le relais de la connexion
+  automatique : un utilisateur GitLab de ce nom ne peut pas reprendre le compte.
 - **Génération du token.** SonarQube refuse de générer un token d'analyse globale pour un autre compte :
   le bootstrap pose un mot de passe aléatoire sur le compte, fait générer le token par le compte
   lui-même, puis remplace aussitôt ce mot de passe par un autre aléa. Mots de passe et token ne passent

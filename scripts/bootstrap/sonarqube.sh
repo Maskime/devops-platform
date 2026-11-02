@@ -367,7 +367,8 @@ fi
 echo
 echo "SonarQube de l'instance $env prêt :"
 echo "  URL             $url"
-echo "  Compte admin    admin / SONARQUBE_ADMIN_PASSWORD de $env_file"
+echo "  Connexion       automatique avec l'identité GitLab (docs/sso.md, « SonarQube »)"
+echo "  Compte admin    admin / SONARQUBE_ADMIN_PASSWORD de $env_file (API, accès de secours)"
 echo "  Compte analyse  $SONAR_ANALYSE_LOGIN, permissions globales : ${PERMISSIONS_ANALYSE[*]}"
 echo "  Token d'analyse type GLOBAL_ANALYSIS_TOKEN du compte d'analyse, stockage de l'instance"
 echo "                  ($SONAR_STOCKAGE), copie locale $token_fichier"
