@@ -80,12 +80,23 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.gitlab.rule: Host(`${GITLAB_HOSTNAME:-gitlab.localhost}`)
+      # Hors passerelle d'authentification (GitLab en est le fournisseur : docs/sso.md) : en-têtes
+      # d'identité reçus du client supprimés, sur ce routeur et sur gitlab-interne (même liste que le
+      # middleware passerelle-sans-identite de compose/proxy.yml)
+      traefik.http.routers.gitlab.middlewares: gitlab-sans-identite
+      traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-User: ""
+      traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Email: ""
+      traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Groups: ""
+      traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Preferred-Username: ""
+      traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Access-Token: ""
+      traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Redirect: ""
       traefik.http.services.gitlab.loadbalancer.server.port: "80"
       # Routeur interne des jobs CI (entrypoint `interne` de compose/proxy.yml, sans TLS) : clone des
       # jobs quand le hostname public est en *.localhost (docs/gitlab-proxy.md)
       traefik.http.routers.gitlab-interne.rule: Host(`gitlab.devops-platform.internal`)
       traefik.http.routers.gitlab-interne.entrypoints: interne
       traefik.http.routers.gitlab-interne.service: gitlab
+      traefik.http.routers.gitlab-interne.middlewares: gitlab-sans-identite
       # Traefik joint GitLab par le réseau gitlab-proxy (sous-réseau de confiance), pas par platform
       traefik.docker.network: devops-platform_gitlab-proxy
     healthcheck:

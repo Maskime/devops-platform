@@ -45,14 +45,15 @@ check-env-name:
 	fi
 	@[[ "$${ENV}" =~ ^[a-z0-9][a-z0-9_-]*$$ ]] || { echo "ENV invalide : $${ENV} (attendu : minuscules, chiffres, - et _)" >&2; exit 1; }
 
-init: check-env-name ## [ENV] Génère envs/ENV.env (questions, secrets aléatoires) ; FORCE=1 pour régénérer
-	@# FORCE et NOUVEAUX_MDP écrasent des secrets : acceptés seulement sur la ligne de commande
-	@for v in "FORCE:$(origin FORCE)" "NOUVEAUX_MDP:$(origin NOUVEAUX_MDP)"; do \
+init: check-env-name ## [ENV] Génère envs/ENV.env (questions, secrets aléatoires) ; FORCE=1 pour régénérer ; COMPLETER=1 ajoute les secrets absents
+	@# FORCE et NOUVEAUX_MDP écrasent des secrets, COMPLETER modifie le fichier : acceptés seulement
+	@# sur la ligne de commande
+	@for v in "FORCE:$(origin FORCE)" "NOUVEAUX_MDP:$(origin NOUVEAUX_MDP)" "COMPLETER:$(origin COMPLETER)"; do \
 	  if [[ "$${v#*:}" == "environment" ]]; then \
 	    echo "$${v%%:*} hérité du shell refusé : le passer explicitement, make init ENV=$(ENV) $${v%%:*}=1" >&2; exit 1; \
 	  fi; \
 	done
-	@FORCE="$(FORCE)" NOUVEAUX_MDP="$(NOUVEAUX_MDP)" scripts/init-env.sh "$(ENV)"
+	@FORCE="$(FORCE)" NOUVEAUX_MDP="$(NOUVEAUX_MDP)" COMPLETER="$(COMPLETER)" scripts/init-env.sh "$(ENV)"
 
 # Fichier de l'instance présent ; FORCER (remplacement d'une instance sur un hôte) et ROTATION (token
 # d'analyse SonarQube remplacé) acceptés seulement sur la ligne de commande
@@ -103,6 +104,8 @@ check-env: check-env-file
 	  fi; \
 	done
 	@scripts/check-env-urls.sh "$(ENV_FILE)"
+	@# Passerelle d'authentification : identifiants présents (sinon make init COMPLETER=1) et au format
+	@scripts/check-env-sso.sh "$(ENV_FILE)"
 	@$(COMPOSE) --profile '*' config -q || { echo "Configuration invalide pour $(ENV_FILE) (voir ci-dessus)." >&2; exit 1; }
 	@scripts/check-loki-config.sh "$(ENV_FILE)" >/dev/null
 

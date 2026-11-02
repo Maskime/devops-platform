@@ -43,6 +43,16 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
     Détails : [certificats Let's Encrypt](letsencrypt.md).
   - Toute autre valeur est refusée par `make deploy`.
 
+## Authentification unique
+
+Les services web (accueil, PlantUML, Grafana, SonarQube, Portainer) sont derrière une passerelle
+d'authentification (oauth2-proxy, *forward auth* de Traefik) : sans session, redirection vers la page
+de connexion de GitLab. GitLab, son API, le git HTTPS et SSH, le runner, l'API de SonarQube appelée
+avec un jeton, les serveurs MCP et les routeurs internes des jobs n'y passent pas ; ces routeurs
+suppriment les en-têtes d'identité (`X-Auth-Request-*`) envoyés par le client. GitLab interdit
+l'inscription libre et restreint la visibilité publique (`make bootstrap`). Détails, exemptions et
+accès de secours : [authentification unique](sso.md).
+
 ## GitLab derrière le proxy
 
 L'URL publique de GitLab est dérivée de `GITLAB_HOSTNAME` et du `TLS_MODE` (`GITLAB_EXTERNAL_URL`,
@@ -72,6 +82,10 @@ Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, en `TLS_MOD
   (le changer ensuite dans l'interface) ; `make check-env` exige 12 caractères au moins. Le tunnel des
   agents Edge (port 8000) n'est pas proposé. ⚠️ Portainer monte le socket Docker : un administrateur
   Portainer est de fait `root` sur l'hôte.
+- **Passerelle d'authentification.** `oauth2-proxy` ne publie aucun port : Traefik l'interroge sur le
+  réseau de la plateforme. Arrêtée ou non *healthy*, elle retire son middleware et les routeurs protégés
+  ne sont plus servis (aucun accès sans authentification) ; ses secrets passent par des secrets
+  Compose ([authentification unique](sso.md)).
 - **Grafana.** Authentification obligatoire : accès anonyme, inscription et création d'organisation
   désactivés, ainsi que les dashboards partagés publiquement et les snapshots (consultables sans compte).
   Le compte admin est créé au premier démarrage avec `GRAFANA_ADMIN_PASSWORD`, transmis par un secret

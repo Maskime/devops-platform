@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<!-- Page de la passerelle d'authentification en mode refus (config/oauth2-proxy/lanceur.sh, docs/sso.md).
+     Aucun lien vers /oauth2/start : la connexion n'est pas proposée tant que la passerelle est en refus. -->
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>GitLab indisponible</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f4f5f7; color: #1f2328; margin: 0; }
+    main { max-width: 36rem; margin: 15vh auto; padding: 2rem; background: #fff; border-radius: 8px;
+           box-shadow: 0 1px 4px rgba(0, 0, 0, .15); }
+    h1 { font-size: 1.3rem; margin-top: 0; }
+    code { background: #eef0f3; padding: .1rem .3rem; border-radius: 4px; }
+    p.note { color: #57606a; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>GitLab indisponible</h1>
+    <p>La passerelle d'authentification ne joint pas GitLab, qui fournit la connexion à tous les
+      services : GitLab démarre peut-être encore (plusieurs minutes après un déploiement).</p>
+    <p>Opérateur : vérifier l'état de l'instance (<code>make status ENV=&lt;env&gt;</code>) ; si GitLab
+      est prêt, voir <code>docs/sso.md</code>.</p>
+    <p class="note">Accès refusé. Cette page se recharge toutes les 30 secondes.</p>
+  </main>
+</body>
+</html>

@@ -48,3 +48,14 @@ services:
         read_only: true
         bind:
           create_host_path: false
+
+  # Passerelle d'authentification : CA privée facultative (config/certs/ca/ca.pem) pour joindre l'URL
+  # publique de GitLab ; même montage que gitlab-runner (compose/tls/gitlab/custom.yml)
+  oauth2-proxy:
+    volumes:
+      - type: bind
+        source: ${PLATFORM_CA_DIR:-../config/certs/ca}
+        target: /etc/devops-platform/ca
+        read_only: true
+        bind:
+          create_host_path: false

@@ -3,10 +3,13 @@
 # envs/.env.example : questions (domaine, hostnames, TLS_MODE, profil) avec valeurs par défaut,
 # mots de passe aléatoires, fichier en permissions 600.
 #
-# Usage : [FORCE=1] [NOUVEAUX_MDP=1] scripts/init-env.sh <env>
+# Usage : [FORCE=1] [NOUVEAUX_MDP=1] [COMPLETER=1] scripts/init-env.sh <env>
 #   FORCE=1       régénère un fichier existant (sauvegarde horodatée envs/<env>.env.bak.<date>) ;
 #                 ses secrets et ses réponses sont repris comme valeurs par défaut ;
-#   NOUVEAUX_MDP=1 avec FORCE=1 : régénère aussi les secrets (instance à réinstaller).
+#   NOUVEAUX_MDP=1 avec FORCE=1 : régénère aussi les secrets (instance à réinstaller) ;
+#   COMPLETER=1   fichier existant : ajoute en fin de fichier les seuls secrets générés absents
+#                 (variable introduite depuis sa génération), sans question ni autre modification ;
+#                 rien à ajouter : fichier inchangé.
 # Sans terminal (entrée redirigée), une réponse vide ou absente prend la valeur par défaut.
 set -euo pipefail
 
@@ -20,6 +23,11 @@ source "$ROOT/scripts/lib/tls.sh"
 # Clés des mots de passe générés (minuscules : pas de faux positif de check-secrets)
 cles_mdp=(GITLAB_ROOT_PASSWORD SONARQUBE_DB_PASSWORD SONARQUBE_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD
   PORTAINER_ADMIN_PASSWORD)
+# Identifiants de la passerelle d'authentification (docs/sso.md) et leur générateur
+cles_sso=(SSO_GITLAB_CLIENT_ID SSO_GITLAB_CLIENT_SECRET SSO_COOKIE_SECRET)
+declare -A generateurs=([SSO_GITLAB_CLIENT_ID]=generer_identifiant_oauth
+  [SSO_GITLAB_CLIENT_SECRET]=generer_mot_de_passe [SSO_COOKIE_SECRET]=generer_cle_cookie)
+for cle in "${cles_mdp[@]}"; do generateurs[$cle]=generer_mot_de_passe; done
 services=(home gitlab sonarqube sonarqube-mcp grafana portainer plantuml)
 declare -A noms=([home]="la page d'accueil" [gitlab]=GitLab [sonarqube]=SonarQube
   [sonarqube-mcp]="SonarQube MCP" [grafana]=Grafana [portainer]=Portainer [plantuml]=PlantUML)
@@ -38,13 +46,20 @@ env_nom="$1"
   || erreur "nom d'instance invalide : $env_nom (attendu : minuscules, chiffres, - et _)"
 FORCE="${FORCE:-}"
 NOUVEAUX_MDP="${NOUVEAUX_MDP:-}"
+COMPLETER="${COMPLETER:-}"
+[[ -z "$COMPLETER" || "$COMPLETER" == 1 ]] || erreur "COMPLETER doit valoir 1 ou être absent."
+[[ -z "$COMPLETER" || -z "$FORCE$NOUVEAUX_MDP" ]] \
+  || erreur "COMPLETER=1 ne se combine pas avec FORCE ni NOUVEAUX_MDP (il ne modifie aucune valeur existante)."
 [[ -f "$MODELE" ]] || erreur "modèle introuvable : $MODELE"
 
 fichier="$ROOT/envs/$env_nom.env"
 fichier_rel="envs/$env_nom.env"
 existant=0
+if [[ "$COMPLETER" == 1 && ! -f "$fichier" ]]; then
+  erreur "$fichier_rel introuvable : rien à compléter (le générer : make init ENV=$env_nom)."
+fi
 if [[ -e "$fichier" ]]; then
-  [[ "$FORCE" == 1 ]] || erreur "$fichier_rel existe déjà : rien n'est modifié (FORCE=1 pour le régénérer)."
+  [[ "$FORCE" == 1 || "$COMPLETER" == 1 ]] || erreur "$fichier_rel existe déjà : rien n'est modifié (FORCE=1 pour le régénérer)."
   [[ -f "$fichier" ]] || erreur "$fichier_rel n'est pas un fichier ordinaire."
   existant=1
 fi
@@ -68,6 +83,86 @@ valeur_existante() {
   done < "$fichier"
   printf '%s' "$valeur"
 }
+
+# --- Générateurs de secrets --------------------------------------------------
+
+# 24 caractères aléatoires, conformes aux règles SonarQube (≥ 12 caractères, majuscule, minuscule,
+# chiffre, caractère spécial) et GitLab (≥ 8). Alphabet sans $ ' " \ # & + % ni espace : valeur sûre
+# dans un env-file, l'interpolation Compose, la chaîne Ruby de GITLAB_OMNIBUS_CONFIG et un formulaire.
+generer_mot_de_passe() {
+  local alea mdp
+  while true; do
+    # head lit un bloc fini puis tr filtre : pas de SIGPIPE sous pipefail
+    alea="$(head -c 2048 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9._,-')"
+    mdp="${alea:0:24}"
+    if [[ ${#mdp} -eq 24 && "$mdp" =~ ^[A-Za-z0-9] && "$mdp" =~ [A-Z] && "$mdp" =~ [a-z] \
+          && "$mdp" =~ [0-9] && "$mdp" =~ [._,-] ]]; then
+      printf '%s' "$mdp"
+      return 0
+    fi
+  done
+}
+
+# Identifiant d'application OAuth : 64 caractères hexadécimaux (32 octets aléatoires)
+generer_identifiant_oauth() {
+  od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+}
+
+# Clé de chiffrement des cookies d'oauth2-proxy : 32 caractères alphanumériques (AES-256)
+generer_cle_cookie() {
+  local alea
+  while true; do
+    alea="$(head -c 2048 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')"
+    if ((${#alea} >= 32)); then printf '%s' "${alea:0:32}"; return 0; fi
+  done
+}
+
+# Ligne d'affectation de <clé> dans le fichier existant (commentaires exclus)
+cle_affectee() {
+  grep -qE "^[[:space:]]*(export[[:space:]]+)?$1=" "$fichier"
+}
+
+# --- Complément d'un fichier existant (COMPLETER=1) ----------------------------------------------
+
+if [[ "$COMPLETER" == 1 ]]; then
+  ajouts=()
+  for cle in "${cles_mdp[@]}" "${cles_sso[@]}"; do
+    cle_affectee "$cle" || ajouts+=("$cle")
+  done
+  if ((${#ajouts[@]} == 0)); then
+    echo "$fichier_rel : aucun secret absent, fichier inchangé."
+    exit 0
+  fi
+  base="$fichier.bak.$(date +%Y%m%d-%H%M%S)"
+  sauvegarde="$base"
+  n=0
+  while [[ -e "$sauvegarde" ]]; do n=$((n + 1)); sauvegarde="$base-$n"; done
+  cp -p "$fichier" "$sauvegarde"
+  chmod 600 "$sauvegarde"
+  umask 077
+  # Fichier sans fin de ligne finale : la première affectation ajoutée resterait collée à la dernière ligne
+  fin_de_ligne=1
+  [[ -z "$(tail -c1 "$fichier")" ]] || fin_de_ligne=0
+  {
+    ((fin_de_ligne)) || echo
+    echo
+    echo "# Ajouté par make init COMPLETER=1 le $(date '+%Y-%m-%d %H:%M:%S') (rôle de chaque variable : envs/.env.example)."
+    for cle in "${ajouts[@]}"; do
+      printf '%s=%s\n' "$cle" "$("${generateurs[$cle]}")"
+    done
+  } >> "$fichier"
+  chmod 600 "$fichier"
+  echo "$fichier_rel complété (permissions 600) : ${ajouts[*]} (valeurs générées, non affichées)."
+  echo "  Sauvegarde de l'ancien fichier : ${sauvegarde#"$ROOT/"}"
+  echo "  Autres valeurs inchangées. Appliquer : make deploy ENV=$env_nom puis make bootstrap ENV=$env_nom."
+  for cle in "${ajouts[@]}"; do
+    if [[ " ${cles_mdp[*]} " == *" $cle "* ]]; then
+      echo "Note : $cle ajoutée : sur une instance déjà déployée, un mot de passe appliqué au premier"
+      echo "  démarrage seulement ne correspond pas au compte existant : y reporter le mot de passe réel si besoin."
+    fi
+  done
+  exit 0
+fi
 
 # --- Questions ---------------------------------------------------------------
 
@@ -156,34 +251,17 @@ demander profil "Profil de dimensionnement ($profils)" "${profil_defaut:-medium}
 
 # --- Mots de passe -----------------------------------------------------------
 
-# 24 caractères aléatoires, conformes aux règles SonarQube (≥ 12 caractères, majuscule, minuscule,
-# chiffre, caractère spécial) et GitLab (≥ 8). Alphabet sans $ ' " \ # & + % ni espace : valeur sûre
-# dans un env-file, l'interpolation Compose, la chaîne Ruby de GITLAB_OMNIBUS_CONFIG et un formulaire.
-generer_mot_de_passe() {
-  local alea mdp
-  while true; do
-    # head lit un bloc fini puis tr filtre : pas de SIGPIPE sous pipefail
-    alea="$(head -c 2048 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9._,-')"
-    mdp="${alea:0:24}"
-    if [[ ${#mdp} -eq 24 && "$mdp" =~ ^[A-Za-z0-9] && "$mdp" =~ [A-Z] && "$mdp" =~ [a-z] \
-          && "$mdp" =~ [0-9] && "$mdp" =~ [._,-] ]]; then
-      printf '%s' "$mdp"
-      return 0
-    fi
-  done
-}
-
 declare -A valeurs
 nb_repris=0
 # Secrets absents du fichier existant (variable ajoutée depuis sa génération) : générés, à signaler
 absents=()
-for cle in "${cles_mdp[@]}"; do
+for cle in "${cles_mdp[@]}" "${cles_sso[@]}"; do
   precedent="$(valeur_existante "$cle")"
   if [[ "$NOUVEAUX_MDP" != 1 && -n "$precedent" && "$precedent" != change_me* ]]; then
     valeurs[$cle]="$precedent"
     nb_repris=$((nb_repris + 1))
   else
-    valeurs[$cle]="$(generer_mot_de_passe)"
+    valeurs[$cle]="$("${generateurs[$cle]}")"
     ((existant)) && [[ "$NOUVEAUX_MDP" != 1 && -z "$precedent" ]] && absents+=("$cle")
   fi
 done
@@ -275,9 +353,10 @@ printf '  %-23s %s\n' TLS_MODE "$tls_mode" PLATFORM_PROFILE "$profil" \
   GRAFANA_EXTERNAL_URL "${valeurs[GRAFANA_EXTERNAL_URL]}"
 [[ -z "$acme_email" ]] || printf '  %-23s %s\n' ACME_EMAIL "$acme_email"
 if ((nb_repris)); then
-  echo "  Mots de passe : $nb_repris repris du fichier existant, $((${#cles_mdp[@]} - nb_repris)) générés."
+  echo "  Secrets : $nb_repris repris du fichier existant, $((${#cles_mdp[@]} + ${#cles_sso[@]} - nb_repris)) générés."
 else
-  echo "  Mots de passe : ${#cles_mdp[@]} générés aléatoirement (à lire dans $fichier_rel)."
+  echo "  Secrets : $((${#cles_mdp[@]} + ${#cles_sso[@]})) générés aléatoirement (mots de passe et passerelle"
+  echo "  d'authentification, à lire dans $fichier_rel)."
 fi
 if ((existant)) && [[ "$NOUVEAUX_MDP" == 1 ]]; then
   echo

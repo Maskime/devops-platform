@@ -29,6 +29,10 @@ Quel que soit le profil, SonarQube exige `vm.max_map_count` ≥ 524288 sur l'hô
 | SonarQube — heap Compute Engine (Xmx) | 512m | 512m | 2g |
 | SonarQube — heap Elasticsearch (Xms = Xmx) | 512m | 512m | 2g |
 
+Les autres services (Traefik, passerelle d'authentification, observabilité, outils) ont une empreinte
+indépendante du profil et incluse dans les ressources minimales ci-dessus (passerelle `oauth2-proxy` :
+quelques dizaines de Mo).
+
 `medium` reprend le réglage historique de la plateforme (heaps SonarQube par défaut).
 En `small`, Puma tourne en **mode single** (un seul processus, sans maître) : quelques centaines de Mo
 économisés, au prix d'un débit réduit et sans redémarrage progressif ni surveillance mémoire des workers.

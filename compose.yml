@@ -6,7 +6,8 @@
 #   compose/sonarqube.yml      sonarqube, sonarqube-db, sonarqube-mcp (profil sonarqube-mcp)
 #   compose/observability.yml  loki, promtail, grafana
 #   compose/tools.yml          portainer, plantuml, home
-#   compose/proxy.yml          traefik (reverse proxy : seul point d'entrée HTTP, routage par hostname)
+#   compose/proxy.yml          traefik (reverse proxy : seul point d'entrée HTTP, routage par hostname),
+#                              oauth2-proxy (passerelle d'authentification GitLab, docs/sso.md)
 #   compose/socket-proxy.yml   socket-proxy-traefik, socket-proxy-promtail (API Docker filtrée, en
 #                              lecture, un proxy et une liste blanche par client)
 #   compose/tls/<mode>.yml     overlay de traefik propre au TLS_MODE de l'instance (none, custom,

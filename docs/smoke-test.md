@@ -29,7 +29,8 @@ non satisfaite, avec la cause et la commande à lancer.
 | 7 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs, service de la plateforme ou sentinelle joignable depuis un job |
 | 8 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
 | 9 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
-| 10 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
+| 10 | Passerelle d'authentification ([détails](sso.md)) : passerelle active ; chaque service protégé, appelé sans session avec des en-têtes d'identité forgés, redirige vers l'autorisation GitLab avec une URI de retour sur son hostname ; session de root ouverte sur la page d'accueil (code d'autorisation créé par `gitlab-rails`, callback, cookie `Secure` en HTTPS seulement), accès authentifié et identité transmise ; en-têtes forgés sans effet sur l'API GitLab et l'API SonarQube exemptée | passerelle en mode refus (`make bootstrap`), routeur sans middleware, en-têtes d'identité acceptés |
+| 11 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
 
 Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
 

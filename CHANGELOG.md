@@ -9,6 +9,13 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Authentification unique : passerelle oauth2-proxy (fournisseur GitLab) devant la page d'accueil,
+  PlantUML, Grafana, SonarQube et Portainer ; sans session, redirection vers la connexion GitLab,
+  restriction facultative à un groupe (`SSO_GITLAB_GROUPE`). `make bootstrap` crée l'application OAuth
+  de confiance et désactive l'inscription libre et la visibilité publique de GitLab ; `make smoke`
+  vérifie la passerelle (`docs/sso.md`).
+- `make init ENV=<env> COMPLETER=1` : ajoute à un fichier d'instance existant les secrets générés qui
+  lui manquent, sans modifier le reste (`docs/initialisation.md`).
 - `make stop ENV=<env>` : arrête les conteneurs de l'instance sans les supprimer (`docker compose stop`) ;
   `make deploy` les relance. Instance distante : même confirmation que `make down` (`docs/deploiement.md`).
 - `make backup ENV=<env>` : sauvegarde à froid des volumes à état de l'instance, locale ou distante,
@@ -18,6 +25,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Authentification unique (`docs/sso.md`) :
+  1. `make init ENV=<env> COMPLETER=1` (identifiants de la passerelle) ;
+  2. `make deploy ENV=<env>` : les services protégés affichent « Passerelle d'authentification non
+     initialisée » jusqu'à l'étape suivante ;
+  3. `make bootstrap ENV=<env>` : application OAuth GitLab, inscription libre désactivée, visibilité
+     publique restreinte (les projets et groupes déjà publics le restent : à revoir) ;
+  4. `make smoke ENV=<env>`.
+
+  Les appels par jeton à l'API de Grafana ou de Portainer passent désormais par la passerelle.
 - Projets co-localisés (conteneurs d'autres projets sur l'hôte de l'instance) :
   1. `make deploy ENV=<env>` : crée le réseau des consommateurs et recrée Traefik (brève coupure) ;
   2. `make bootstrap ENV=<env>`, puis recopier `outputs/<env>.env` sur le serveur ;

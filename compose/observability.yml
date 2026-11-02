@@ -130,6 +130,8 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.grafana.rule: Host(`${GRAFANA_HOSTNAME:-grafana.localhost}`)
+      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
+      traefik.http.routers.grafana.middlewares: passerelle-auth@docker
       traefik.http.services.grafana.loadbalancer.server.port: "3000"
     volumes:
       - grafana_data:/var/lib/grafana
