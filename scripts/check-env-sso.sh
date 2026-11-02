@@ -6,7 +6,7 @@
 #   - identifiant, secret client et secret de cookie (SSO_GITLAB_CLIENT_ID, SSO_GITLAB_CLIENT_SECRET et
 #     SSO_COOKIE_SECRET) présents, sinon commande à lancer pour les ajouter sans régénérer les autres
 #     secrets, et au format attendu ;
-#   - SSO_GITLAB_GROUPE : vide ou chemin de groupe GitLab.
+#   - SSO_GITLAB_GROUPE et SSO_GROUPE_ADMIN : vides ou chemins de groupe GitLab.
 # Valeur effective comme Compose (variable du shell prioritaire). Les secrets ne sont jamais affichés.
 # Code de sortie : 0 si tout est conforme, 1 sinon.
 set -euo pipefail
@@ -55,11 +55,16 @@ if ((${#absentes[@]})); then
   erreurs=1
 fi
 
-groupe="$(env_valeur "$env_file" SSO_GITLAB_GROUPE)"
+# Chemins de groupes GitLab : SSO_GITLAB_GROUPE (restriction de la passerelle) et SSO_GROUPE_ADMIN
+# (administrateurs des services) ; vides : pas de restriction, aucun administrateur par le SSO
 segment='[A-Za-z0-9_][A-Za-z0-9_.-]*'
-if [[ -n "$groupe" && ! "$groupe" =~ ^${segment}(/${segment})*$ ]]; then
-  echo "SSO_GITLAB_GROUPE invalide : $groupe (chemin complet d'un groupe GitLab attendu, ex. : equipe/devops ; vide : pas de restriction)." >&2
-  erreurs=1
-fi
+declare -A sens_vide=([SSO_GITLAB_GROUPE]="pas de restriction" [SSO_GROUPE_ADMIN]="aucun administrateur par la connexion GitLab")
+for cle in SSO_GITLAB_GROUPE SSO_GROUPE_ADMIN; do
+  groupe="$(env_valeur "$env_file" "$cle")"
+  if [[ -n "$groupe" && ! "$groupe" =~ ^${segment}(/${segment})*$ ]]; then
+    echo "$cle invalide : $groupe (chemin complet d'un groupe GitLab attendu, ex. : equipe/devops ; vide : ${sens_vide[$cle]})." >&2
+    erreurs=1
+  fi
+done
 
 exit "$erreurs"
