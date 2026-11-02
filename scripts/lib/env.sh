@@ -81,11 +81,12 @@ ipv4_entier() { # <adresse>
 # Sous-réseau <clé> (défaut <défaut>) d'un lien interne Traefik → service : CIDR IPv4, préfixe de 16 à 29
 # (au moins 6 adresses). Valeur effective sur stdout ; motif du refus sur stderr (code 1).
 sous_reseau_valide() { # <fichier> <clé> <défaut>
-  local cidr
+  local cidr prefixe
   cidr="$(env_valeur "$1" "$2")"
   cidr="${cidr:-$3}"
-  if [[ "$cidr" =~ ^([0-9.]+)/([0-9]{2})$ ]] && ipv4_entier "${BASH_REMATCH[1]}" > /dev/null \
-    && ((10#${BASH_REMATCH[2]} >= 16 && 10#${BASH_REMATCH[2]} <= 29)); then
+  prefixe="${cidr##*/}"
+  if [[ "$cidr" =~ ^[0-9.]+/[0-9]{2}$ ]] && ipv4_entier "${cidr%/*}" > /dev/null \
+    && ((10#$prefixe >= 16 && 10#$prefixe <= 29)); then
     printf '%s' "$cidr"
     return 0
   fi

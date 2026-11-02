@@ -89,7 +89,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Branchement d'un projet](docs/branchement-projet.md) | Brancher un projet hébergé, co-localisé ou distant : `outputs/<env>.env`, `.gitlab-ci.yml` avec analyse SonarQube, réseau Docker externe |
 | [Fichier de sortie](docs/sortie-instance.md) | `outputs/<env>.env` pour les projets consommateurs : URLs, API GitLab, token d'analyse |
 | [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | Étape SonarQube : `vm.max_map_count`, compte admin, token d'analyse, mot de passe admin inconnu |
-| [Authentification unique](docs/sso.md) | Passerelle GitLab devant les services web : mécanisme, services exemptés, groupe, durée de session, accès de secours, déconnexion |
+| [Authentification unique](docs/sso.md) | Passerelle GitLab devant les services web : mécanisme, services exemptés, groupe, durée de session, accès de secours, déconnexion ; connexion automatique et rôles Grafana |
 | [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
 | [Let's Encrypt](docs/letsencrypt.md) | `TLS_MODE=letsencrypt` : prérequis, challenge, stockage, renouvellement |

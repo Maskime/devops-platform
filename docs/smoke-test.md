@@ -29,7 +29,7 @@ non satisfaite, avec la cause et la commande à lancer.
 | 7 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs, service de la plateforme ou sentinelle joignable depuis un job |
 | 8 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
 | 9 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
-| 10 | Passerelle d'authentification ([détails](sso.md)) : passerelle active ; chaque service protégé, appelé sans session avec des en-têtes d'identité forgés, redirige vers l'autorisation GitLab avec une URI de retour sur son hostname ; session de root ouverte sur la page d'accueil (code d'autorisation créé par `gitlab-rails`, callback, cookie `Secure` en HTTPS seulement), accès authentifié et identité transmise ; en-têtes forgés sans effet sur l'API GitLab et l'API SonarQube exemptée | passerelle en mode refus (`make bootstrap`), routeur sans middleware, en-têtes d'identité acceptés |
+| 10 | Passerelle d'authentification ([détails](sso.md)) : passerelle active ; chaque service protégé, appelé sans session avec des en-têtes d'identité forgés, redirige vers l'autorisation GitLab avec une URI de retour sur son hostname ; session de root ouverte sur la page d'accueil (code d'autorisation créé par `gitlab-rails`, callback, cookie `Secure` en HTTPS seulement), accès authentifié et identité transmise ; session de root sur Grafana : connexion sans formulaire, compte `root` et rôle attendu (`Admin` si root est membre de `SSO_GROUPE_ADMIN`, `Viewer` sinon) malgré des en-têtes forgés (`X-Auth-Request-Role: Admin` compris) ; service `grafana-role` (groupes sur plusieurs en-têtes, groupe voisin, homonyme du compte admin local refusé) ; Grafana joint hors Traefik avec des en-têtes d'identité refusé ; en-têtes forgés sans effet sur l'API GitLab et l'API SonarQube exemptée | passerelle en mode refus (`make bootstrap`), routeur sans middleware, en-têtes d'identité acceptés, Grafana affichant son formulaire ou rôle inattendu, adresse source non restreinte |
 | 11 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
 
 Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
@@ -90,6 +90,7 @@ hôte sans accès à `registry.gitlab.com`) renvoie à `GITLAB_RUNNER_HELPER_IMA
 | Projet SonarQube | `devops-platform-smoke` | privé |
 | Jeton utilisateur SonarQube (compte admin), application OAuth GitLab (scope `mcp`) | `devops-platform-smoke-mcp` | supprimés en fin d'étape 9, succès ou échec |
 | Conteneurs [sentinelles](#sentinelles) | label `devops-platform.smoke=<env>` | supprimés après le pipeline, succès ou échec |
+| Compte Grafana de root (rôle synchronisé, voir [Grafana](sso.md#grafana)) | `root` | conservé : le même compte que lors d'une visite de root |
 
 - **Relance** : les projets sont réutilisés. Seuls les fichiers absents ou modifiés sont poussés ; s'ils
   sont tous à jour, un nouveau pipeline est lancé sur `main`. Un projet GitLab en attente de suppression

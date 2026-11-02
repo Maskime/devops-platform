@@ -6,8 +6,9 @@ vers la page de connexion de GitLab, puis ramené sur l'URL demandée. Seuls les
 actifs (et, en option, les membres d'un groupe) accèdent aux services, y compris à ceux qui n'ont pas
 d'authentification propre (page d'accueil, PlantUML).
 
-Grafana, SonarQube et Portainer affichent encore leur propre page de connexion derrière la passerelle :
-la passerelle filtre l'accès, chaque application garde ses comptes.
+Grafana ouvre directement la session de l'utilisateur GitLab (voir « Grafana »). SonarQube et Portainer
+affichent encore leur propre page de connexion derrière la passerelle : la passerelle filtre l'accès,
+ces applications gardent leurs comptes.
 
 ## Mécanisme
 
@@ -26,10 +27,12 @@ la passerelle filtre l'accès, chaque application garde ses comptes.
 
    | En-tête | Contenu |
    |---|---|
-   | `X-Auth-Request-User` | Identifiant GitLab (`sub`) |
+   | `X-Auth-Request-User` | Login GitLab |
    | `X-Auth-Request-Preferred-Username` | Login GitLab |
    | `X-Auth-Request-Email` | E-mail principal |
-   | `X-Auth-Request-Groups` | Groupes GitLab (chemins complets, séparés par des virgules) |
+   | `X-Auth-Request-Groups` | Groupes GitLab (chemins complets, groupes hérités compris), un en-tête par groupe |
+
+   Le nom complet de l'utilisateur n'est pas transmis.
 
    Traefik retire de la requête tout en-tête `X-Auth-Request-*` envoyé par le client avant d'y copier
    ceux de la passerelle : un en-tête forgé n'atteint jamais un service protégé.
@@ -131,6 +134,69 @@ gardent leur session, et la session GitLab reste ouverte (une nouvelle visite re
 Pour une déconnexion complète : se déconnecter de GitLab, puis fermer le navigateur, ou attendre
 l'expiration des sessions de la passerelle.
 
+## Grafana
+
+Un utilisateur qui a passé la passerelle arrive dans Grafana **déjà connecté**, sans formulaire. Son
+compte Grafana est créé à la première visite : login et e-mail GitLab (nom affiché : le login, la
+passerelle ne transmettant pas le nom complet).
+
+### Mécanisme : `auth.proxy`
+
+Grafana lit l'identité dans les en-têtes de la passerelle (`auth.proxy` de Grafana) plutôt que de mener
+sa propre connexion OAuth avec GitLab : la passerelle a déjà authentifié l'utilisateur, et ce choix
+n'impose ni seconde application OAuth, ni secret supplémentaire, ni nouvelle redirection. Chaîne d'une
+requête vers `GRAFANA_HOSTNAME` :
+
+1. `passerelle-auth` (forward auth vers la passerelle) : session vérifiée, en-têtes
+   `X-Auth-Request-*` du client supprimés puis remplacés par ceux de la passerelle ;
+2. `grafana-role` (second forward auth, service `grafana-role` de `compose/observability.yml`) :
+   calcule le rôle à partir des groupes et le transmet dans `X-Auth-Request-Role` (valeur du client
+   supprimée par l'étape 1, puis remplacée) ;
+3. Grafana : login `X-Auth-Request-User`, e-mail `X-Auth-Request-Email`, rôle `X-Auth-Request-Role`.
+
+Grafana n'accepte ces en-têtes que d'**une seule adresse source** : celle de Traefik sur le réseau
+interne `devops-platform_grafana-proxy`, qui ne relie que Traefik et Grafana (sous-réseau
+`GRAFANA_PROXY_SUBNET`, défaut `172.31.254.16/28`, adresse fixe de Traefik `GRAFANA_PROXY_IP_TRAEFIK`,
+défaut `172.31.254.30`). Une requête portant ces en-têtes depuis une autre source (autre conteneur de la
+plateforme, hôte, tunnel SSH) est refusée. Grafana n'a pas d'autre routeur que celui protégé par la
+passerelle. Les deux sous-réseaux `*_PROXY_SUBNET` doivent être disjoints (`make check-env`) ; changer
+le sous-réseau d'une instance existante impose de supprimer le réseau `devops-platform_grafana-proxy`
+(`make down`, puis `make deploy`).
+
+Si `grafana-role` est arrêté, Traefik répond par une erreur sur Grafana : aucun accès sans rôle calculé.
+
+### Rôles
+
+| Utilisateur GitLab | Rôle Grafana (organisation principale) |
+|---|---|
+| Membre du groupe `SSO_GROUPE_ADMIN`, directement ou par un groupe parent | `Admin` |
+| Autres | `Viewer` |
+| Login identique à `GRAFANA_ADMIN_USER` (casse ignorée) | Refusé (403) |
+
+- `SSO_GROUPE_ADMIN` (`envs/<env>.env`, vide par défaut) : chemin complet d'un groupe GitLab
+  (`equipe/admins`), comparé sans tenir compte de la casse. Vide : tout le monde est `Viewer`
+  (administration par le compte local). Après modification : `make deploy ENV=<env>`.
+- Il s'agit du rôle d'**organisation** `Admin` (dashboards, sources de données, utilisateurs de
+  l'organisation), pas de *Grafana Server Admin*, réservé au compte local.
+- Le rôle est recalculé à **chaque connexion**, c'est-à-dire à chaque nouvelle session de la passerelle :
+  les groupes sont lus dans GitLab à l'ouverture de la session et figés pour sa durée (8 h au plus, voir
+  « Durée de session »). Grafana applique le nouveau rôle dès la requête suivante. Pour qu'un
+  changement d'appartenance prenne effet tout de suite : `/oauth2/sign_out` sur `GRAFANA_HOSTNAME` (ou
+  le bouton de déconnexion de Grafana, qui y renvoie), puis nouvelle visite.
+- **Homonymie avec le compte admin local** : Grafana relie un utilisateur de la passerelle à un compte
+  existant de même login. Un utilisateur GitLab nommé comme `GRAFANA_ADMIN_USER` obtiendrait le compte
+  admin local (et lui imposerait son rôle) : `grafana-role` le refuse. `make check-env` refuse
+  `GRAFANA_ADMIN_USER=root`, compte GitLab toujours présent. Grafana relie aussi par e-mail : ne pas
+  donner à un compte GitLab l'e-mail du compte admin local (`admin@localhost` par défaut).
+
+### Compte admin local et inscription
+
+Le compte `GRAFANA_ADMIN_USER` (mot de passe `GRAFANA_ADMIN_PASSWORD`) reste utilisable par le
+formulaire de connexion, joint par l'accès de secours ci-dessous : sans en-tête d'identité, Grafana
+affiche son formulaire habituel. L'inscription libre, l'accès anonyme, les dashboards publics et les
+snapshots restent désactivés ; seuls les utilisateurs passés par la passerelle obtiennent un compte.
+La source de données Loki provisionnée n'est pas concernée.
+
 ## Accès de secours sans GitLab
 
 GitLab indisponible, plus aucun service protégé n'est accessible par son hostname. Accès direct, sans
@@ -139,8 +205,11 @@ passerelle, par un tunnel SSH vers le service (réseau de la plateforme), avec l
 `envs/<env>.env`). Sur le serveur :
 
 ```bash
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' devops-platform-grafana-1
+docker inspect -f '{{(index .NetworkSettings.Networks "devops-platform").IPAddress}}' devops-platform-grafana-1
 ```
+
+(adresse sur le réseau de la plateforme, `PLATFORM_NETWORK` ; Grafana est aussi sur
+`devops-platform_grafana-proxy`, réservé à Traefik).
 
 Puis, depuis le poste, tunnel vers cette adresse et le port interne du service (Grafana 3000,
 SonarQube 9000, Portainer 9000, PlantUML 8080, accueil 80) :
@@ -155,6 +224,8 @@ URL publique : naviguer par les chemins relatifs.
 ## Limites
 
 - Session par hostname : la déconnexion ne couvre qu'un service (voir « Déconnexion »).
+- Grafana : nom complet GitLab non transmis (nom affiché = login) ; rôle figé pour la durée de la
+  session de la passerelle (voir « Grafana »).
 - Exemption SonarQube par en-tête `Authorization` : l'API reste joignable sans passer par la passerelle
   (voir « Services couverts et exemptés »).
 - Image : `quay.io/oauth2-proxy/oauth2-proxy` (variante `-alpine`, `OAUTH2_PROXY_VERSION`), montée de
