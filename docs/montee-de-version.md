@@ -39,6 +39,7 @@ perte de données.
 | `plantuml/plantuml-server` | `PLANTUML_VERSION` | variante `jetty-` | [plantuml-server](https://github.com/plantuml/plantuml-server/releases) |
 | `nginx` (page d'accueil) | `HOME_VERSION` | variante `-alpine` (healthcheck) ; branche *stable* (version mineure paire) | [nginx](https://nginx.org/en/download.html) |
 | `traefik` | `TRAEFIK_VERSION` | ≥ 3.6.1 pour Docker Engine 29 ; préfixe `v` | [traefik](https://github.com/traefik/traefik/releases) |
+| `quay.io/oauth2-proxy/oauth2-proxy` | `OAUTH2_PROXY_VERSION` | variante `-alpine` (lanceur, healthcheck) ; préfixe `v` | [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy/releases) |
 | `wollomatic/socket-proxy` | `SOCKET_PROXY_VERSION` | tag sans préfixe `v` ; listes blanches à revalider ([accès à l'API Docker](acces-docker.md)) | [socket-proxy](https://github.com/wollomatic/socket-proxy/releases) |
 
 Images d'outillage, épinglées en dur dans les scripts (variables `*_IMAGE`, contrôlées par `scripts/check-images.sh`) :
@@ -234,5 +235,8 @@ test appelle `search_my_sonarqube_projects`), puis `make smoke ENV=<env>`.
 - **Portainer** : garder la variante `-alpine` (le healthcheck exige `wget`). `make backup` avant la
   montée (migration de sa base, volume `portainer_data`, au démarrage).
 - **PlantUML** : sans état ; garder la variante `jetty-`. Changer le tag et `make deploy ENV=<env>`.
+- **Passerelle d'authentification** (`oauth2-proxy`) : sans état (sessions dans les cookies) ; garder
+  la variante `-alpine`. Relire les notes de version (options du lanceur
+  `config/oauth2-proxy/lanceur.sh`), changer le tag, `make deploy ENV=<env>` puis `make smoke ENV=<env>`.
 - **Page d'accueil** (`nginx`) : sans état ; garder la variante `-alpine`. Changer le tag et
   `make deploy ENV=<env>`.

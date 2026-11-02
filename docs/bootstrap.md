@@ -15,7 +15,7 @@ indépendamment du DNS et du TLS du poste.
 | Ordre | Étape | Script | Lancée seule par |
 |---|---|---|---|
 | 1 | SonarQube : `vm.max_map_count`, compte admin, plugin, compte et token d'analyse ([détails](bootstrap-sonarqube.md)) | `scripts/bootstrap/sonarqube.sh` | `make bootstrap-sonarqube` |
-| 2 | GitLab : jeton d'administration, variables CI SonarQube, runner d'instance (ci-dessous) | `scripts/bootstrap/gitlab.sh` | `make bootstrap-gitlab` |
+| 2 | GitLab : jeton d'administration, variables CI SonarQube, runner d'instance, application OAuth de la passerelle et accès anonyme (ci-dessous), serveur MCP | `scripts/bootstrap/gitlab.sh` | `make bootstrap-gitlab` |
 
 SonarQube passe en premier : son token d'analyse est posé en variable CI d'instance par l'étape
 GitLab. Une
@@ -119,6 +119,17 @@ aucune architecture n'est figée. Un miroir doit donc publier ce tag (et pas seu
 
 Avant tout ré-enregistrement, le bootstrap tire `<dépôt>:v<version du runner déployé>` sur la cible :
 erreur si l'image est introuvable, simple avertissement si le runner est déjà conforme.
+
+## Passerelle d'authentification
+
+L'étape GitLab crée ou met à jour l'application OAuth `devops-platform-sso` de la passerelle
+(identifiants `SSO_GITLAB_CLIENT_ID` et `SSO_GITLAB_CLIENT_SECRET` de `envs/<env>.env`, une URI de
+redirection par hostname protégé, scopes `openid profile email read_user`, application de confiance),
+désactive l'inscription libre et restreint la visibilité publique de GitLab. Elle relance la passerelle
+si l'application a changé ou si elle est encore en mode refus, puis attend qu'elle soit active ;
+sinon rien n'est redémarré. D'où l'ordre `make deploy` puis `make bootstrap` : entre les deux, les
+services protégés affichent « Passerelle d'authentification non initialisée ». Détails :
+[authentification unique](sso.md).
 
 ## Exécutions simultanées
 

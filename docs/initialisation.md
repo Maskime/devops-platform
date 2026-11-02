@@ -13,6 +13,8 @@ inventer ni à copier :
 - **Mots de passe** (root GitLab, base et admin SonarQube, admin Grafana, admin Portainer) : 24 caractères aléatoires
   avec majuscule, minuscule, chiffre et caractère spécial (règles SonarQube), sans caractère
   problématique pour Compose ou le shell. Ils ne sont jamais affichés : les lire dans le fichier.
+- **Passerelle d'authentification** ([authentification unique](sso.md)) : identifiant (64 caractères
+  hexadécimaux) et secret de l'application OAuth GitLab, clé des cookies (32 caractères).
 - **Fichier** en permissions `600`, écrit de façon atomique.
 - **URLs publiques** : `GITLAB_EXTERNAL_URL` n'est pas écrite (dérivée par GitLab du hostname et du
   `TLS_MODE`) ; `SONARQUBE_EXTERNAL_URL` et `GRAFANA_EXTERNAL_URL` valent `https://<hostname>` en
@@ -32,3 +34,11 @@ réinstaller, car le mot de passe PostgreSQL de SonarQube est inscrit dans son v
 passe root GitLab et admin Grafana et Portainer ne sont appliqués qu'au premier démarrage. Un secret absent de
 l'ancien fichier (variable ajoutée depuis) est généré et signalé. `FORCE` et `NOUVEAUX_MDP` ne sont acceptés
 que sur la ligne de commande, jamais hérités du shell.
+
+**Compléter un fichier existant.** Quand une nouvelle version de la plateforme introduit un secret
+généré (par exemple les identifiants de la passerelle d'authentification), `make check-env` refuse le
+fichier et indique `make init ENV=<env> COMPLETER=1`. Cette commande ajoute en fin de fichier les
+seuls secrets absents (valeurs générées, non affichées), après une sauvegarde `envs/<env>.env.bak.<date>`,
+sans poser de question ni modifier une autre ligne ; sans secret absent, elle ne touche à rien.
+Contrairement à `FORCE=1`, ports, versions et réglages personnalisés sont conservés. `COMPLETER` ne se
+combine ni avec `FORCE` ni avec `NOUVEAUX_MDP` et n'est accepté que sur la ligne de commande.

@@ -670,7 +670,7 @@ for paire in "${SSO_HOSTNAMES[@]}"; do
 done
 
 # Requête : <hôte> <chemin> [ligne de configuration curl…]. Configuration sur l'entrée standard (code
-# d'autorisation et cookies jamais en argument) ; sortie : en-têtes de réponse, corps (2 Ko au plus),
+# d'autorisation et cookies jamais en argument) ; sortie : en-têtes de réponse, corps,
 # puis « CODE=<code HTTP> ».
 requete() {
   local hote="$1" chemin="$2" config ligne
@@ -680,7 +680,7 @@ requete() {
   [[ -n "$ca_sso" ]] && config+="cacert = $(cfg "$ca_sso")"$'\n'
   for ligne in "$@"; do config+="$ligne"$'\n'; done
   # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
-  dc exec -T gitlab-runner sh -c 'curl -sS -K - -D - --max-filesize 2048 -w "\nCODE=%{http_code}\n" || true' <<<"$config"
+  dc exec -T gitlab-runner sh -c 'curl -sS -K - -D - -w "\nCODE=%{http_code}\n" || true' <<<"$config"
 }
 code_de() { sed -n 's/^CODE=//p' <<<"$1" | tail -n1; }
 entete_de() { grep -i "^$2:" <<<"$1" | tail -n1 | sed 's/^[^:]*: *//; s/\r$//'; }
