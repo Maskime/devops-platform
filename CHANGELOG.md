@@ -9,6 +9,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Portainer : connexion avec l'identité GitLab (OAuth, seconde application GitLab de confiance créée par
+  `make bootstrap`), réservée aux membres du groupe `SSO_GROUPE_ADMIN` : filtre de groupe à la passerelle
+  et comptes Portainer administrateurs synchronisés par `make bootstrap` ; le compte `admin` local reste
+  l'accès de secours. `make smoke` vérifie les réglages et le refus d'un utilisateur hors du groupe
+  (`docs/sso.md`, « Portainer »).
 - Authentification unique : passerelle oauth2-proxy (fournisseur GitLab) devant la page d'accueil,
   PlantUML, Grafana, SonarQube et Portainer ; sans session, redirection vers la connexion GitLab,
   restriction facultative à un groupe (`SSO_GITLAB_GROUPE`). `make bootstrap` crée l'application OAuth
@@ -25,6 +30,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Portainer avec l'identité GitLab (`docs/sso.md`, « Portainer ») :
+  1. `make init ENV=<env> COMPLETER=1` (`SSO_PORTAINER_CLIENT_ID`, `SSO_PORTAINER_CLIENT_SECRET`) ;
+  2. renseigner `SSO_GROUPE_ADMIN` (groupe GitLab des administrateurs) dans `envs/<env>.env` ;
+  3. vérifier que `PORTAINER_ADMIN_PASSWORD` est bien le mot de passe actuel du compte `admin` de
+     Portainer (le reporter s'il a été changé dans l'interface) ;
+  4. supprimer dans Portainer les comptes locaux autres que `admin` qui ne correspondent pas à un membre
+     du groupe : `make bootstrap` s'arrête sans rien modifier tant qu'il en reste ;
+  5. `make deploy ENV=<env>`, `make bootstrap ENV=<env>`, `make smoke ENV=<env>`.
 - Authentification unique (`docs/sso.md`) :
   1. `make init ENV=<env> COMPLETER=1` (identifiants de la passerelle) ;
   2. `make deploy ENV=<env>` : les services protégés affichent « Passerelle d'authentification non
