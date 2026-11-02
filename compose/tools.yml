@@ -29,6 +29,8 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.portainer.rule: Host(`${PORTAINER_HOSTNAME:-portainer.localhost}`)
+      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
+      traefik.http.routers.portainer.middlewares: passerelle-auth@docker
       traefik.http.services.portainer.loadbalancer.server.port: "9000"
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
@@ -54,6 +56,8 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.plantuml.rule: Host(`${PLANTUML_HOSTNAME:-plantuml.localhost}`)
+      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
+      traefik.http.routers.plantuml.middlewares: passerelle-auth@docker
       traefik.http.services.plantuml.loadbalancer.server.port: "8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
@@ -90,6 +94,8 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.home.rule: Host(`${HOME_HOSTNAME:-home.localhost}`)
+      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
+      traefik.http.routers.home.middlewares: passerelle-auth@docker
       traefik.http.services.home.loadbalancer.server.port: "80"
     volumes:
       - type: bind

@@ -107,6 +107,94 @@ services:
       # Accès à l'API Docker filtrée (compose/socket-proxy.yml), réseau partagé avec son seul proxy
       socket-proxy-traefik: {}
 
+  # ---------------------------------------------------------------------------
+  # Passerelle d'authentification (oauth2-proxy, fournisseur GitLab) : forward auth de Traefik devant
+  # les routeurs publics home, plantuml, grafana, sonarqube et portainer (middleware passerelle-auth,
+  # déclaré ci-dessous et référencé par les labels de ces services). Mécanisme, exemptions et limites :
+  # docs/sso.md.
+  # Lanceur config/oauth2-proxy/lanceur.sh : sonde de l'application OAuth GitLab (créée par make
+  # bootstrap), puis mode actif, ou mode refus avec une page explicite (redémarrage périodique pour
+  # rejouer la sonde). Passerelle arrêtée ou non healthy : Traefik retire son middleware et les
+  # routeurs protégés ne sont plus servis (404) ; aucun accès sans authentification.
+  # Image -alpine : sh et wget (lanceur, healthcheck), absents de l'image distroless.
+  # ---------------------------------------------------------------------------
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:${OAUTH2_PROXY_VERSION:-v7.15.5-alpine}
+    restart: unless-stopped
+    # Pas de read_only : Compose copie les secrets de source `environment` dans le conteneur
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: ["/bin/sh", "/etc/devops-platform/oauth2-proxy/lanceur.sh"]
+    # Secret client et secret de cookie : lus dans les fichiers par oauth2-proxy (*-file), jamais
+    # interpolés ici (absents de `docker compose config`) ; présence et format contrôlés par make check-env
+    secrets:
+      - sso_client_secret
+      - sso_cookie_secret
+    environment:
+      SSO_CLIENT_ID: ${SSO_GITLAB_CLIENT_ID:-}
+      SSO_GITLAB_GROUPE: ${SSO_GITLAB_GROUPE:-}
+      SSO_TLS_MODE: ${TLS_MODE:-none}
+      # URL publique de GitLab (fournisseur) : GITLAB_EXTERNAL_URL, sinon dérivée du hostname et du
+      # TLS_MODE par le lanceur (même règle que compose/gitlab.yml)
+      SSO_GITLAB_URL: ${GITLAB_EXTERNAL_URL:-}
+      SSO_GITLAB_HOSTNAME: ${GITLAB_HOSTNAME:-gitlab.localhost}
+      # Hostnames protégés (destinations de retour admises) : défauts identiques aux labels
+      # traefik.http.routers.<service>.rule des modules et au routeur passerelle ci-dessous
+      SSO_HOSTNAMES: >-
+        ${HOME_HOSTNAME:-home.localhost} ${PLANTUML_HOSTNAME:-plantuml.localhost}
+        ${GRAFANA_HOSTNAME:-grafana.localhost} ${SONARQUBE_HOSTNAME:-sonarqube.localhost}
+        ${PORTAINER_HOSTNAME:-portainer.localhost}
+    labels:
+      traefik.enable: "true"
+      # Chemin /oauth2/ (callback, déconnexion) de chaque hostname protégé servi par la passerelle :
+      # cookie de session par hostname, aucun domaine parent commun exigé
+      traefik.http.routers.passerelle.rule: >-
+        (Host(`${HOME_HOSTNAME:-home.localhost}`) || Host(`${PLANTUML_HOSTNAME:-plantuml.localhost}`)
+        || Host(`${GRAFANA_HOSTNAME:-grafana.localhost}`) || Host(`${SONARQUBE_HOSTNAME:-sonarqube.localhost}`)
+        || Host(`${PORTAINER_HOSTNAME:-portainer.localhost}`)) && PathPrefix(`/oauth2/`)
+      traefik.http.routers.passerelle.priority: "1000"
+      traefik.http.routers.passerelle.middlewares: passerelle-sans-identite
+      traefik.http.services.passerelle.loadbalancer.server.port: "4180"
+      # Forward auth : sans session, redirection vers GitLab (puis retour sur l'URL demandée) ; avec
+      # session, en-têtes d'identité X-Auth-Request-* (login, e-mail, groupes) copiés sur la requête
+      # transmise. Traefik retire d'abord de la requête tout en-tête correspondant au motif : un en-tête
+      # forgé par le client ne passe jamais.
+      traefik.http.middlewares.passerelle-auth.forwardauth.address: http://oauth2-proxy:4180/
+      traefik.http.middlewares.passerelle-auth.forwardauth.authResponseHeadersRegex: ^X-Auth-Request-
+      # En-têtes d'identité reçus du client supprimés (même liste sur chaque routeur exempté :
+      # <service>-sans-identite dans les modules)
+      traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-User: ""
+      traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Email: ""
+      traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Groups: ""
+      traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Preferred-Username: ""
+      traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Access-Token: ""
+      traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Redirect: ""
+    volumes:
+      - type: bind
+        source: ${PLATFORM_CONFIG_DIR:-../config}/oauth2-proxy
+        target: /etc/devops-platform/oauth2-proxy
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4180/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    # platform : URL publique de GitLab via l'alias de Traefik, sonde interne http://gitlab, requêtes
+    # de Traefik
+    networks:
+      - platform
+
+# Secret client de l'application OAuth GitLab et secret de chiffrement des cookies de la passerelle, lus
+# dans les variables de envs/<env>.env et montés en fichiers dans /run/secrets
+secrets:
+  sso_client_secret:
+    environment: SSO_GITLAB_CLIENT_SECRET
+  sso_cookie_secret:
+    environment: SSO_COOKIE_SECRET
+
 # Définition strictement identique dans chaque module (compose refuse les définitions divergentes)
 networks:
   platform:

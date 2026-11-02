@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Bootstrap GitLab d'une instance déployée : attente de GitLab, jeton d'accès personnel (PAT)
 # d'administration renouvelé, variables CI d'instance SonarQube (SONAR_HOST_URL, SONAR_TOKEN), runner
-# d'instance enregistré, accès au serveur MCP intégré autorisé. Aucune donnée de test créée ; idempotent.
+# d'instance enregistré, application OAuth de la passerelle d'authentification et réglages d'accès
+# anonyme (docs/sso.md), accès au serveur MCP intégré autorisé. Aucune donnée de test créée ; idempotent.
 # Lancé par `make bootstrap ENV=<env>` (scripts/instance.sh bootstrap), qui positionne la cible Docker
 # (contexte SSH d'une instance distante). Documentation : docs/bootstrap.md.
 #
@@ -48,7 +49,15 @@ readonly CA_CONTENEUR=/etc/devops-platform/ca/ca.pem
 # Verrou de l'instance : dans le volume du runner, donc sur l'hôte de l'instance quel que soit le poste
 # (même fichier dans scripts/instance.sh et scripts/smoke.sh)
 readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
-readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120
+readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 ATTENTE_PASSERELLE=120
+# Application OAuth de la passerelle d'authentification (instance, sans propriétaire) et scopes
+# minimaux ; hostnames protégés, une URI de redirection chacun (défauts identiques aux labels
+# traefik.http.routers.<service>.rule des modules et à SSO_HOSTNAMES de compose/proxy.yml)
+readonly SSO_APP_NOM="devops-platform-sso"
+readonly SSO_SCOPES="openid profile email read_user"
+readonly SSO_HOSTNAMES=(HOME_HOSTNAME:home.localhost PLANTUML_HOSTNAME:plantuml.localhost
+  GRAFANA_HOSTNAME:grafana.localhost SONARQUBE_HOSTNAME:sonarqube.localhost
+  PORTAINER_HOSTNAME:portainer.localhost)
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -565,7 +574,138 @@ attendre "Runner $courant en ligne" "$ATTENTE_EN_LIGNE" runner_en_ligne \
   || erreur "le runner $courant n'est pas en ligne après $ATTENTE_EN_LIGNE s (docker compose logs gitlab-runner)"
 verrou_tenu
 
-# --- 5. Serveur MCP --------------------------------------------------------------------------------
+# --- 5. Passerelle d'authentification --------------------------------------------------------------
+
+etape "Passerelle d'authentification (application OAuth $SSO_APP_NOM, docs/sso.md)"
+verrou_tenu
+# Identifiants lus dans le fichier uniquement (format contrôlé par make check-env), transmis à
+# gitlab-rails par l'environnement (-e sans valeur) : jamais en argument de processus
+sso_client_id="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_ID)"
+sso_client_secret="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_SECRET)"
+[[ -n "$sso_client_id" && -n "$sso_client_secret" ]] \
+  || erreur "SSO_GITLAB_CLIENT_ID ou SSO_GITLAB_CLIENT_SECRET absent de $env_file : make init ENV=$env COMPLETER=1"
+# URIs de redirection : <schéma>://<hostname>/oauth2/callback, schéma du TLS_MODE (celui que la passerelle
+# reçoit de Traefik dans X-Forwarded-Proto)
+sso_uris=()
+for paire in "${SSO_HOSTNAMES[@]}"; do
+  h="$(env_valeur "$env_file" "${paire%%:*}")"
+  sso_uris+=("$(schema_tls "$tls_mode")://${h:-${paire#*:}}/oauth2/callback")
+done
+
+# Application créée ou mise à jour (uid = identifiant de l'instance, secret stocké selon la stratégie de
+# GitLab : haché), confidentielle et de confiance (pas d'écran de consentement). Doublons sans
+# propriétaire du même nom supprimés ; une application d'un utilisateur portant ce nom est ignorée.
+# Réglages d'accès anonyme : inscription libre désactivée, niveau de visibilité public restreint.
+# Seuls des marqueurs sont affichés.
+# shellcheck disable=SC2016 # code Ruby
+readonly CODE_SSO='
+nom, uid, secret = ENV.fetch("SSO_NOM"), ENV.fetch("SSO_CLIENT_ID"), ENV.fetch("SSO_CLIENT_SECRET")
+uris, scopes = ENV.fetch("SSO_URIS").split, ENV.fetch("SSO_SCOPES").split
+org = Organizations::Organization.default_organization.id
+app = Authn::OauthApplication.find_by(uid: uid)
+if app && (app.name != nom || app.owner_id)
+  abort("Identifiant SSO_GITLAB_CLIENT_ID déjà utilisé par l application « #{app.name} » (id #{app.id}) : à régénérer.")
+end
+app ||= Authn::OauthApplication.where(name: nom, owner_id: nil).order(:id).first
+etat = app ? "INCHANGEE" : "CREEE"
+app ||= Authn::OauthApplication.new(name: nom, organization_id: org)
+attendus = { uid: uid, redirect_uri: uris.join("\n"), scopes: scopes.join(" "), confidential: true, trusted: true }
+conforme = app.persisted? &&
+  app.uid == uid && app.redirect_uri.to_s.split.sort == uris.sort &&
+  app.scopes.to_a.map(&:to_s).sort == scopes.sort && app.confidential && app.trusted &&
+  app.secret_matches?(secret)
+unless conforme
+  app.assign_attributes(attendus)
+  Doorkeeper.config.application_secret_strategy.store_secret(app, :secret, secret) unless app.persisted? && app.secret_matches?(secret)
+  app.save!
+  etat = "MAJ" if etat == "INCHANGEE"
+end
+Authn::OauthApplication.where(name: nom, owner_id: nil).where.not(id: app.id).find_each do |a|
+  Doorkeeper::AccessToken.where(application_id: a.id).delete_all
+  a.destroy!
+  puts "SUPPRIMEE=#{a.id}"
+end
+puts "APP=#{etat}"
+puts "ID=#{app.id}"
+s = ApplicationSetting.current_without_cache or abort("Réglages de l instance introuvables.")
+maj = {}
+maj[:signup_enabled] = false if s.signup_enabled
+niveaux = Array(s.restricted_visibility_levels).map(&:to_i)
+niveau_public = Gitlab::VisibilityLevel::PUBLIC
+maj[:restricted_visibility_levels] = niveaux + [niveau_public] unless niveaux.include?(niveau_public)
+s.update!(maj) unless maj.empty?
+puts "REGLAGES=#{maj.empty? ? "" : maj.keys.join(",")}"
+'
+erreurs_sso="$(mktemp)"
+if ! sortie_sso="$(SSO_CLIENT_ID="$sso_client_id" SSO_CLIENT_SECRET="$sso_client_secret" dc exec -T \
+    -e SSO_CLIENT_ID -e SSO_CLIENT_SECRET -e SSO_NOM="$SSO_APP_NOM" -e SSO_URIS="${sso_uris[*]}" \
+    -e SSO_SCOPES="$SSO_SCOPES" gitlab gitlab-rails runner "$CODE_SSO" 2> "$erreurs_sso")"; then
+  cat "$erreurs_sso" >&2
+  rm -f "$erreurs_sso"
+  erreur "application OAuth de la passerelle : création ou mise à jour impossible (voir ci-dessus)"
+fi
+rm -f "$erreurs_sso"
+unset sso_client_secret
+etat_sso="$(sed -n 's/^APP=//p' <<<"$sortie_sso" | tail -n1)"
+declare -A libelles_sso=([CREEE]=créée [MAJ]="mise à jour" [INCHANGEE]="déjà conforme")
+case "$etat_sso" in
+  CREEE) echo "    Application OAuth créée (id=$(sed -n 's/^ID=//p' <<<"$sortie_sso"))." ;;
+  MAJ) echo "    Application OAuth mise à jour (id=$(sed -n 's/^ID=//p' <<<"$sortie_sso"))." ;;
+  INCHANGEE) echo "    Application OAuth déjà conforme (id=$(sed -n 's/^ID=//p' <<<"$sortie_sso")) : rien à faire." ;;
+  *) erreur "réponse inattendue de gitlab-rails pour l'application OAuth" ;;
+esac
+while IFS= read -r id; do
+  echo "    Ancienne application $SSO_APP_NOM supprimée (id=$id)."
+done < <(sed -n 's/^SUPPRIMEE=//p' <<<"$sortie_sso")
+printf '    URI de redirection : %s\n' "${sso_uris[@]}"
+reglages="$(sed -n 's/^REGLAGES=//p' <<<"$sortie_sso" | tail -n1)"
+if [[ -n "$reglages" ]]; then
+  echo "    Réglages d'accès anonyme appliqués : $reglages (inscription libre désactivée, visibilité publique restreinte)."
+else
+  echo "    Inscription libre désactivée et visibilité publique restreinte : déjà en place."
+fi
+# Visiteur anonyme : page de connexion de GitLab (simple contrôle, depuis le conteneur gitlab)
+accueil="$(dc exec -T gitlab curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://localhost/ 2> /dev/null)" || accueil=""
+if [[ "$accueil" == 302\ */users/sign_in ]]; then
+  echo "    Visiteur anonyme redirigé vers la page de connexion de GitLab."
+else
+  echo "Attention : page d'accueil de GitLab pour un visiteur anonyme inattendue (« $accueil ») : attendu 302 vers /users/sign_in." >&2
+fi
+
+# Passerelle : relancée si l'application vient d'être créée ou modifiée, ou si elle est encore en mode
+# refus (sonde rejouée au démarrage, config/oauth2-proxy/lanceur.sh) ; sinon laissée en place (pas de
+# coupure des services protégés)
+mode_passerelle() {
+  dc exec -T oauth2-proxy cat /proc/1/cmdline 2> /dev/null | tr '\0' ' ' || true
+}
+passerelle_active() {
+  [[ "$(mode_passerelle)" == *skip-provider-button=true* ]] \
+    && [[ "$(dc ps --format '{{.Health}}' oauth2-proxy 2> /dev/null)" == healthy ]]
+}
+etat_passerelle="service oauth2-proxy absent"
+if [[ " $(dc config --services | paste -sd ' ' -) " == *" oauth2-proxy "* ]]; then
+  [[ -n "$(dc ps -q --status running oauth2-proxy)" ]] \
+    || erreur "service oauth2-proxy arrêté : démarrer l'instance (make deploy ENV=$env)"
+  if [[ "$etat_sso" != INCHANGEE ]] || ! passerelle_active; then
+    echo "    Redémarrage de la passerelle (nouvelle sonde de l'application OAuth)..."
+    dc restart oauth2-proxy > /dev/null
+  fi
+  if ! attendre "Passerelle active" "$ATTENTE_PASSERELLE" passerelle_active; then
+    {
+      echo "Passerelle toujours en mode refus après $ATTENTE_PASSERELLE s : identifiants du conteneur différents"
+      echo "  de ceux de $env_file (fichier modifié sans make deploy ?) ou GitLab injoignable depuis la passerelle."
+      echo "  make deploy ENV=$env puis make bootstrap ENV=$env ; journal : make status ENV=$env, docs/sso.md."
+    } >&2
+    erreur "passerelle d'authentification inactive"
+  fi
+  etat_passerelle="active"
+  echo "    Passerelle active : connexion GitLab exigée sur les services protégés."
+else
+  echo "Attention : service oauth2-proxy absent de l'instance : services web non protégés (docs/sso.md)." >&2
+fi
+verrou_tenu
+
+# --- 6. Serveur MCP --------------------------------------------------------------------------------
 
 etape "Serveur MCP de GitLab ($url/api/v4/mcp)"
 # Accès au serveur MCP intégré autorisé pour l'instance (réglage mcp_server_enabled, absent de l'API
@@ -615,5 +755,6 @@ echo "  CA         : ${ca_runner:-aucune (magasin système)}"
 echo "  CI SonarQube : SONAR_HOST_URL $etat_sonar_url"
 echo "                 SONAR_TOKEN $etat_sonar_token"
 echo "  Jeton root : $PAT_NOM, scopes api et admin_mode, expire le $expiration (valeur non affichée)"
+echo "  Passerelle : application OAuth $SSO_APP_NOM (${libelles_sso[$etat_sso]}), passerelle $etat_passerelle"
 echo "  Runners    : $url/admin/runners"
 echo "  MCP        : $url/api/v4/mcp (accès ${etat_mcp:-?})"

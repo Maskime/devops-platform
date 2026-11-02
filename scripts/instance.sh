@@ -43,11 +43,12 @@ readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
 # par gitlab-runner et sonarqube (compose/tls/gitlab/custom.yml, compose/tls/sonarqube/custom.yml), a sa
 # propre copie et sa propre empreinte : un autre changement de config ne recrée pas ces services, et
 # seul ca.pem est copié (jamais une clé de CA déposée à côté).
-readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning home)
+readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning home
+  oauth2-proxy)
 # Service qui lit chaque élément de CONFIG_MONTEE à son démarrage (à garder synchronisé) : en local, le
 # montage pointe directement sur config/ et `up` ne le recrée pas après une modification (appliquer_config)
 declare -rA SERVICE_CONFIG=([loki/loki-config.yaml]=loki [promtail/promtail-config.yaml]=promtail
-  [grafana/provisioning]=grafana [home]=home)
+  [grafana/provisioning]=grafana [home]=home [oauth2-proxy]=oauth2-proxy)
 readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.pem)
 readonly CA_CUSTOM=config/certs/ca/ca.pem
 # Verrou de l'instance, dans le volume du runner (même fichier dans scripts/bootstrap/gitlab.sh et
@@ -358,7 +359,7 @@ appliquer_config() {
   attendre_sante "${a_redemarrer[@]}"
 }
 
-# gitlab-runner et sonarqube lisent la CA à leur démarrage : un changement de CA leur est appliqué ici
+# gitlab-runner, sonarqube et oauth2-proxy lisent la CA à leur démarrage : un changement de CA leur est appliqué ici
 # (make deploy, make reload-certs), à eux seuls, avec arrêt gracieux du runner (compose/gitlab.yml).
 #   - distant : la CA a sa copie ca-<empreinte> (PLATFORM_CA_DIR) ; un conteneur qui monte une autre
 #     copie est recréé (`up` l'a déjà fait dans make deploy) ;
@@ -375,7 +376,7 @@ appliquer_ca() {
       if [[ -e "$f" ]] && (($(stat -c %Z "$f") > modif)); then modif="$(stat -c %Z "$f")"; fi
     done
   fi
-  for service in gitlab-runner sonarqube; do
+  for service in gitlab-runner sonarqube oauth2-proxy; do
     [[ "$services" == *" $service "* ]] || continue
     id="$("${compose[@]}" ps -q --status running "$service")"
     [[ -n "$id" ]] || continue
@@ -403,7 +404,7 @@ appliquer_ca() {
     fi
     echo "CA privée appliquée à ${a_appliquer[*]}."
   else
-    echo "CA privée inchangée pour gitlab-runner et sonarqube."
+    echo "CA privée inchangée pour gitlab-runner, sonarqube et oauth2-proxy."
   fi
   verifier_ca_runner
 }
@@ -457,6 +458,29 @@ recapitulatif() {
   else
     printf '  %-10s désactivé (SONARQUBE_MCP_ENABLED, TLS_MODE=%s)\n' SonarQube "${tls_mode:-none}"
   fi
+  etat_passerelle
+}
+
+# Mode de la passerelle d'authentification (docs/sso.md), lu dans la commande du processus principal du
+# conteneur oauth2-proxy (config/oauth2-proxy/lanceur.sh) : healthy dans les deux modes, un conteneur
+# sain peut cacher une passerelle qui refuse tout accès
+etat_passerelle() {
+  local commande
+  echo
+  if [[ -z "$("${compose[@]}" ps -q --status running oauth2-proxy 2>/dev/null)" ]]; then
+    echo "Passerelle d'authentification : arrêtée (services protégés indisponibles)."
+    return 0
+  fi
+  commande="$("${compose[@]}" exec -T oauth2-proxy cat /proc/1/cmdline 2>/dev/null | tr '\0' ' ')" || commande=""
+  case "$commande" in
+    *refus-non-initialisee*)
+      echo "Passerelle d'authentification : REFUS, application OAuth inconnue de GitLab (make bootstrap ENV=$env)." ;;
+    *refus-gitlab-indisponible*)
+      echo "Passerelle d'authentification : REFUS, GitLab injoignable ou en cours de démarrage." ;;
+    *skip-provider-button=true*)
+      echo "Passerelle d'authentification : active (connexion GitLab)." ;;
+    *) echo "Passerelle d'authentification : état indéterminé (démarrage en cours ?)." ;;
+  esac
 }
 
 # Arrêt d'une instance distante : confirmation avant tout contact avec le serveur. En terminal, le nom

@@ -55,12 +55,34 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.sonarqube.rule: Host(`${SONARQUBE_HOSTNAME:-sonarqube.localhost}`)
+      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
+      traefik.http.routers.sonarqube.middlewares: passerelle-auth@docker
       traefik.http.services.sonarqube.loadbalancer.server.port: "9000"
+      # Scanner de la CI (token SonarQube) : API sur le hostname public hors passerelle, seulement
+      # avec un en-tête Authorization Bearer ou Basic ; l'interface web (sans cet en-tête) reste
+      # derrière la passerelle. Formulaire de connexion exclu (pas de force brute hors passerelle).
+      # Comptes et tokens toujours vérifiés par SonarQube (docs/sso.md, « Exemptions »).
+      traefik.http.routers.sonarqube-api.rule: >-
+        Host(`${SONARQUBE_HOSTNAME:-sonarqube.localhost}`)
+        && (PathPrefix(`/api/`) || PathPrefix(`/batch/`)) && !PathPrefix(`/api/authentication/login`)
+        && HeaderRegexp(`Authorization`, `^(Bearer|Basic) .+`)
+      traefik.http.routers.sonarqube-api.priority: "900"
+      traefik.http.routers.sonarqube-api.service: sonarqube
+      traefik.http.routers.sonarqube-api.middlewares: sonarqube-sans-identite
+      # Routeurs hors passerelle (sonarqube-api, sonarqube-interne) : en-têtes d'identité reçus du client
+      # supprimés (même liste que le middleware passerelle-sans-identite de compose/proxy.yml)
+      traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-User: ""
+      traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Email: ""
+      traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Groups: ""
+      traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Preferred-Username: ""
+      traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Access-Token: ""
+      traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Redirect: ""
       # Routeur interne des jobs CI (entrypoint `interne` de compose/proxy.yml, sans TLS) : SONAR_HOST_URL
       # des jobs en hostname *.localhost ou avec une CA privée (docs/analyse-sonarqube.md)
       traefik.http.routers.sonarqube-interne.rule: Host(`sonarqube.devops-platform.internal`)
       traefik.http.routers.sonarqube-interne.entrypoints: interne
       traefik.http.routers.sonarqube-interne.service: sonarqube
+      traefik.http.routers.sonarqube-interne.middlewares: sonarqube-sans-identite
     ulimits:
       nofile:
         soft: 65536
@@ -105,6 +127,15 @@ services:
       traefik.enable: "true"
       traefik.http.routers.sonarqube-mcp.rule: Host(`${SONARQUBE_MCP_HOSTNAME:-sonarqube-mcp.localhost}`)
       traefik.http.services.sonarqube-mcp.loadbalancer.server.port: "8080"
+      # Hors passerelle d'authentification (jeton SonarQube du client) : en-têtes d'identité reçus du
+      # client supprimés (même liste que le middleware passerelle-sans-identite de compose/proxy.yml)
+      traefik.http.routers.sonarqube-mcp.middlewares: sonarqube-mcp-sans-identite
+      traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-User: ""
+      traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Email: ""
+      traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Groups: ""
+      traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Preferred-Username: ""
+      traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Access-Token: ""
+      traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Redirect: ""
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       interval: 10s
