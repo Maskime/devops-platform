@@ -89,6 +89,16 @@ sonarqube:
   racine du projet.
 - Image du scanner : dernière stable à la rédaction ; la version est épinglée par chaque projet.
 
+## Connexion automatique
+
+La [connexion automatique](sso.md#sonarqube) à SonarQube ne concerne que l'interface web. Le scanner
+n'est pas concerné : avec `SONAR_TOKEN` (en-tête `Authorization`), il joint SonarQube hors passerelle, par
+l'URL publique (routeur `sonarqube-api`) ou le nom interne (routeur `sonarqube-interne`), et Traefik
+supprime de ses requêtes tout en-tête d'identité `X-Auth-Request-*` : un job ne peut pas se faire passer
+pour un utilisateur. Il en va de même pour tout appel à l'API par jeton ou mot de passe. `make smoke`
+vérifie qu'un jeton invalide accompagné d'en-têtes d'identité forgés est refusé, et qu'aucun utilisateur
+n'est connecté par le routeur interne avec ces en-têtes.
+
 ## Limites
 
 - **Token partagé.** `SONAR_TOKEN` est un token d'analyse globale du compte technique
