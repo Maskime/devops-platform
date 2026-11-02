@@ -6,7 +6,9 @@
 #   - identifiant, secret client et secret de cookie (SSO_GITLAB_CLIENT_ID, SSO_GITLAB_CLIENT_SECRET et
 #     SSO_COOKIE_SECRET) présents, sinon commande à lancer pour les ajouter sans régénérer les autres
 #     secrets, et au format attendu ;
-#   - SSO_GITLAB_GROUPE : vide ou chemin de groupe GitLab.
+#   - SSO_GITLAB_GROUPE et SSO_GROUPE_ADMIN : vides ou chemins de groupe GitLab ;
+#   - GRAFANA_ADMIN_USER : format accepté par grafana-role (config/grafana/role/lanceur.sh), différent de
+#     root (compte GitLab toujours présent : homonyme refusé par grafana-role, docs/sso.md).
 # Valeur effective comme Compose (variable du shell prioritaire). Les secrets ne sont jamais affichés.
 # Code de sortie : 0 si tout est conforme, 1 sinon.
 set -euo pipefail
@@ -59,6 +61,27 @@ groupe="$(env_valeur "$env_file" SSO_GITLAB_GROUPE)"
 segment='[A-Za-z0-9_][A-Za-z0-9_.-]*'
 if [[ -n "$groupe" && ! "$groupe" =~ ^${segment}(/${segment})*$ ]]; then
   echo "SSO_GITLAB_GROUPE invalide : $groupe (chemin complet d'un groupe GitLab attendu, ex. : equipe/devops ; vide : pas de restriction)." >&2
+  erreurs=1
+fi
+
+# Groupe GitLab dont les membres sont administrateurs des applications (Grafana : docs/sso.md)
+groupe_admin="$(env_valeur "$env_file" SSO_GROUPE_ADMIN)"
+if [[ -n "$groupe_admin" && ! "$groupe_admin" =~ ^${segment}(/${segment})*$ ]]; then
+  echo "SSO_GROUPE_ADMIN invalide : $groupe_admin (chemin complet d'un groupe GitLab attendu, ex. : equipe/admins ; vide : aucun administrateur par les groupes)." >&2
+  erreurs=1
+fi
+
+# Compte admin local de Grafana : un utilisateur GitLab de même login serait relié à ce compte par
+# auth.proxy ; grafana-role le refuse, ce qui rendrait root (toujours présent dans GitLab) inutilisable
+admin_grafana="$(env_valeur "$env_file" GRAFANA_ADMIN_USER)"
+admin_grafana="${admin_grafana:-admin}"
+if [[ ! "$admin_grafana" =~ ^[A-Za-z0-9_][A-Za-z0-9_.@+-]*$ ]]; then
+  echo "GRAFANA_ADMIN_USER invalide : $admin_grafana (lettres sans accent, chiffres, . _ @ + -)." >&2
+  erreurs=1
+elif [[ "${admin_grafana,,}" == root ]]; then
+  echo "GRAFANA_ADMIN_USER invalide : root est le compte administrateur de GitLab ; l'utilisateur GitLab" >&2
+  echo "  homonyme du compte admin local de Grafana est refusé par la connexion automatique (docs/sso.md)." >&2
+  echo "  Corriger dans $env_file : GRAFANA_ADMIN_USER=admin" >&2
   erreurs=1
 fi
 
