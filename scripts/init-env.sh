@@ -24,9 +24,12 @@ source "$ROOT/scripts/lib/tls.sh"
 cles_mdp=(GITLAB_ROOT_PASSWORD SONARQUBE_DB_PASSWORD SONARQUBE_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD
   PORTAINER_ADMIN_PASSWORD)
 # Identifiants de la passerelle d'authentification (docs/sso.md) et leur générateur
-cles_sso=(SSO_GITLAB_CLIENT_ID SSO_GITLAB_CLIENT_SECRET SSO_COOKIE_SECRET)
+# et de l'application OAuth de Portainer
+cles_sso=(SSO_GITLAB_CLIENT_ID SSO_GITLAB_CLIENT_SECRET SSO_COOKIE_SECRET SSO_PORTAINER_CLIENT_ID
+  SSO_PORTAINER_CLIENT_SECRET)
 declare -A generateurs=([SSO_GITLAB_CLIENT_ID]=generer_identifiant_oauth
-  [SSO_GITLAB_CLIENT_SECRET]=generer_mot_de_passe [SSO_COOKIE_SECRET]=generer_cle_cookie)
+  [SSO_GITLAB_CLIENT_SECRET]=generer_mot_de_passe [SSO_COOKIE_SECRET]=generer_cle_cookie
+  [SSO_PORTAINER_CLIENT_ID]=generer_identifiant_oauth [SSO_PORTAINER_CLIENT_SECRET]=generer_mot_de_passe)
 for cle in "${cles_mdp[@]}"; do generateurs[$cle]=generer_mot_de_passe; done
 services=(home gitlab sonarqube sonarqube-mcp grafana portainer plantuml)
 declare -A noms=([home]="la page d'accueil" [gitlab]=GitLab [sonarqube]=SonarQube

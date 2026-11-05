@@ -30,7 +30,8 @@ non satisfaite, avec la cause et la commande à lancer.
 | 8 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
 | 9 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
 | 10 | Passerelle d'authentification ([détails](sso.md)) : passerelle active ; chaque service protégé, appelé sans session avec des en-têtes d'identité forgés, redirige vers l'autorisation GitLab avec une URI de retour sur son hostname ; session de root ouverte sur la page d'accueil (code d'autorisation créé par `gitlab-rails`, callback, cookie `Secure` en HTTPS seulement), accès authentifié et identité transmise ; session de root sur Grafana : connexion sans formulaire, compte `root` et rôle attendu (`Admin` si root est membre de `SSO_GROUPE_ADMIN`, `Viewer` sinon) malgré des en-têtes forgés (`X-Auth-Request-Role: Admin` compris) ; service `grafana-role` (groupes sur plusieurs en-têtes, groupe voisin, homonyme du compte admin local refusé) ; Grafana joint hors Traefik avec des en-têtes d'identité refusé ; en-têtes forgés sans effet sur l'API GitLab et l'API SonarQube exemptée | passerelle en mode refus (`make bootstrap`), routeur sans middleware, en-têtes d'identité acceptés, Grafana affichant son formulaire ou rôle inattendu, adresse source non restreinte |
-| 11 | Avec `NETTOYER=1` : projets GitLab et SonarQube supprimés | — |
+| 11 | Portainer ([détails](sso.md#portainer)) : connexion du compte `admin` local, réglages OAuth conformes (application, URIs, création automatique de compte désactivée), comptes limités aux membres de `SSO_GROUPE_ADMIN` ; utilisateur GitLab de test hors du groupe : Portainer échange son code d'autorisation (créé par `gitlab-rails`), lit son identité et refuse la connexion (403) ; si `SSO_GROUPE_ADMIN` est renseigné et `SSO_GITLAB_GROUPE` vide, sa session de passerelle est refusée sur le hostname de Portainer (403) | `make bootstrap` non lancé, groupe modifié depuis le dernier bootstrap, mot de passe admin Portainer différent |
+| 12 | Avec `NETTOYER=1` : projets GitLab et SonarQube et utilisateur de test supprimés | — |
 
 Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
 
@@ -90,12 +91,13 @@ hôte sans accès à `registry.gitlab.com`) renvoie à `GITLAB_RUNNER_HELPER_IMA
 | Projet SonarQube | `devops-platform-smoke` | privé |
 | Jeton utilisateur SonarQube (compte admin), application OAuth GitLab (scope `mcp`) | `devops-platform-smoke-mcp` | supprimés en fin d'étape 9, succès ou échec |
 | Conteneurs [sentinelles](#sentinelles) | label `devops-platform.smoke=<env>` | supprimés après le pipeline, succès ou échec |
+| Utilisateur GitLab hors de `SSO_GROUPE_ADMIN` (étape 11) | `devops-platform-smoke-portainer` | bloqué en fin d'étape, succès ou échec ; débloqué et réutilisé au smoke test suivant |
 | Compte Grafana de root (rôle synchronisé, voir [Grafana](sso.md#grafana)) | `root` | conservé : le même compte que lors d'une visite de root |
 
 - **Relance** : les projets sont réutilisés. Seuls les fichiers absents ou modifiés sont poussés ; s'ils
   sont tous à jour, un nouveau pipeline est lancé sur `main`. Un projet GitLab en attente de suppression
   est restauré.
-- **Nettoyage** : `NETTOYER=1` supprime les deux projets **après un succès**. En échec, ils sont
+- **Nettoyage** : `NETTOYER=1` supprime les deux projets et l'utilisateur de test **après un succès**. En échec, ils sont
   conservés pour le diagnostic et leurs URLs sont affichées : corriger, puis relancer avec
   `NETTOYER=1`. GitLab peut différer la suppression d'un projet (projet seulement marqué) : le smoke
   test demande alors la suppression définitive et attend qu'elle soit faite.
