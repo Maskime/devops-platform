@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Bootstrap GitLab d'une instance déployée : attente de GitLab, jeton d'accès personnel (PAT)
 # d'administration renouvelé, variables CI d'instance SonarQube (SONAR_HOST_URL, SONAR_TOKEN), runner
-# d'instance enregistré, application OAuth de la passerelle d'authentification et réglages d'accès
-# anonyme (docs/sso.md), accès au serveur MCP intégré autorisé. Aucune donnée de test créée ; idempotent.
+# d'instance enregistré, applications OAuth de la passerelle d'authentification et de Portainer, réglages
+# d'accès anonyme (docs/sso.md), accès au serveur MCP intégré autorisé, connexion de Portainer à GitLab et
+# comptes Portainer des membres de SSO_GROUPE_ADMIN. Aucune donnée de test créée ; idempotent.
 # Lancé par `make bootstrap ENV=<env>` (scripts/instance.sh bootstrap), qui positionne la cible Docker
 # (contexte SSH d'une instance distante). Documentation : docs/bootstrap.md.
 #
@@ -26,6 +27,8 @@ source "$ROOT/scripts/lib/tls.sh"
 source "$ROOT/scripts/lib/gitlab.sh"
 # shellcheck source=scripts/lib/sonarqube.sh
 source "$ROOT/scripts/lib/sonarqube.sh"
+# shellcheck source=scripts/lib/portainer.sh
+source "$ROOT/scripts/lib/portainer.sh"
 # shellcheck source=scripts/lib/verrou.sh
 source "$ROOT/scripts/lib/verrou.sh"
 
@@ -49,7 +52,7 @@ readonly CA_CONTENEUR=/etc/devops-platform/ca/ca.pem
 # Verrou de l'instance : dans le volume du runner, donc sur l'hôte de l'instance quel que soit le poste
 # (même fichier dans scripts/instance.sh et scripts/smoke.sh)
 readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock
-readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 ATTENTE_PASSERELLE=120
+readonly ATTENTE_GITLAB=900 ATTENTE_URL=300 ATTENTE_EN_LIGNE=120 ATTENTE_PASSERELLE=120 ATTENTE_PORTAINER=120
 # Application OAuth de la passerelle d'authentification (instance, sans propriétaire) et scopes
 # minimaux ; hostnames protégés, une URI de redirection chacun (défauts identiques aux labels
 # traefik.http.routers.<service>.rule des modules et à SSO_HOSTNAMES de compose/proxy.yml)
@@ -58,6 +61,9 @@ readonly SSO_SCOPES="openid profile email read_user"
 readonly SSO_HOSTNAMES=(HOME_HOSTNAME:home.localhost PLANTUML_HOSTNAME:plantuml.localhost
   GRAFANA_HOSTNAME:grafana.localhost SONARQUBE_HOSTNAME:sonarqube.localhost
   PORTAINER_HOSTNAME:portainer.localhost)
+# Application OAuth de Portainer (connexion à Portainer avec l'identité GitLab, docs/sso.md) : scope
+# PORTAINER_SCOPES (scripts/lib/portainer.sh), URI de redirection = racine du hostname de Portainer
+readonly PORTAINER_APP_NOM="devops-platform-portainer"
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -576,14 +582,16 @@ verrou_tenu
 
 # --- 5. Passerelle d'authentification --------------------------------------------------------------
 
-etape "Passerelle d'authentification (application OAuth $SSO_APP_NOM, docs/sso.md)"
+etape "Passerelle d'authentification (applications OAuth $SSO_APP_NOM et $PORTAINER_APP_NOM, docs/sso.md)"
 verrou_tenu
 # Identifiants lus dans le fichier uniquement (format contrôlé par make check-env), transmis à
 # gitlab-rails par l'environnement (-e sans valeur) : jamais en argument de processus
 sso_client_id="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_ID)"
 sso_client_secret="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_SECRET)"
-[[ -n "$sso_client_id" && -n "$sso_client_secret" ]] \
-  || erreur "SSO_GITLAB_CLIENT_ID ou SSO_GITLAB_CLIENT_SECRET absent de $env_file : make init ENV=$env COMPLETER=1"
+portainer_client_id="$(env_valeur_fichier "$env_file" SSO_PORTAINER_CLIENT_ID)"
+portainer_client_secret="$(env_valeur_fichier "$env_file" SSO_PORTAINER_CLIENT_SECRET)"
+[[ -n "$sso_client_id" && -n "$sso_client_secret" && -n "$portainer_client_id" && -n "$portainer_client_secret" ]] \
+  || erreur "SSO_GITLAB_CLIENT_ID, SSO_GITLAB_CLIENT_SECRET, SSO_PORTAINER_CLIENT_ID ou SSO_PORTAINER_CLIENT_SECRET absent de $env_file : make init ENV=$env COMPLETER=1"
 # URIs de redirection : <schéma>://<hostname>/oauth2/callback, schéma du TLS_MODE (celui que la passerelle
 # reçoit de Traefik dans X-Forwarded-Proto)
 sso_uris=()
@@ -591,42 +599,48 @@ for paire in "${SSO_HOSTNAMES[@]}"; do
   h="$(env_valeur "$env_file" "${paire%%:*}")"
   sso_uris+=("$(schema_tls "$tls_mode")://${h:-${paire#*:}}/oauth2/callback")
 done
+# Portainer : racine de son hostname (Portainer y reçoit le code d'autorisation), même schéma
+portainer_hostname="$(env_valeur "$env_file" PORTAINER_HOSTNAME)"
+portainer_uri="$(schema_tls "$tls_mode")://${portainer_hostname:-portainer.localhost}/"
 
-# Application créée ou mise à jour (uid = identifiant de l'instance, secret stocké selon la stratégie de
-# GitLab : haché), confidentielle et de confiance (pas d'écran de consentement). Doublons sans
-# propriétaire du même nom supprimés ; une application d'un utilisateur portant ce nom est ignorée.
+# Applications (passerelle : SSO, Portainer : PORTAINER) créées ou mises à jour (uid = identifiant de
+# l'instance, secret stocké selon la stratégie de GitLab : haché), confidentielles et de confiance (pas
+# d'écran de consentement). Doublons sans propriétaire du même nom supprimés ; une application d'un
+# utilisateur portant ce nom est ignorée. Marqueurs préfixés par la clé de l'application.
 # Réglages d'accès anonyme : inscription libre désactivée, niveau de visibilité public restreint.
 # Seuls des marqueurs sont affichés.
 # shellcheck disable=SC2016 # code Ruby
 readonly CODE_SSO='
-nom, uid, secret = ENV.fetch("SSO_NOM"), ENV.fetch("SSO_CLIENT_ID"), ENV.fetch("SSO_CLIENT_SECRET")
-uris, scopes = ENV.fetch("SSO_URIS").split, ENV.fetch("SSO_SCOPES").split
 org = Organizations::Organization.default_organization.id
-app = Authn::OauthApplication.find_by(uid: uid)
-if app && (app.name != nom || app.owner_id)
-  abort("Identifiant SSO_GITLAB_CLIENT_ID déjà utilisé par l application « #{app.name} » (id #{app.id}) : à régénérer.")
+%w[SSO PORTAINER].each do |cle|
+  nom, uid, secret = ENV.fetch("#{cle}_NOM"), ENV.fetch("#{cle}_CLIENT_ID"), ENV.fetch("#{cle}_CLIENT_SECRET")
+  uris, scopes = ENV.fetch("#{cle}_URIS").split, ENV.fetch("#{cle}_SCOPES").split
+  app = Authn::OauthApplication.find_by(uid: uid)
+  if app && (app.name != nom || app.owner_id)
+    abort("Identifiant de l application #{nom} déjà utilisé par l application « #{app.name} » (id #{app.id}) : à régénérer.")
+  end
+  app ||= Authn::OauthApplication.where(name: nom, owner_id: nil).order(:id).first
+  etat = app ? "INCHANGEE" : "CREEE"
+  app ||= Authn::OauthApplication.new(name: nom, organization_id: org)
+  attendus = { uid: uid, redirect_uri: uris.join("\n"), scopes: scopes.join(" "), confidential: true, trusted: true }
+  conforme = app.persisted? &&
+    app.uid == uid && app.redirect_uri.to_s.split.sort == uris.sort &&
+    app.scopes.to_a.map(&:to_s).sort == scopes.sort && app.confidential && app.trusted &&
+    app.secret_matches?(secret)
+  unless conforme
+    app.assign_attributes(attendus)
+    Doorkeeper.config.application_secret_strategy.store_secret(app, :secret, secret) unless app.persisted? && app.secret_matches?(secret)
+    app.save!
+    etat = "MAJ" if etat == "INCHANGEE"
+  end
+  Authn::OauthApplication.where(name: nom, owner_id: nil).where.not(id: app.id).find_each do |a|
+    Doorkeeper::AccessToken.where(application_id: a.id).delete_all
+    a.destroy!
+    puts "#{cle}_SUPPRIMEE=#{a.id}"
+  end
+  puts "#{cle}_APP=#{etat}"
+  puts "#{cle}_ID=#{app.id}"
 end
-app ||= Authn::OauthApplication.where(name: nom, owner_id: nil).order(:id).first
-etat = app ? "INCHANGEE" : "CREEE"
-app ||= Authn::OauthApplication.new(name: nom, organization_id: org)
-attendus = { uid: uid, redirect_uri: uris.join("\n"), scopes: scopes.join(" "), confidential: true, trusted: true }
-conforme = app.persisted? &&
-  app.uid == uid && app.redirect_uri.to_s.split.sort == uris.sort &&
-  app.scopes.to_a.map(&:to_s).sort == scopes.sort && app.confidential && app.trusted &&
-  app.secret_matches?(secret)
-unless conforme
-  app.assign_attributes(attendus)
-  Doorkeeper.config.application_secret_strategy.store_secret(app, :secret, secret) unless app.persisted? && app.secret_matches?(secret)
-  app.save!
-  etat = "MAJ" if etat == "INCHANGEE"
-end
-Authn::OauthApplication.where(name: nom, owner_id: nil).where.not(id: app.id).find_each do |a|
-  Doorkeeper::AccessToken.where(application_id: a.id).delete_all
-  a.destroy!
-  puts "SUPPRIMEE=#{a.id}"
-end
-puts "APP=#{etat}"
-puts "ID=#{app.id}"
 s = ApplicationSetting.current_without_cache or abort("Réglages de l instance introuvables.")
 maj = {}
 maj[:signup_enabled] = false if s.signup_enabled
@@ -637,27 +651,37 @@ s.update!(maj) unless maj.empty?
 puts "REGLAGES=#{maj.empty? ? "" : maj.keys.join(",")}"
 '
 erreurs_sso="$(mktemp)"
-if ! sortie_sso="$(SSO_CLIENT_ID="$sso_client_id" SSO_CLIENT_SECRET="$sso_client_secret" dc exec -T \
+if ! sortie_sso="$(SSO_CLIENT_ID="$sso_client_id" SSO_CLIENT_SECRET="$sso_client_secret" \
+    PORTAINER_CLIENT_ID="$portainer_client_id" PORTAINER_CLIENT_SECRET="$portainer_client_secret" dc exec -T \
     -e SSO_CLIENT_ID -e SSO_CLIENT_SECRET -e SSO_NOM="$SSO_APP_NOM" -e SSO_URIS="${sso_uris[*]}" \
-    -e SSO_SCOPES="$SSO_SCOPES" gitlab gitlab-rails runner "$CODE_SSO" 2> "$erreurs_sso")"; then
+    -e SSO_SCOPES="$SSO_SCOPES" -e PORTAINER_CLIENT_ID -e PORTAINER_CLIENT_SECRET \
+    -e PORTAINER_NOM="$PORTAINER_APP_NOM" -e PORTAINER_URIS="$portainer_uri" -e PORTAINER_SCOPES="$PORTAINER_SCOPES" \
+    gitlab gitlab-rails runner "$CODE_SSO" 2> "$erreurs_sso")"; then
   cat "$erreurs_sso" >&2
   rm -f "$erreurs_sso"
   erreur "application OAuth de la passerelle : création ou mise à jour impossible (voir ci-dessus)"
 fi
 rm -f "$erreurs_sso"
-unset sso_client_secret
-etat_sso="$(sed -n 's/^APP=//p' <<<"$sortie_sso" | tail -n1)"
+unset sso_client_secret portainer_client_secret
 declare -A libelles_sso=([CREEE]=créée [MAJ]="mise à jour" [INCHANGEE]="déjà conforme")
-case "$etat_sso" in
-  CREEE) echo "    Application OAuth créée (id=$(sed -n 's/^ID=//p' <<<"$sortie_sso"))." ;;
-  MAJ) echo "    Application OAuth mise à jour (id=$(sed -n 's/^ID=//p' <<<"$sortie_sso"))." ;;
-  INCHANGEE) echo "    Application OAuth déjà conforme (id=$(sed -n 's/^ID=//p' <<<"$sortie_sso")) : rien à faire." ;;
-  *) erreur "réponse inattendue de gitlab-rails pour l'application OAuth" ;;
-esac
-while IFS= read -r id; do
-  echo "    Ancienne application $SSO_APP_NOM supprimée (id=$id)."
-done < <(sed -n 's/^SUPPRIMEE=//p' <<<"$sortie_sso")
-printf '    URI de redirection : %s\n' "${sso_uris[@]}"
+declare -A noms_apps=([SSO]="$SSO_APP_NOM" [PORTAINER]="$PORTAINER_APP_NOM")
+declare -A etats_apps=()
+for cle_app in SSO PORTAINER; do
+  etat_app="$(sed -n "s/^${cle_app}_APP=//p" <<<"$sortie_sso" | tail -n1)"
+  id_app="$(sed -n "s/^${cle_app}_ID=//p" <<<"$sortie_sso" | tail -n1)"
+  case "$etat_app" in
+    CREEE | MAJ) echo "    Application OAuth ${noms_apps[$cle_app]} ${libelles_sso[$etat_app]} (id=$id_app)." ;;
+    INCHANGEE) echo "    Application OAuth ${noms_apps[$cle_app]} déjà conforme (id=$id_app) : rien à faire." ;;
+    *) erreur "réponse inattendue de gitlab-rails pour l'application OAuth ${noms_apps[$cle_app]}" ;;
+  esac
+  etats_apps[$cle_app]="$etat_app"
+  while IFS= read -r id; do
+    echo "    Ancienne application ${noms_apps[$cle_app]} supprimée (id=$id)."
+  done < <(sed -n "s/^${cle_app}_SUPPRIMEE=//p" <<<"$sortie_sso")
+done
+etat_sso="${etats_apps[SSO]}"
+printf '    URI de redirection (passerelle) : %s\n' "${sso_uris[@]}"
+echo "    URI de redirection (Portainer) : $portainer_uri"
 reglages="$(sed -n 's/^REGLAGES=//p' <<<"$sortie_sso" | tail -n1)"
 if [[ -n "$reglages" ]]; then
   echo "    Réglages d'accès anonyme appliqués : $reglages (inscription libre désactivée, visibilité publique restreinte)."
@@ -746,6 +770,52 @@ if [[ "$url" != https://* ]]; then
 fi
 verrou_tenu
 
+# --- 7. Portainer ------------------------------------------------------------------------------------
+
+# Dernière étape : un mot de passe admin Portainer obsolète n'empêche aucune autre configuration
+etape "Portainer : connexion avec l'identité GitLab (docs/sso.md, « Portainer »)"
+verrou_tenu
+groupe_admin="$(env_valeur "$env_file" SSO_GROUPE_ADMIN)"
+etat_portainer="service portainer absent"
+if [[ " $(dc config --services | paste -sd ' ' -) " == *" portainer "* ]]; then
+  [[ -n "$(dc ps -q --status running portainer)" ]] \
+    || erreur "service portainer arrêté : démarrer l'instance (make deploy ENV=$env)"
+  attendre "Portainer" "$ATTENTE_PORTAINER" portainer_pret \
+    || erreur "API de Portainer injoignable depuis gitlab après $ATTENTE_PORTAINER s (docker compose logs portainer)"
+  # Secret client sur l'entrée standard, après le PAT et le mot de passe admin (scripts/lib/portainer.sh)
+  stdin_extra=("$(env_valeur_fichier "$env_file" SSO_PORTAINER_CLIENT_SECRET)")
+  if ! sortie_portainer="$(portainer_api "$CODE_PORTAINER_CONFIG" "$groupe_admin" "$url/oauth/authorize" \
+      "$portainer_uri" "$(env_valeur_fichier "$env_file" SSO_PORTAINER_CLIENT_ID)")"; then
+    stdin_extra=()
+    erreur "configuration de Portainer impossible (voir ci-dessus)"
+  fi
+  stdin_extra=()
+  echo "    Connexion OAuth GitLab configurée (application $PORTAINER_APP_NOM, retour $portainer_uri)."
+  echo "    Formulaire local : compte $PORTAINER_ADMIN seul (accès de secours, docs/sso.md)."
+  [[ -z "$(sed -n 's/^EQUIPE=//p' <<<"$sortie_portainer")" ]] \
+    || echo "    Équipe $PORTAINER_EQUIPE créée (comptes gérés par make bootstrap)."
+  while IFS= read -r nom; do echo "    Compte administrateur créé : $nom."; done \
+    < <(sed -n 's/^CREE=//p' <<<"$sortie_portainer")
+  while IFS= read -r nom; do echo "    Compte existant pris en charge (administrateur, équipe $PORTAINER_EQUIPE) : $nom."; done \
+    < <(sed -n 's/^ADOPTE=//p' <<<"$sortie_portainer")
+  while IFS= read -r nom; do echo "    Compte supprimé (plus membre de ${groupe_admin:-SSO_GROUPE_ADMIN}) : $nom."; done \
+    < <(sed -n 's/^SUPPRIME=//p' <<<"$sortie_portainer")
+  comptes="$(sed -n 's/^COMPTES=//p' <<<"$sortie_portainer" | tail -n1)"
+  if [[ -z "$groupe_admin" ]]; then
+    {
+      echo "Attention : SSO_GROUPE_ADMIN vide : aucun utilisateur GitLab n'a de compte Portainer (seul le"
+      echo "  compte admin local se connecte). Renseigner le groupe des administrateurs : docs/sso.md."
+    } >&2
+    etat_portainer="OAuth GitLab, aucun compte (SSO_GROUPE_ADMIN vide)"
+  else
+    echo "    Comptes GitLab admis : ${comptes:-0} membre(s) de $groupe_admin."
+    etat_portainer="OAuth GitLab, ${comptes:-0} compte(s) pour $groupe_admin"
+  fi
+else
+  echo "    Service portainer absent de l'instance : étape ignorée."
+fi
+verrou_tenu
+
 echo
 echo "Bootstrap GitLab terminé ($env) :"
 echo "  Runner     : id=$courant, « $description », jobs sur le réseau $reseau (image $RUNNER_IMAGE)"
@@ -758,3 +828,4 @@ echo "  Jeton root : $PAT_NOM, scopes api et admin_mode, expire le $expiration (
 echo "  Passerelle : application OAuth $SSO_APP_NOM (${libelles_sso[$etat_sso]}), passerelle $etat_passerelle"
 echo "  Runners    : $url/admin/runners"
 echo "  MCP        : $url/api/v4/mcp (accès ${etat_mcp:-?})"
+echo "  Portainer  : $etat_portainer"

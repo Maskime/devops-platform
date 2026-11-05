@@ -3,10 +3,11 @@
 # lancé par make check-env (donc make deploy, bootstrap…) avant `docker compose config`.
 #
 # Usage : scripts/check-env-sso.sh envs/<env>.env
-#   - identifiant, secret client et secret de cookie (SSO_GITLAB_CLIENT_ID, SSO_GITLAB_CLIENT_SECRET et
-#     SSO_COOKIE_SECRET) présents, sinon commande à lancer pour les ajouter sans régénérer les autres
-#     secrets, et au format attendu ;
-#   - SSO_GITLAB_GROUPE : vide ou chemin de groupe GitLab.
+#   - identifiants, secrets clients et secret de cookie (SSO_GITLAB_CLIENT_ID, SSO_GITLAB_CLIENT_SECRET,
+#     SSO_COOKIE_SECRET, SSO_PORTAINER_CLIENT_ID et SSO_PORTAINER_CLIENT_SECRET) présents, sinon commande
+#     à lancer pour les ajouter sans régénérer les autres secrets, et au format attendu ;
+#   - identifiants des deux applications OAuth distincts (une application GitLab par identifiant) ;
+#   - SSO_GITLAB_GROUPE et SSO_GROUPE_ADMIN : vides ou chemins de groupe GitLab.
 # Valeur effective comme Compose (variable du shell prioritaire). Les secrets ne sont jamais affichés.
 # Code de sortie : 0 si tout est conforme, 1 sinon.
 set -euo pipefail
@@ -27,13 +28,18 @@ declare -A motifs=(
   [SSO_GITLAB_CLIENT_ID]='^[0-9a-f]{64}$'
   [SSO_GITLAB_CLIENT_SECRET]='^[A-Za-z0-9._,-]{16,128}$'
   [SSO_COOKIE_SECRET]='^([A-Za-z0-9]{16}|[A-Za-z0-9]{24}|[A-Za-z0-9]{32})$'
+  [SSO_PORTAINER_CLIENT_ID]='^[0-9a-f]{64}$'
+  [SSO_PORTAINER_CLIENT_SECRET]='^[A-Za-z0-9._,-]{16,128}$'
 )
 declare -A formats=(
   [SSO_GITLAB_CLIENT_ID]="64 caractères hexadécimaux minuscules"
   [SSO_GITLAB_CLIENT_SECRET]="16 à 128 caractères parmi lettres sans accent, chiffres, . _ , -"
   [SSO_COOKIE_SECRET]="exactement 16, 24 ou 32 caractères alphanumériques"
+  [SSO_PORTAINER_CLIENT_ID]="64 caractères hexadécimaux minuscules"
+  [SSO_PORTAINER_CLIENT_SECRET]="16 à 128 caractères parmi lettres sans accent, chiffres, . _ , -"
 )
-cles=(SSO_GITLAB_CLIENT_ID SSO_GITLAB_CLIENT_SECRET SSO_COOKIE_SECRET)
+cles=(SSO_GITLAB_CLIENT_ID SSO_GITLAB_CLIENT_SECRET SSO_COOKIE_SECRET SSO_PORTAINER_CLIENT_ID
+  SSO_PORTAINER_CLIENT_SECRET)
 
 erreurs=0
 absentes=()
@@ -55,11 +61,22 @@ if ((${#absentes[@]})); then
   erreurs=1
 fi
 
-groupe="$(env_valeur "$env_file" SSO_GITLAB_GROUPE)"
-segment='[A-Za-z0-9_][A-Za-z0-9_.-]*'
-if [[ -n "$groupe" && ! "$groupe" =~ ^${segment}(/${segment})*$ ]]; then
-  echo "SSO_GITLAB_GROUPE invalide : $groupe (chemin complet d'un groupe GitLab attendu, ex. : equipe/devops ; vide : pas de restriction)." >&2
+id_sso="$(env_valeur "$env_file" SSO_GITLAB_CLIENT_ID)"
+if [[ -n "$id_sso" && "$id_sso" == "$(env_valeur "$env_file" SSO_PORTAINER_CLIENT_ID)" ]]; then
+  echo "SSO_PORTAINER_CLIENT_ID identique à SSO_GITLAB_CLIENT_ID dans $env_file : deux applications OAuth distinctes attendues (en régénérer un : le supprimer, puis make init ENV=$env COMPLETER=1)." >&2
   erreurs=1
 fi
+
+# Chemins de groupe : segments GitLab séparés par « / » (sans caractère à encoder dans l'URL de la
+# passerelle, compose/tools.yml)
+segment='[A-Za-z0-9_][A-Za-z0-9_.-]*'
+declare -A vide_signifie=([SSO_GITLAB_GROUPE]="pas de restriction" [SSO_GROUPE_ADMIN]="aucun compte Portainer par GitLab")
+for cle in SSO_GITLAB_GROUPE SSO_GROUPE_ADMIN; do
+  groupe="$(env_valeur "$env_file" "$cle")"
+  if [[ -n "$groupe" && ! "$groupe" =~ ^${segment}(/${segment})*$ ]]; then
+    echo "$cle invalide : $groupe (chemin complet d'un groupe GitLab attendu, ex. : equipe/devops ; vide : ${vide_signifie[$cle]})." >&2
+    erreurs=1
+  fi
+done
 
 exit "$erreurs"
