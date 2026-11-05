@@ -90,6 +90,7 @@ services:
       traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Preferred-Username: ""
       traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Access-Token: ""
       traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Redirect: ""
+      traefik.http.middlewares.gitlab-sans-identite.headers.customrequestheaders.X-Auth-Request-Role: ""
       traefik.http.services.gitlab.loadbalancer.server.port: "80"
       # Routeur interne des jobs CI (entrypoint `interne` de compose/proxy.yml, sans TLS) : clone des
       # jobs quand le hostname public est en *.localhost (docs/gitlab-proxy.md)

@@ -9,6 +9,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Connexion automatique à Grafana avec l'identité GitLab (`auth.proxy`) : compte créé à la première
+  visite, rôle `Admin` pour les membres du groupe `SSO_GROUPE_ADMIN`, `Viewer` pour les autres ;
+  identité acceptée de la seule adresse de Traefik sur le réseau dédié `grafana-proxy`
+  (`GRAFANA_PROXY_SUBNET`, `GRAFANA_PROXY_IP_TRAEFIK`) ; `make smoke` vérifie la connexion et le rôle
+  (`docs/sso.md`, « Grafana »).
 - Portainer : connexion avec l'identité GitLab (OAuth, seconde application GitLab de confiance créée par
   `make bootstrap`), réservée aux membres du groupe `SSO_GROUPE_ADMIN` : filtre de groupe à la passerelle
   et comptes Portainer administrateurs synchronisés par `make bootstrap` ; le compte `admin` local reste
@@ -47,6 +52,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   4. `make smoke ENV=<env>`.
 
   Les appels par jeton à l'API de Grafana ou de Portainer passent désormais par la passerelle.
+- Connexion automatique à Grafana (`docs/sso.md`, « Grafana ») : facultatif, `SSO_GROUPE_ADMIN` dans
+  `envs/<env>.env` ; `GRAFANA_ADMIN_USER=root` est refusé (homonyme du compte administrateur GitLab) ;
+  puis `make deploy ENV=<env>` (réseau `devops-platform_grafana-proxy` créé, Traefik et Grafana
+  recréés). Les comptes Grafana existants de même login qu'un utilisateur GitLab lui sont reliés.
 - Projets co-localisés (conteneurs d'autres projets sur l'hôte de l'instance) :
   1. `make deploy ENV=<env>` : crée le réseau des consommateurs et recrée Traefik (brève coupure) ;
   2. `make bootstrap ENV=<env>`, puis recopier `outputs/<env>.env` sur le serveur ;
