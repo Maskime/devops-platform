@@ -6,8 +6,8 @@
 # jobs (conteneurs sentinelles), attend que le pipeline passe au vert et que l'analyse du commit
 # apparaisse dans SonarQube, puis interroge les serveurs MCP (SonarQube s'il est actif, GitLab) avec des
 # jetons éphémères, vérifie la passerelle d'authentification (redirection vers GitLab sans session,
-# accès avec une session de root, connexion automatique à Grafana avec le rôle attendu, en-têtes
-# d'identité forgés sans effet) et la connexion de Portainer à GitLab (réglages OAuth, comptes limités à
+# accès avec une session de root, connexion automatique à Grafana avec le rôle attendu et à SonarQube
+# avec les groupes attendus, en-têtes d'identité forgés sans effet) et la connexion de Portainer à GitLab (réglages OAuth, comptes limités à
 # SSO_GROUPE_ADMIN, refus d'un utilisateur de test hors du groupe). NETTOYER=1 : projets de test GitLab
 # et SonarQube et utilisateur de test supprimés après un
 # succès.
@@ -77,6 +77,11 @@ readonly SSO_JAR=/tmp/devops-platform-smoke-sso.jar
 readonly PORTAINER_TEST=devops-platform-smoke-portainer
 readonly SSO_FORGES=("X-Auth-Request-User: root" "X-Auth-Request-Email: admin@example.com"
   "X-Auth-Request-Groups: admins" "X-Auth-Request-Preferred-Username: root" "X-Auth-Request-Role: Admin")
+# En-têtes forgés propres à SonarQube : compte admin local et groupe de ses administrateurs
+readonly SSO_FORGES_SONAR=("X-Auth-Request-User: admin" "X-Auth-Request-Email: admin@example.com"
+  "X-Auth-Request-Groups: sonar-administrators" "X-Auth-Request-Preferred-Username: admin")
+# Routeur interne de SonarQube (entrypoint interne de Traefik, labels de compose/sonarqube.yml)
+readonly SONAR_INTERNE_HOTE=sonarqube.devops-platform.internal SONAR_INTERNE_PORT=8000
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -822,6 +827,45 @@ rep="$(requete "$h_grafana" "/api/user/orgs" "cookie = $(cfg "$SSO_JAR")" "${for
   || erreur "$h_grafana/api/user/orgs : rôle $role_attendu attendu pour root (HTTP $(code_de "$rep") : $(tail -n2 <<<"$rep" | head -n1))"
 echo "    $h_grafana : root connecté sans formulaire (compte root, $email_root), rôle $role_attendu" \
   "(SSO_GROUPE_ADMIN ${groupe_admin:-vide}), en-têtes forgés sans effet."
+
+# d. SonarQube (docs/sso.md, « SonarQube ») : session de root sur son hostname, connexion automatique
+#    par le relais sonarqube-sso, compte SSO de root (créé à la première visite) malgré des en-têtes
+#    forgés (compte admin local, groupe sonar-administrators) ; groupes réécrits par le relais :
+#    sonar-users, et sonar-administrators si et seulement si root est membre de SSO_GROUPE_ADMIN
+#    (groupes transmis par la passerelle, comme pour Grafana)
+sonar_hote="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
+sonar_hote="${sonar_hote:-sonarqube.localhost}"
+forges_sonar=()
+for f in "${SSO_FORGES_SONAR[@]}"; do forges_sonar+=("header = $(cfg "$f")"); done
+if [[ "$services" == *" sonarqube-sso "* ]]; then
+  [[ "$(dc ps --format '{{.Health}}' sonarqube-sso 2> /dev/null)" == healthy ]] \
+    || erreur "relais sonarqube-sso arrêté ou non healthy (make deploy ENV=$env)"
+  ouvrir_session "$sonar_hote"
+  rep="$(requete "$sonar_hote" "/api/users/current" "cookie = $(cfg "$SSO_JAR")" "${forges_sonar[@]}")"
+  [[ "$(code_de "$rep")" == 200 && "$rep" == *'"isLoggedIn":true'* ]] \
+    || erreur "$sonar_hote/api/users/current : utilisateur connecté attendu (HTTP $(code_de "$rep")) : connexion automatique inactive"
+  [[ "$rep" == *'"login":"root"'* ]] \
+    || erreur "$sonar_hote : connecté sous un autre compte que root (en-têtes d'identité forgés acceptés ?)"
+  [[ "$rep" == *'"local":false'* && "$rep" == *'"externalProvider":"sonarqube"'* ]] \
+    || erreur "$sonar_hote : compte root attendu non local, créé par la connexion automatique (fournisseur sonarqube)"
+  [[ -z "$email_root" || "$rep" == *"\"email\":\"$email_root\""* ]] \
+    || erreur "$sonar_hote : e-mail de root ($email_root) non repris de GitLab"
+  [[ "$rep" == *'"sonar-users"'* ]] \
+    || erreur "$sonar_hote : root absent du groupe sonar-users (en-tête des groupes non réécrit par le relais ?)"
+  if [[ "$role_attendu" == Admin ]]; then
+    [[ "$rep" == *'"sonar-administrators"'* ]] \
+      || erreur "$sonar_hote : root, membre de SSO_GROUPE_ADMIN, absent du groupe sonar-administrators"
+    statut_admin="membre de sonar-administrators"
+  else
+    [[ "$rep" != *'"sonar-administrators"'* ]] \
+      || erreur "$sonar_hote : root, hors de SSO_GROUPE_ADMIN, membre de sonar-administrators (groupe forgé accepté ?)"
+    statut_admin="hors de sonar-administrators"
+  fi
+  echo "    $sonar_hote : root connecté sans formulaire (compte SSO, $email_root), $statut_admin" \
+    "(SSO_GROUPE_ADMIN ${groupe_admin:-vide}), en-têtes forgés sans effet."
+else
+  echo "Attention : relais sonarqube-sso absent de l'instance : connexion automatique à SonarQube non vérifiée." >&2
+fi
 dc exec -T gitlab-runner rm -f "$SSO_JAR" > /dev/null 2>&1 || true
 sso_jar=0
 
@@ -870,19 +914,29 @@ dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_
   gitlab gitlab-rails runner "$CODE_JETONS" > /dev/null 2>&1 \
   || echo "Attention : jetons OAuth de test de root non révoqués (Admin > Applications)." >&2
 
-# d. Usurpation sur les routeurs hors passerelle : en-têtes d'identité forgés sans effet
+# e. Usurpation sur les routeurs hors passerelle : en-têtes d'identité forgés sans effet
 rep="$(requete "$gitlab_hote" "/api/v4/user" "${forges[@]}")"
 [[ "$(code_de "$rep")" == 401 ]] \
   || erreur "GitLab /api/v4/user avec en-têtes d'identité forgés : HTTP $(code_de "$rep") (attendu : 401)"
 echo "    $gitlab_hote : en-têtes d'identité forgés sans effet (API GitLab : 401)."
 if [[ "$services" == *" sonarqube "* ]]; then
-  sonar_hote="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
-  sonar_hote="${sonar_hote:-sonarqube.localhost}"
   rep="$(requete "$sonar_hote" "/api/authentication/validate" "${forges[@]}" \
     "header = $(cfg "Authorization: Bearer squ_jeton_factice_du_smoke_test")")"
   [[ "$(code_de "$rep")" == 200 && "$rep" == *'"valid":false'* ]] \
     || erreur "SonarQube /api (hors passerelle) avec en-têtes d'identité forgés : HTTP $(code_de "$rep"), session non refusée"
   echo "    $sonar_hote : API hors passerelle (jeton), en-têtes d'identité forgés sans effet (valid:false)."
+  # Routeur interne des jobs (entrypoint interne de Traefik, sans passerelle) : sans jeton, en-têtes
+  # d'identité forgés → non connecté
+  rep="$(requete_directe "http://$ip_traefik:$SONAR_INTERNE_PORT/api/users/current" "Host: $SONAR_INTERNE_HOTE" \
+    "${SSO_FORGES_SONAR[@]}")"
+  [[ "$(code_de "$rep")" == 401 || ("$(code_de "$rep")" == 200 && "$rep" == *'"isLoggedIn":false'*) ]] \
+    || erreur "SonarQube, routeur interne ($SONAR_INTERNE_HOTE) avec en-têtes d'identité forgés : HTTP $(code_de "$rep"), utilisateur connecté"
+  echo "    $SONAR_INTERNE_HOTE : routeur interne, en-têtes d'identité forgés sans effet (non connecté)."
+  # Compte admin local : toujours accepté par l'API publique (authentification Basic, hors passerelle)
+  rep="$(requete "$sonar_hote" "/api/authentication/validate" "user = $(cfg "$admin")")"
+  [[ "$(code_de "$rep")" == 200 && "$rep" == *'"valid":true'* ]] \
+    || erreur "SonarQube : compte admin local refusé sur l'API publique (HTTP $(code_de "$rep"))"
+  echo "    $sonar_hote : compte admin local accepté par l'API publique (Basic, hors passerelle)."
 fi
 
 # --- 11. Portainer --------------------------------------------------------------------------------

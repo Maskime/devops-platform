@@ -49,14 +49,25 @@ services:
     # URL publique (liens des notifications, décoration des merge requests). Passée en option -D :
     # la variable d'environnement SONAR_CORE_SERVERBASEURL serait lue en minuscules
     # (sonar.core.serverbaseurl) et ignorée.
+    # Connexion automatique par les en-têtes de la passerelle (SSO par en-têtes HTTP, docs/sso.md,
+    # « SonarQube ») : login et e-mail GitLab, groupes réécrits par le relais sonarqube-sso. Noms des
+    # en-têtes en camelCase : options -D obligatoires. Tous les en-têtes lus sont des X-Auth-Request-*,
+    # remplacés par la passerelle sur le routeur protégé et supprimés sur les autres routeurs
+    # (sonarqube-sans-identite) ; nameHeader sur le login (le nom complet n'est pas transmis), jamais sur
+    # son défaut X-Forwarded-Name, que Traefik laisse passer. Requêtes sans X-Auth-Request-User (scanner,
+    # API par jeton, bootstrap, serveur MCP, accès de secours) : authentification habituelle de SonarQube.
     command:
       - -Dsonar.core.serverBaseURL=${SONARQUBE_EXTERNAL_URL:-http://${SONARQUBE_HOSTNAME:-sonarqube.localhost}}
+      - -Dsonar.web.sso.enable=true
+      - -Dsonar.web.sso.loginHeader=X-Auth-Request-User
+      - -Dsonar.web.sso.nameHeader=X-Auth-Request-User
+      - -Dsonar.web.sso.emailHeader=X-Auth-Request-Email
+      - -Dsonar.web.sso.groupsHeader=X-Auth-Request-Groups
+      - -Dsonar.web.sso.refreshIntervalInMinutes=5
     # Aucun port publié : servi par Traefik (compose/proxy.yml) sur SONARQUBE_HOSTNAME
     labels:
       traefik.enable: "true"
-      traefik.http.routers.sonarqube.rule: Host(`${SONARQUBE_HOSTNAME:-sonarqube.localhost}`)
-      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
-      traefik.http.routers.sonarqube.middlewares: passerelle-auth@docker
+      # Interface web (routeur protégé sonarqube) : servie par le relais sonarqube-sso, ci-dessous
       traefik.http.services.sonarqube.loadbalancer.server.port: "9000"
       # Scanner de la CI (token SonarQube) : API sur le hostname public hors passerelle, seulement
       # avec un en-tête Authorization Bearer ou Basic ; l'interface web (sans cet en-tête) reste
@@ -98,6 +109,50 @@ services:
       timeout: 10s
       retries: 20
       start_period: 120s
+    networks:
+      - platform
+
+  # ---------------------------------------------------------------------------
+  # Relais SSO de SonarQube (nginx + njs) : interface web de SonarQube derrière la passerelle
+  # d'authentification (routeur protégé sonarqube). Réécrit l'en-tête des groupes GitLab (noms réservés
+  # de SonarQube retirés, sonar-users toujours présent, sonar-administrators pour les membres de
+  # SSO_GROUPE_ADMIN) et refuse les logins des comptes locaux (admin, compte d'analyse) :
+  # config/sonarqube-sso/, docs/sso.md, « SonarQube ».
+  # Le scanner et les appels API par jeton (routeur sonarqube-api), les jobs (sonarqube-interne) et le
+  # serveur MCP joignent SonarQube directement, sans ce relais.
+  # ---------------------------------------------------------------------------
+  sonarqube-sso:
+    image: nginx:${SONARQUBE_SSO_VERSION:-1.30.6-alpine}
+    restart: unless-stopped
+    depends_on:
+      - sonarqube
+    security_opt:
+      - no-new-privileges:true
+    command: ["nginx", "-c", "/etc/devops-platform/sonarqube-sso/nginx.conf", "-g", "daemon off;"]
+    environment:
+      # Chemin complet du groupe GitLab des administrateurs (vide : aucun administrateur par le SSO)
+      SSO_GROUPE_ADMIN: ${SSO_GROUPE_ADMIN:-}
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.sonarqube.rule: Host(`${SONARQUBE_HOSTNAME:-sonarqube.localhost}`)
+      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
+      traefik.http.routers.sonarqube.middlewares: passerelle-auth@docker
+      traefik.http.routers.sonarqube.service: sonarqube-sso
+      traefik.http.services.sonarqube-sso.loadbalancer.server.port: "8080"
+    volumes:
+      - type: bind
+        source: ${PLATFORM_CONFIG_DIR:-../config}/sonarqube-sso
+        target: /etc/devops-platform/sonarqube-sso
+        read_only: true
+        bind:
+          create_host_path: false
+    # Sonde sur un port local non routé (ne masque aucun chemin de SonarQube)
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/sante"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks:
       - platform
 

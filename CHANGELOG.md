@@ -9,6 +9,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Connexion automatique à SonarQube avec l'identité GitLab (SSO par en-têtes, relais `sonarqube-sso`) :
+  compte créé à la première visite (login et e-mail GitLab), groupes GitLab synchronisés, membres de
+  `SSO_GROUPE_ADMIN` dans `sonar-administrators`. Scanner, API par jeton, serveur MCP et compte admin
+  local inchangés ; `make smoke` vérifie l'arrivée connectée et les tentatives d'usurpation
+  (`docs/sso.md`).
 - Connexion automatique à Grafana avec l'identité GitLab (`auth.proxy`) : compte créé à la première
   visite, rôle `Admin` pour les membres du groupe `SSO_GROUPE_ADMIN`, `Viewer` pour les autres ;
   identité acceptée de la seule adresse de Traefik sur le réseau dédié `grafana-proxy`
@@ -56,6 +61,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   `envs/<env>.env` ; `GRAFANA_ADMIN_USER=root` est refusé (homonyme du compte administrateur GitLab) ;
   puis `make deploy ENV=<env>` (réseau `devops-platform_grafana-proxy` créé, Traefik et Grafana
   recréés). Les comptes Grafana existants de même login qu'un utilisateur GitLab lui sont reliés.
+- Connexion automatique à SonarQube (`docs/sso.md`, « SonarQube ») :
+  1. facultatif : `SSO_GROUPE_ADMIN=<chemin du groupe GitLab des administrateurs>` dans `envs/<env>.env` ;
+  2. vérifier les comptes locaux créés à la main dans SonarQube : un utilisateur GitLab de même login
+     les reprend ;
+  3. `make deploy ENV=<env>` (nouveau service `sonarqube-sso`, SonarQube redémarré ; brève erreur 404
+     sur l'interface pendant la bascule du routeur), puis `make smoke ENV=<env>`.
+
+  Le formulaire de connexion de SonarQube ne sert plus sur le hostname public : compte `admin` par
+  l'API ou l'accès de secours. Tout utilisateur admis par la passerelle consulte tous les projets
+  SonarQube (droits par défaut de `sonar-users`).
 - Projets co-localisés (conteneurs d'autres projets sur l'hôte de l'instance) :
   1. `make deploy ENV=<env>` : crée le réseau des consommateurs et recrée Traefik (brève coupure) ;
   2. `make bootstrap ENV=<env>`, puis recopier `outputs/<env>.env` sur le serveur ;

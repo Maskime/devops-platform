@@ -38,6 +38,7 @@ perte de données.
 | `portainer/portainer-ce` | `PORTAINER_VERSION` | variante `-alpine` (healthcheck) | [portainer](https://github.com/portainer/portainer/releases) |
 | `plantuml/plantuml-server` | `PLANTUML_VERSION` | variante `jetty-` | [plantuml-server](https://github.com/plantuml/plantuml-server/releases) |
 | `nginx` (page d'accueil) | `HOME_VERSION` | variante `-alpine` (healthcheck) ; branche *stable* (version mineure paire) | [nginx](https://nginx.org/en/download.html) |
+| `nginx` (relais de la [connexion automatique](sso.md#sonarqube) à SonarQube) | `SONARQUBE_SSO_VERSION` | variante `-alpine` (module njs, healthcheck) ; branche *stable* | [nginx](https://nginx.org/en/download.html) |
 | `traefik` | `TRAEFIK_VERSION` | ≥ 3.6.1 pour Docker Engine 29 ; préfixe `v` | [traefik](https://github.com/traefik/traefik/releases) |
 | `quay.io/oauth2-proxy/oauth2-proxy` | `OAUTH2_PROXY_VERSION` | variante `-alpine` (lanceur, healthcheck) ; préfixe `v` | [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy/releases) |
 | `wollomatic/socket-proxy` | `SOCKET_PROXY_VERSION` | tag sans préfixe `v` ; listes blanches à revalider ([accès à l'API Docker](acces-docker.md)) | [socket-proxy](https://github.com/wollomatic/socket-proxy/releases) |

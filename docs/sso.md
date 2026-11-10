@@ -6,9 +6,8 @@ vers la page de connexion de GitLab, puis ramené sur l'URL demandée. Seuls les
 actifs (et, en option, les membres d'un groupe) accèdent aux services, y compris à ceux qui n'ont pas
 d'authentification propre (page d'accueil, PlantUML).
 
-Grafana ouvre directement la session de l'utilisateur GitLab (voir « Grafana »). SonarQube affiche
-encore sa propre page de connexion derrière la passerelle : la passerelle filtre l'accès, SonarQube
-garde ses comptes. Portainer se connecte avec l'identité GitLab, réservé aux membres de
+Grafana et SonarQube ouvrent directement la session de l'utilisateur GitLab (voir « Grafana » et
+« SonarQube »). Portainer se connecte avec l'identité GitLab, réservé aux membres de
 `SSO_GROUPE_ADMIN` (voir « Portainer »).
 
 ## Mécanisme
@@ -54,7 +53,7 @@ résolue vers Traefik dans le réseau de la plateforme ; en `TLS_MODE=custom`, l
 |---|---|---|
 | Accueil (`HOME_HOSTNAME`), PlantUML, Grafana | **Protégés** | Tout le hostname |
 | Portainer (`PORTAINER_HOSTNAME`) | **Protégé**, groupe `SSO_GROUPE_ADMIN` | Tout le hostname ; voir « Portainer » |
-| SonarQube (`SONARQUBE_HOSTNAME`) : interface web | **Protégé** | |
+| SonarQube (`SONARQUBE_HOSTNAME`) : interface web | **Protégé** | Connexion automatique ; voir « SonarQube » |
 | SonarQube : `/api/…` et `/batch/…` avec `Authorization: Bearer` ou `Basic` | Exempté | Scanner de la CI (token) ; formulaire `/api/authentication/login` exclu, reste protégé |
 | GitLab (`GITLAB_HOSTNAME`) : interface, API, git en HTTPS, runner | Exempté | Fournisseur d'identité ; voir « GitLab » |
 | SSH de GitLab (`GITLAB_SSH_PORT`) | Exempté | Hors Traefik |
@@ -68,7 +67,8 @@ forgés est redirigée vers GitLab sur chaque service protégé et reste sans ef
 
 Exemption SonarQube : n'importe qui peut envoyer un en-tête `Authorization` et atteindre l'API sans
 passer par la passerelle ; SonarQube vérifie alors le jeton ou le mot de passe, comme avant cette
-passerelle. Les comptes locaux de SonarQube restent donc la protection de son API.
+passerelle. Les comptes locaux et les jetons de SonarQube restent donc la protection de son API ; les
+en-têtes d'identité y sont supprimés, la connexion automatique ne s'y applique pas.
 
 ## GitLab
 
@@ -195,6 +195,96 @@ connexion, Portainer limitant les échecs).
   « Déconnexion »).
 - Tous les membres du groupe sont administrateurs de Portainer : aucun rôle plus restreint.
 
+## SonarQube
+
+Un utilisateur qui a passé la passerelle arrive dans SonarQube **connecté**, sans formulaire ni bouton
+de connexion. Son compte SonarQube est créé à la première visite, puis mis à jour à chaque
+resynchronisation (toutes les 5 minutes au plus pendant la navigation).
+
+| Champ SonarQube | Repris de GitLab |
+|---|---|
+| Login | Login GitLab (`X-Auth-Request-User`) |
+| Nom | Login GitLab : le nom complet n'est pas transmis par la passerelle (#225) |
+| E-mail | E-mail principal (`X-Auth-Request-Email`) |
+| Groupes | Groupes GitLab (chemins complets), réécrits par le relais (ci-dessous) |
+
+### Mécanisme
+
+**SSO par en-têtes HTTP** de SonarQube (`sonar.web.sso.*`, options `-D` du service `sonarqube` dans
+`compose/sonarqube.yml`), disponible dans l'édition Community : SonarQube fait confiance aux en-têtes
+d'identité de la passerelle. L'interface web passe par un **relais** (service `sonarqube-sso`, nginx et
+njs, `config/sonarqube-sso/`), placé entre Traefik (routeur protégé `sonarqube`) et SonarQube, qui :
+
+- **réécrit l'en-tête des groupes** : groupes GitLab de l'utilisateur moins `sonar-administrators` et
+  `sonar-users` (noms réservés, casse ignorée), plus `sonar-users` (en-tête jamais vide), plus
+  `sonar-administrators` pour les membres de `SSO_GROUPE_ADMIN` ;
+- **refuse** (HTTP 403) une requête sans identité, ou dont le login est celui d'un compte local de la
+  plateforme (`admin`, `devops-platform-analyse`) : SonarQube associerait sinon l'utilisateur GitLab
+  de même login à ce compte local.
+
+L'authentification GitLab intégrée à SonarQube a été écartée : elle exige une troisième application
+OAuth dans GitLab, n'offre pas de redirection automatique dans l'édition Community (bouton « Log in
+with GitLab ») et associe les groupes par nom de la même façon. Les en-têtes réutilisent la session de la
+passerelle, déjà ouverte.
+
+Seuls des en-têtes `X-Auth-Request-*` sont lus, y compris pour le nom (jamais le défaut
+`X-Forwarded-Name`, que Traefik laisse passer) : sur le routeur protégé, Traefik les remplace par ceux de
+la passerelle ; sur les autres routeurs (`sonarqube-api`, `sonarqube-interne`), ils sont supprimés.
+Une requête sans `X-Auth-Request-User` suit l'authentification habituelle de SonarQube (jeton, mot de
+passe) : scanner, appels API par jeton, bootstrap, serveur MCP, accès de secours.
+
+### Groupes et administrateurs
+
+À chaque resynchronisation, SonarQube ajoute l'utilisateur aux **groupes SonarQube existants** dont le
+nom figure dans l'en-tête, et le retire des autres (sauf `sonar-users`). Les noms inconnus de SonarQube
+sont ignorés : aucun groupe n'est créé.
+
+- **Administrateurs.** `SSO_GROUPE_ADMIN` (`envs/<env>.env`, vide par défaut) : chemin complet d'un
+  groupe GitLab (`equipe/admins`) ; ses membres, y compris ceux d'un groupe parent, sont placés dans
+  `sonar-administrators`. Comparaison exacte, casse ignorée. Vide : personne n'administre SonarQube par
+  la connexion GitLab. Après modification : `make deploy ENV=<env>`. Un utilisateur retiré du groupe
+  GitLab perd l'administration à sa resynchronisation suivante.
+- **Autres utilisateurs.** Membres de `sonar-users` seulement. Leurs droits sont ceux que SonarQube donne
+  par défaut à ce groupe et au modèle de permissions par défaut (Administration > Sécurité), que la
+  plateforme ne modifie pas : consultation de **tous les projets** et de leur code, création de jetons
+  personnels (Mon compte > Sécurité, utilisables par exemple avec le [serveur MCP](mcp.md)). Les droits
+  des projets GitLab ne sont pas repris (#228) ; pour restreindre l'accès : `SSO_GITLAB_GROUPE`, ou
+  modèles de permissions sans `sonar-users`.
+- **Accès par groupe.** Pour donner des droits à un groupe GitLab, créer dans SonarQube un groupe portant
+  exactement son chemin complet (`equipe/devops`), puis lui attribuer des permissions. Un utilisateur
+  GitLab qui crée un groupe de premier niveau du même nom qu'un groupe SonarQube en devient membre :
+  ne donner de droits qu'à des chemins de groupes GitLab existants, ou restreindre la création de
+  groupes de premier niveau dans GitLab (#228).
+- **Appartenances manuelles.** Une appartenance posée à la main dans SonarQube à un utilisateur GitLab est
+  effacée à la resynchronisation suivante.
+
+### Comptes locaux
+
+- **`admin`** (`SONARQUBE_ADMIN_PASSWORD`) : utilisable par l'API publique (authentification Basic,
+  routeur `sonarqube-api`), par `make bootstrap` (API appelée dans le conteneur) et par l'interface via
+  l'**accès de secours** (tunnel SSH, sans passerelle ni en-têtes d'identité). Le formulaire de connexion du hostname public ne sert plus : la requête suivante
+  porte l'identité GitLab et SonarQube bascule sur ce compte.
+- **`devops-platform-analyse`** et son token d'analyse : inchangés (scanner hors passerelle).
+- **Comptes locaux créés à la main** : un utilisateur GitLab de même login reprend le compte, avec ses
+  permissions (#229). Supprimer ou renommer ces comptes avant la mise en service, ou vérifier que leur
+  login appartient à la même personne dans GitLab.
+
+### Limites
+
+- Nom complet : le compte porte le login GitLab comme nom (#225).
+- Rafraîchissement : groupes et e-mail resynchronisés toutes les 5 minutes au plus pendant la
+  navigation ; une révocation dans GitLab prend effet à l'expiration de la session de la passerelle
+  (8 h au plus, voir « Durée de session »). Un compte bloqué dans GitLab n'est pas désactivé dans
+  SonarQube (il ne peut simplement plus y entrer).
+- Confiance : SonarQube accepte les en-têtes d'identité de tout conteneur du réseau de la plateforme ;
+  les jobs CI et les clients externes n'y ont pas accès (#226). Le contrôle CSRF de SonarQube ne
+  s'applique pas aux requêtes authentifiées par en-têtes ; le cookie `SameSite=Lax` de la passerelle
+  bloque les requêtes venant d'autres sites (#227).
+- Déconnexion : « Se déconnecter » dans SonarQube reconnecte aussitôt (voir « Déconnexion »).
+- Un login GitLab que SonarQube n'accepte pas (règles de format de SonarQube) empêche la connexion
+  automatique de cet utilisateur.
+- `make smoke` crée le compte SonarQube de `root` (première visite automatique).
+
 ## Durée de session
 
 La session de la passerelle dure **8 heures**, sans rafraîchissement. Un compte bloqué, supprimé ou
@@ -209,6 +299,8 @@ erreur au lieu de la redirection : recharger la page.
 
 `/oauth2/sign_out` sur un hostname supprime le cookie de ce hostname seulement : les autres services
 gardent leur session, et la session GitLab reste ouverte (une nouvelle visite reconnecte aussitôt).
+La déconnexion de SonarQube (menu du compte) ne ferme pas la session de la passerelle : l'utilisateur
+est reconnecté à la requête suivante.
 Pour une déconnexion complète : se déconnecter de GitLab, puis fermer le navigateur, ou attendre
 l'expiration des sessions de la passerelle.
 
@@ -298,7 +390,9 @@ ssh -N -L 3000:<IP du conteneur>:3000 <utilisateur>@<serveur>
 
 et ouvrir `http://localhost:3000`. Les liens et redirections de l'application pointent toujours vers son
 URL publique : naviguer par les chemins relatifs. Portainer : se connecter avec le compte `admin` local
-par le formulaire (« Login with OAuth » renvoie vers GitLab).
+par le formulaire (« Login with OAuth » renvoie vers GitLab). SonarQube : le tunnel joint le conteneur
+`sonarqube` (port 9000) sans le relais de la connexion automatique ; se connecter avec le compte `admin`
+local par le formulaire.
 
 ## Limites
 
@@ -309,5 +403,7 @@ par le formulaire (« Login with OAuth » renvoie vers GitLab).
   session de la passerelle (voir « Grafana »).
 - Exemption SonarQube par en-tête `Authorization` : l'API reste joignable sans passer par la passerelle
   (voir « Services couverts et exemptés »).
+- Connexion automatique à SonarQube : voir « SonarQube », « Limites ».
 - Image : `quay.io/oauth2-proxy/oauth2-proxy` (variante `-alpine`, `OAUTH2_PROXY_VERSION`), montée de
-  version : [montée de version](montee-de-version.md).
+  version : [montée de version](montee-de-version.md). Relais de SonarQube : `nginx` (variante
+  `-alpine`, `SONARQUBE_SSO_VERSION`).

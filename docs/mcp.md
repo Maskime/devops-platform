@@ -45,7 +45,8 @@ n'est à lui fournir, quel que soit le `TLS_MODE`. Télémétrie désactivée.
 
 Le serveur exige un **jeton utilisateur** (*My Account > Security > Generate Tokens*, type
 *User Token*) : les jetons de projet et les jetons globaux d'analyse sont refusés. Le serveur n'accède
-qu'à ce que le compte voit dans SonarQube.
+qu'à ce que le compte voit dans SonarQube. Avec la [connexion automatique](sso.md#sonarqube), chaque
+utilisateur GitLab dispose d'un compte SonarQube et peut générer son propre jeton.
 
 ### Branchement de Claude Code
 

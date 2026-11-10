@@ -72,7 +72,7 @@ fi
 # Chemins de groupe : segments GitLab séparés par « / » (sans caractère à encoder dans l'URL de la
 # passerelle, compose/tools.yml)
 segment='[A-Za-z0-9_][A-Za-z0-9_.-]*'
-declare -A vide_signifie=([SSO_GITLAB_GROUPE]="pas de restriction" [SSO_GROUPE_ADMIN]="aucun compte Portainer par GitLab, Viewer pour tous dans Grafana")
+declare -A vide_signifie=([SSO_GITLAB_GROUPE]="pas de restriction" [SSO_GROUPE_ADMIN]="aucun compte Portainer par GitLab, Viewer pour tous dans Grafana, aucun administrateur SonarQube par GitLab")
 for cle in SSO_GITLAB_GROUPE SSO_GROUPE_ADMIN; do
   groupe="$(env_valeur "$env_file" "$cle")"
   if [[ -n "$groupe" && ! "$groupe" =~ ^${segment}(/${segment})*$ ]]; then
