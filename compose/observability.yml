@@ -127,12 +127,34 @@ services:
       GF_SERVER_HTTP_PORT: "3000"
       GF_SERVER_ROOT_URL: ${GRAFANA_EXTERNAL_URL:-http://${GRAFANA_HOSTNAME:-grafana.localhost}}
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      # Connexion automatique par l'identité GitLab (docs/sso.md, « Grafana ») : en-têtes posés par la
+      # passerelle (login, e-mail) et par grafana-role (rôle), compte créé à la première visite, rôle
+      # d'organisation resynchronisé dès qu'il change. Identité acceptée de la seule adresse de Traefik
+      # sur le réseau grafana-proxy : toute autre source (conteneur de la plateforme, hôte, tunnel SSH)
+      # qui enverrait ces en-têtes est refusée. Sans en-tête, formulaire de connexion habituel (compte
+      # admin local, accès de secours).
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: X-Auth-Request-User
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_HEADERS: Email:X-Auth-Request-Email Role:X-Auth-Request-Role
+      GF_AUTH_PROXY_WHITELIST: ${GRAFANA_PROXY_IP_TRAEFIK:-172.31.254.30}
+      # Déconnexion de Grafana : session de la passerelle supprimée pour ce hostname (docs/sso.md)
+      GF_AUTH_SIGNOUT_REDIRECT_URL: /oauth2/sign_out
     labels:
       traefik.enable: "true"
       traefik.http.routers.grafana.rule: Host(`${GRAFANA_HOSTNAME:-grafana.localhost}`)
-      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
-      traefik.http.routers.grafana.middlewares: passerelle-auth@docker
+      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md), puis le calcul
+      # du rôle : l'ordre compte, grafana-role lit les en-têtes posés par passerelle-auth
+      traefik.http.routers.grafana.middlewares: passerelle-auth@docker,grafana-role@docker
+      # Rôle Grafana (service grafana-role) : seul X-Auth-Request-Role est copié de sa réponse (jamais un
+      # motif ^X-Auth-Request-, qui effacerait l'identité posée par la passerelle). Un X-Auth-Request-Role
+      # envoyé par le client est retiré par passerelle-auth, puis remplacé ici.
+      traefik.http.middlewares.grafana-role.forwardauth.address: http://grafana-role:8080/
+      traefik.http.middlewares.grafana-role.forwardauth.authResponseHeaders: X-Auth-Request-Role
       traefik.http.services.grafana.loadbalancer.server.port: "3000"
+      # Traefik joint Grafana par le réseau grafana-proxy (adresse source fixe), pas par platform
+      traefik.docker.network: devops-platform_grafana-proxy
     volumes:
       - grafana_data:/var/lib/grafana
       - type: bind
@@ -144,12 +166,49 @@ services:
     depends_on:
       loki:
         condition: service_started
+      grafana-role:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
+    networks:
+      # platform : Loki ; grafana-proxy : requêtes de Traefik (adresse source de confiance)
+      - platform
+      - grafana-proxy
+
+  # ---------------------------------------------------------------------------
+  # grafana-role — rôle Grafana déduit des groupes GitLab (docs/sso.md, « Grafana »)
+  # Second forward auth du routeur grafana (middleware grafana-role, labels de grafana) : Admin pour les
+  # membres de SSO_GROUPE_ADMIN, Viewer sinon ; refus (403) du login homonyme du compte admin local.
+  # Aucun label Traefik : pas de routeur public. Arrêté, Traefik répond 500 sur Grafana (aucun accès
+  # sans rôle calculé). Même image que la page d'accueil (HOME_VERSION, compose/tools.yml) : défaut à
+  # garder identique.
+  # ---------------------------------------------------------------------------
+  grafana-role:
+    image: nginx:${HOME_VERSION:-1.30.5-alpine}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: ["/bin/sh", "/etc/devops-platform/grafana-role/lanceur.sh"]
+    environment:
+      SSO_GROUPE_ADMIN: ${SSO_GROUPE_ADMIN:-}
+      GRAFANA_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+    volumes:
+      - type: bind
+        source: ${PLATFORM_CONFIG_DIR:-../config}/grafana/role
+        target: /etc/devops-platform/grafana-role
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/sante"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     networks:
       - platform
 
@@ -170,6 +229,15 @@ networks:
     name: devops-platform_socket-proxy-promtail
     driver: bridge
     internal: true
+  # Lien Traefik → Grafana, sous-réseau et adresse de Traefik fixés (GF_AUTH_PROXY_WHITELIST de grafana).
+  # Définition strictement identique dans compose/proxy.yml.
+  grafana-proxy:
+    name: devops-platform_grafana-proxy
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${GRAFANA_PROXY_SUBNET:-172.31.254.16/28}
 
 # Noms explicites (= noms qu'attribuait Compose : données existantes conservées). Le préfixe reprend
 # le nom de projet : le changer impose de modifier aussi `name:` dans compose.yml, le filtre de

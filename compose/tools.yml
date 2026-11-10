@@ -12,6 +12,8 @@ services:
   # Portainer CE — gestion des conteneurs (UI web)
   # UI : http://${PORTAINER_HOSTNAME}, servie par Traefik (HTTP interne 9000 ; 9443 non utilisé)
   # Aucun port publié : le tunnel des agents Edge (8000) n'est pas proposé (surface d'exposition).
+  # Connexion OAuth GitLab et comptes des membres de SSO_GROUPE_ADMIN posés par make bootstrap (API de
+  # Portainer, scripts/lib/portainer.sh) ; le compte admin local reste l'accès de secours (docs/sso.md).
   # Variante -alpine (même version) : l'image standard ne contient aucun shell ni client HTTP,
   # ce qui interdit tout healthcheck.
   # ---------------------------------------------------------------------------
@@ -29,8 +31,12 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.routers.portainer.rule: Host(`${PORTAINER_HOSTNAME:-portainer.localhost}`)
-      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md)
-      traefik.http.routers.portainer.middlewares: passerelle-auth@docker
+      # Derrière la passerelle d'authentification GitLab (compose/proxy.yml, docs/sso.md), puis réservé
+      # aux membres de SSO_GROUPE_ADMIN : seconde interrogation de la passerelle (session déjà ouverte par
+      # passerelle-auth), 403 hors du groupe. Vide : pas de filtre ici, Portainer refuse alors tout
+      # utilisateur GitLab (aucun compte, docs/sso.md, « Portainer »). Format contrôlé par make check-env.
+      traefik.http.routers.portainer.middlewares: passerelle-auth@docker,portainer-admins
+      traefik.http.middlewares.portainer-admins.forwardauth.address: http://oauth2-proxy:4180/oauth2/auth?allowed_groups=${SSO_GROUPE_ADMIN:-}
       traefik.http.services.portainer.loadbalancer.server.port: "9000"
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro

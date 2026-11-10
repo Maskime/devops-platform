@@ -88,6 +88,7 @@ services:
       traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Preferred-Username: ""
       traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Access-Token: ""
       traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Redirect: ""
+      traefik.http.middlewares.sonarqube-sans-identite.headers.customrequestheaders.X-Auth-Request-Role: ""
       # Routeur interne des jobs CI (entrypoint `interne` de compose/proxy.yml, sans TLS) : SONAR_HOST_URL
       # des jobs en hostname *.localhost ou avec une CA privée (docs/analyse-sonarqube.md)
       traefik.http.routers.sonarqube-interne.rule: Host(`sonarqube.devops-platform.internal`)
@@ -191,6 +192,7 @@ services:
       traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Preferred-Username: ""
       traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Access-Token: ""
       traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Redirect: ""
+      traefik.http.middlewares.sonarqube-mcp-sans-identite.headers.customrequestheaders.X-Auth-Request-Role: ""
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       interval: 10s

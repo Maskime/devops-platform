@@ -3,10 +3,13 @@
 # lancé par make check-env (donc make deploy, bootstrap…) avant `docker compose config`.
 #
 # Usage : scripts/check-env-sso.sh envs/<env>.env
-#   - identifiant, secret client et secret de cookie (SSO_GITLAB_CLIENT_ID, SSO_GITLAB_CLIENT_SECRET et
-#     SSO_COOKIE_SECRET) présents, sinon commande à lancer pour les ajouter sans régénérer les autres
-#     secrets, et au format attendu ;
+#   - identifiants, secrets clients et secret de cookie (SSO_GITLAB_CLIENT_ID, SSO_GITLAB_CLIENT_SECRET,
+#     SSO_COOKIE_SECRET, SSO_PORTAINER_CLIENT_ID et SSO_PORTAINER_CLIENT_SECRET) présents, sinon commande
+#     à lancer pour les ajouter sans régénérer les autres secrets, et au format attendu ;
+#   - identifiants des deux applications OAuth distincts (une application GitLab par identifiant) ;
 #   - SSO_GITLAB_GROUPE et SSO_GROUPE_ADMIN : vides ou chemins de groupe GitLab.
+#   - GRAFANA_ADMIN_USER : format accepté par grafana-role (config/grafana/role/lanceur.sh), différent de
+#     root (compte GitLab toujours présent : homonyme refusé par grafana-role, docs/sso.md).
 # Valeur effective comme Compose (variable du shell prioritaire). Les secrets ne sont jamais affichés.
 # Code de sortie : 0 si tout est conforme, 1 sinon.
 set -euo pipefail
@@ -27,13 +30,18 @@ declare -A motifs=(
   [SSO_GITLAB_CLIENT_ID]='^[0-9a-f]{64}$'
   [SSO_GITLAB_CLIENT_SECRET]='^[A-Za-z0-9._,-]{16,128}$'
   [SSO_COOKIE_SECRET]='^([A-Za-z0-9]{16}|[A-Za-z0-9]{24}|[A-Za-z0-9]{32})$'
+  [SSO_PORTAINER_CLIENT_ID]='^[0-9a-f]{64}$'
+  [SSO_PORTAINER_CLIENT_SECRET]='^[A-Za-z0-9._,-]{16,128}$'
 )
 declare -A formats=(
   [SSO_GITLAB_CLIENT_ID]="64 caractères hexadécimaux minuscules"
   [SSO_GITLAB_CLIENT_SECRET]="16 à 128 caractères parmi lettres sans accent, chiffres, . _ , -"
   [SSO_COOKIE_SECRET]="exactement 16, 24 ou 32 caractères alphanumériques"
+  [SSO_PORTAINER_CLIENT_ID]="64 caractères hexadécimaux minuscules"
+  [SSO_PORTAINER_CLIENT_SECRET]="16 à 128 caractères parmi lettres sans accent, chiffres, . _ , -"
 )
-cles=(SSO_GITLAB_CLIENT_ID SSO_GITLAB_CLIENT_SECRET SSO_COOKIE_SECRET)
+cles=(SSO_GITLAB_CLIENT_ID SSO_GITLAB_CLIENT_SECRET SSO_COOKIE_SECRET SSO_PORTAINER_CLIENT_ID
+  SSO_PORTAINER_CLIENT_SECRET)
 
 erreurs=0
 absentes=()
@@ -55,16 +63,36 @@ if ((${#absentes[@]})); then
   erreurs=1
 fi
 
-# Chemins de groupes GitLab : SSO_GITLAB_GROUPE (restriction de la passerelle) et SSO_GROUPE_ADMIN
-# (administrateurs des services) ; vides : pas de restriction, aucun administrateur par le SSO
+id_sso="$(env_valeur "$env_file" SSO_GITLAB_CLIENT_ID)"
+if [[ -n "$id_sso" && "$id_sso" == "$(env_valeur "$env_file" SSO_PORTAINER_CLIENT_ID)" ]]; then
+  echo "SSO_PORTAINER_CLIENT_ID identique à SSO_GITLAB_CLIENT_ID dans $env_file : deux applications OAuth distinctes attendues (en régénérer un : le supprimer, puis make init ENV=$env COMPLETER=1)." >&2
+  erreurs=1
+fi
+
+# Chemins de groupe : segments GitLab séparés par « / » (sans caractère à encoder dans l'URL de la
+# passerelle, compose/tools.yml)
 segment='[A-Za-z0-9_][A-Za-z0-9_.-]*'
-declare -A sens_vide=([SSO_GITLAB_GROUPE]="pas de restriction" [SSO_GROUPE_ADMIN]="aucun administrateur par la connexion GitLab")
+declare -A vide_signifie=([SSO_GITLAB_GROUPE]="pas de restriction" [SSO_GROUPE_ADMIN]="aucun compte Portainer par GitLab, Viewer pour tous dans Grafana, aucun administrateur SonarQube par GitLab")
 for cle in SSO_GITLAB_GROUPE SSO_GROUPE_ADMIN; do
   groupe="$(env_valeur "$env_file" "$cle")"
   if [[ -n "$groupe" && ! "$groupe" =~ ^${segment}(/${segment})*$ ]]; then
-    echo "$cle invalide : $groupe (chemin complet d'un groupe GitLab attendu, ex. : equipe/devops ; vide : ${sens_vide[$cle]})." >&2
+    echo "$cle invalide : $groupe (chemin complet d'un groupe GitLab attendu, ex. : equipe/devops ; vide : ${vide_signifie[$cle]})." >&2
     erreurs=1
   fi
 done
+
+# Compte admin local de Grafana : un utilisateur GitLab de même login serait relié à ce compte par
+# auth.proxy ; grafana-role le refuse, ce qui rendrait root (toujours présent dans GitLab) inutilisable
+admin_grafana="$(env_valeur "$env_file" GRAFANA_ADMIN_USER)"
+admin_grafana="${admin_grafana:-admin}"
+if [[ ! "$admin_grafana" =~ ^[A-Za-z0-9_][A-Za-z0-9_.@+-]*$ ]]; then
+  echo "GRAFANA_ADMIN_USER invalide : $admin_grafana (lettres sans accent, chiffres, . _ @ + -)." >&2
+  erreurs=1
+elif [[ "${admin_grafana,,}" == root ]]; then
+  echo "GRAFANA_ADMIN_USER invalide : root est le compte administrateur de GitLab ; l'utilisateur GitLab" >&2
+  echo "  homonyme du compte admin local de Grafana est refusé par la connexion automatique (docs/sso.md)." >&2
+  echo "  Corriger dans $env_file : GRAFANA_ADMIN_USER=admin" >&2
+  erreurs=1
+fi
 
 exit "$erreurs"

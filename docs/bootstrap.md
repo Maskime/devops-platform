@@ -15,7 +15,7 @@ indépendamment du DNS et du TLS du poste.
 | Ordre | Étape | Script | Lancée seule par |
 |---|---|---|---|
 | 1 | SonarQube : `vm.max_map_count`, compte admin, plugin, compte et token d'analyse ([détails](bootstrap-sonarqube.md)) | `scripts/bootstrap/sonarqube.sh` | `make bootstrap-sonarqube` |
-| 2 | GitLab : jeton d'administration, variables CI SonarQube, runner d'instance, application OAuth de la passerelle et accès anonyme (ci-dessous), serveur MCP | `scripts/bootstrap/gitlab.sh` | `make bootstrap-gitlab` |
+| 2 | GitLab : jeton d'administration, variables CI SonarQube, runner d'instance, applications OAuth de la passerelle et de Portainer, accès anonyme (ci-dessous), serveur MCP, connexion de Portainer à GitLab | `scripts/bootstrap/gitlab.sh` | `make bootstrap-gitlab` |
 
 SonarQube passe en premier : son token d'analyse est posé en variable CI d'instance par l'étape
 GitLab. Une
@@ -55,9 +55,11 @@ Lancé directement, un script d'étape refuse une instance distante.
 5. **Serveur MCP** : accès au serveur MCP intégré autorisé pour l'instance (`mcp_server_enabled`), avec
    un avertissement si l'enregistrement dynamique des clients OAuth est désactivé ou si GitLab est
    servi en HTTP : voir [serveurs MCP](mcp.md).
+6. **Portainer** : connexion OAuth GitLab et comptes des membres de `SSO_GROUPE_ADMIN` (ci-dessous).
+   En dernier : un `PORTAINER_ADMIN_PASSWORD` obsolète n'empêche aucune autre configuration.
 
 Le récapitulatif final affiche l'id du runner, son réseau, l'URL, l'expiration du jeton, l'état des
-variables CI et l'URL du serveur MCP.
+variables CI, l'URL du serveur MCP et l'état de Portainer.
 
 ## Jeton d'administration
 
@@ -130,6 +132,16 @@ si l'application a changé ou si elle est encore en mode refus, puis attend qu'e
 sinon rien n'est redémarré. D'où l'ordre `make deploy` puis `make bootstrap` : entre les deux, les
 services protégés affichent « Passerelle d'authentification non initialisée ». Détails :
 [authentification unique](sso.md).
+
+## Portainer
+
+L'étape GitLab crée aussi l'application OAuth `devops-platform-portainer` (`SSO_PORTAINER_CLIENT_ID`,
+`SSO_PORTAINER_CLIENT_SECRET`, scope `read_user`, application de confiance). En dernière étape, elle
+attend l'API de Portainer, s'y connecte avec le compte `admin` local (`PORTAINER_ADMIN_PASSWORD`, une
+seule tentative), pose la connexion OAuth GitLab et synchronise les comptes avec les membres de
+`SSO_GROUPE_ADMIN` : création, prise en charge d'un compte homonyme, suppression des comptes gérés
+dont la personne a quitté le groupe. Un compte non géré hors du groupe arrête l'étape avant toute
+modification. Détails : [authentification unique, Portainer](sso.md#portainer).
 
 ## Exécutions simultanées
 

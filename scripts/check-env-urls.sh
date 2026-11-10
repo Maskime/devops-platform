@@ -14,7 +14,9 @@
 #     connu (verifier_letsencrypt, scripts/lib/tls.sh).
 #   - GITLAB_SSH_PORT : entier de 1 à 65535, hors 80 et 443 (ports de Traefik) ; 22 signalé.
 #   - GITLAB_RUNNER_NETWORK et CONSUMER_NETWORK : noms Docker distincts entre eux et des réseaux de la
-#     plateforme (isolation des jobs CI et des projets co-localisés) ; GITLAB_PROXY_SUBNET : CIDR IPv4 de /16 à /29.
+#     plateforme (isolation des jobs CI et des projets co-localisés) ; GITLAB_PROXY_SUBNET et
+#     GRAFANA_PROXY_SUBNET : CIDR IPv4 de /16 à /29, disjoints ; GRAFANA_PROXY_IP_TRAEFIK : adresse du
+#     second, hors adresse réseau, broadcast et passerelle Docker.
 #   - SONARQUBE_MCP_ENABLED : true, false ou absente ; serveur MCP SonarQube forcé en TLS_MODE=none
 #     signalé (jetons en clair). Son hostname n'est contrôlé (certificat, Let's Encrypt) que s'il est actif.
 #
@@ -94,11 +96,12 @@ elif ((port_ssh == 22)); then
   echo "Attention : GITLAB_SSH_PORT=22 entre en conflit avec le sshd de l'hôte s'il écoute sur ce port." >&2
 fi
 
-# Réseaux : jobs CI et projets co-localisés sur des réseaux dédiés distincts, sous-réseau du lien
-# Traefik → GitLab (scripts/lib/env.sh)
+# Réseaux : jobs CI et projets co-localisés sur des réseaux dédiés distincts, sous-réseaux des liens
+# Traefik → GitLab et Traefik → Grafana, adresse de Traefik vers Grafana (scripts/lib/env.sh)
 reseau_jobs "$fichier" > /dev/null || erreurs=1
 reseau_consommateurs "$fichier" > /dev/null || erreurs=1
 sous_reseau_gitlab_proxy_valide "$fichier" || erreurs=1
+reseau_grafana_proxy_valide "$fichier" || erreurs=1
 
 # Serveur MCP SonarQube (scripts/lib/env.sh) : actif, inactif ou valeur invalide
 mcp_sonar=0 code=0

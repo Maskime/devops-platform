@@ -5,9 +5,12 @@
 # un job (ISOLATION_FICHIER), vérifie l'isolation entre le réseau des projets co-localisés et celui des
 # jobs (conteneurs sentinelles), attend que le pipeline passe au vert et que l'analyse du commit
 # apparaisse dans SonarQube, puis interroge les serveurs MCP (SonarQube s'il est actif, GitLab) avec des
-# jetons éphémères, et vérifie la passerelle d'authentification (redirection vers GitLab sans session,
-# accès avec une session de root, arrivée connectée de root dans SonarQube, en-têtes d'identité forgés
-# sans effet). NETTOYER=1 : projets de test GitLab et SonarQube supprimés après un succès.
+# jetons éphémères, vérifie la passerelle d'authentification (redirection vers GitLab sans session,
+# accès avec une session de root, connexion automatique à Grafana avec le rôle attendu et à SonarQube
+# avec les groupes attendus, en-têtes d'identité forgés sans effet) et la connexion de Portainer à GitLab (réglages OAuth, comptes limités à
+# SSO_GROUPE_ADMIN, refus d'un utilisateur de test hors du groupe). NETTOYER=1 : projets de test GitLab
+# et SonarQube et utilisateur de test supprimés après un
+# succès.
 # Lancé par `make smoke ENV=<env>` (scripts/instance.sh smoke), qui positionne la cible Docker (contexte
 # SSH d'une instance distante). Documentation : docs/smoke-test.md.
 #
@@ -30,6 +33,8 @@ source "$ROOT/scripts/lib/tls.sh"
 source "$ROOT/scripts/lib/gitlab.sh"
 # shellcheck source=scripts/lib/sonarqube.sh
 source "$ROOT/scripts/lib/sonarqube.sh"
+# shellcheck source=scripts/lib/portainer.sh
+source "$ROOT/scripts/lib/portainer.sh"
 # shellcheck source=scripts/lib/verrou.sh
 source "$ROOT/scripts/lib/verrou.sh"
 # shellcheck source=scripts/lib/images.sh
@@ -67,9 +72,13 @@ readonly SSO_HOSTNAMES=(HOME_HOSTNAME:home.localhost PLANTUML_HOSTNAME:plantuml.
 readonly SSO_SCOPES_PASSERELLE="openid profile email"
 readonly SSO_COOKIE=_devops_platform_sso
 readonly SSO_JAR=/tmp/devops-platform-smoke-sso.jar
-# En-têtes d'identité forgés par le « client » (docs/sso.md, « Usurpation ») : compte admin local de
-# SonarQube et groupe de ses administrateurs
-readonly SSO_FORGES=("X-Auth-Request-User: admin" "X-Auth-Request-Email: admin@example.com"
+# En-têtes d'identité forgés par le « client » (docs/sso.md, « Usurpation »)
+# Utilisateur GitLab de test de Portainer (hors de SSO_GROUPE_ADMIN), bloqué en fin de smoke test
+readonly PORTAINER_TEST=devops-platform-smoke-portainer
+readonly SSO_FORGES=("X-Auth-Request-User: root" "X-Auth-Request-Email: admin@example.com"
+  "X-Auth-Request-Groups: admins" "X-Auth-Request-Preferred-Username: root" "X-Auth-Request-Role: Admin")
+# En-têtes forgés propres à SonarQube : compte admin local et groupe de ses administrateurs
+readonly SSO_FORGES_SONAR=("X-Auth-Request-User: admin" "X-Auth-Request-Email: admin@example.com"
   "X-Auth-Request-Groups: sonar-administrators" "X-Auth-Request-Preferred-Username: admin")
 # Routeur interne de SonarQube (entrypoint interne de Traefik, labels de compose/sonarqube.yml)
 readonly SONAR_INTERNE_HOTE=sonarqube.devops-platform.internal SONAR_INTERNE_PORT=8000
@@ -118,7 +127,13 @@ readonly CODE_REVOCATION='
 code, _ = api("delete", "/personal_access_tokens/self")
 abort("HTTP #{code}") unless code == 204
 '
-mcp_sonar_jeton="" sentinelles=0 sso_jar=0
+mcp_sonar_jeton="" sentinelles=0 sso_jar=0 portainer_test_id=""
+# Utilisateur de test de Portainer bloqué (inutilisable entre deux smoke tests)
+# shellcheck disable=SC2016 # code Ruby
+readonly CODE_BLOCAGE='
+code, _ = api("post", "/users/#{ARGV[0]}/block")
+abort("HTTP #{code}") unless [201, 403, 404].include?(code)
+'
 # Sentinelles de l'instance supprimées (identifiants : exception au contrôle de verify.sh)
 retirer_sentinelles() {
   local ids
@@ -138,6 +153,11 @@ terminer() {
     sentinelles=0
     retirer_sentinelles \
       || echo "Attention : sentinelles non supprimées : docker ps -a --filter label=$SENTINELLE_LABEL=$env" >&2
+  fi
+  if [[ -n "$portainer_test_id" && -n "$pat" ]]; then
+    gitlab_api "$CODE_BLOCAGE" "$portainer_test_id" > /dev/null 2>&1 \
+      || echo "Attention : utilisateur GitLab de test $PORTAINER_TEST non bloqué : le bloquer (Admin > Utilisateurs)." >&2
+    portainer_test_id=""
   fi
   if [[ -n "$mcp_sonar_jeton" ]]; then
     mcp_sonar_jeton=""
@@ -676,21 +696,11 @@ done
 # d'autorisation et cookies jamais en argument) ; sortie : en-têtes de réponse, corps,
 # puis « CODE=<code HTTP> ».
 requete() {
-  local hote="$1" chemin="$2"
+  local hote="$1" chemin="$2" config ligne
   shift 2
-  requete_vers "$schema" "$hote" "$port" "$chemin" "$@"
-}
-# Même requête vers un schéma et un port donnés : <schéma> <hôte> <port> <chemin> [ligne…] (routeur
-# interne des jobs)
-requete_vers() {
-  local schema_req="$1" hote="$2" port_req="$3" chemin="$4" url="$1://$2" config ligne
-  shift 4
-  if ! [[ ("$schema_req" == http && "$port_req" == 80) || ("$schema_req" == https && "$port_req" == 443) ]]; then
-    url+=":$port_req"
-  fi
-  config="url = $(cfg "$url$chemin")"$'\n'
-  config+="resolve = $(cfg "$hote:$port_req:$ip_traefik")"$'\n'
-  [[ -n "$ca_sso" && "$schema_req" == https ]] && config+="cacert = $(cfg "$ca_sso")"$'\n'
+  config="url = $(cfg "$schema://$hote$chemin")"$'\n'
+  config+="resolve = $(cfg "$hote:$port:$ip_traefik")"$'\n'
+  [[ -n "$ca_sso" ]] && config+="cacert = $(cfg "$ca_sso")"$'\n'
   for ligne in "$@"; do config+="$ligne"$'\n'; done
   # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
   dc exec -T gitlab-runner sh -c 'curl -sS -K - -D - -w "\nCODE=%{http_code}\n" || true' <<<"$config"
@@ -719,45 +729,39 @@ done
 
 # b. Session de root : demande d'autorisation (cookie CSRF, state, défi PKCE), code d'autorisation créé
 #    par gitlab-rails pour root (comme après une connexion GitLab), callback de la passerelle sur le
-#    hostname demandé (d'abord celui de la page d'accueil), puis accès authentifié et identité lue par
-#    /oauth2/userinfo. La sortie de gitlab-rails donne aussi l'e-mail de root et son appartenance à
-#    SSO_GROUPE_ADMIN (groupes au sens de GitLab : membres d'un groupe parent compris, comme le claim
-#    groups transmis par la passerelle).
+#    hostname de la page d'accueil, puis accès authentifié et identité lue par /oauth2/userinfo
 # shellcheck disable=SC2016 # code Ruby
+# Code d'autorisation pour l'application d'identifiant SSO_CLIENT_ID et l'utilisateur SSO_UTILISATEUR
+# (root par défaut), avec défi PKCE si SSO_DEFI est fourni (passerelle ; Portainer n'en utilise pas)
 readonly CODE_GRANT='
-app = Authn::OauthApplication.find_by(uid: ENV.fetch("SSO_CLIENT_ID")) or abort("Application OAuth de la passerelle introuvable : make bootstrap.")
-root = User.find_by_username("root") or abort("Compte root introuvable.")
-attrs = { application_id: app.id, resource_owner_id: root.id, redirect_uri: ENV.fetch("SSO_URI"),
-  expires_in: 300, scopes: ENV.fetch("SSO_SCOPES"), code_challenge: ENV.fetch("SSO_DEFI"),
-  code_challenge_method: "S256" }
+app = Authn::OauthApplication.find_by(uid: ENV.fetch("SSO_CLIENT_ID")) or abort("Application OAuth introuvable : make bootstrap.")
+nom = ENV.fetch("SSO_UTILISATEUR", "root")
+utilisateur = User.find_by_username(nom) or abort("Compte #{nom} introuvable.")
+attrs = { application_id: app.id, resource_owner_id: utilisateur.id, redirect_uri: ENV.fetch("SSO_URI"),
+  expires_in: 300, scopes: ENV.fetch("SSO_SCOPES") }
+defi = ENV.fetch("SSO_DEFI", "")
+attrs.merge!(code_challenge: defi, code_challenge_method: "S256") unless defi.empty?
 if Doorkeeper::AccessGrant.column_names.include?("organization_id")
   attrs[:organization_id] = Organizations::Organization.default_organization.id
 end
 g = Doorkeeper::AccessGrant.create!(attrs)
 puts "CODE=#{g.plaintext_token || g.token}"
-puts "EMAIL=#{root.email}"
-admin = ENV.fetch("SSO_GROUPE_ADMIN", "").downcase
-membre = !admin.empty? && root.membership_groups.any? { |gr| gr.full_path.downcase == admin }
-puts "ADMIN=#{membre ? 1 : 0}"
 '
-sso_debut="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-sso_jar=1
-root_email="" root_admin=""
-# Session de root sur <hôte> (cookie dans SSO_JAR, partagé par les hostnames) ; positionne root_email et
-# root_admin
+# Paramètre <nom> de l'URL de redirection vers GitLab (variable loc)
+param() { sed -n "s/.*[?&]$1=\([^&]*\).*/\1/p" <<<"$loc"; }
+# Ouvre une session de root sur <hôte> (cookie propre au hostname, dans le jar) ; en-tête Set-Cookie
+# du callback dans la variable cookie
 ouvrir_session() { # <hôte>
-  local h="$1" rep loc state defi sortie code_auth cookie attribut erreurs
+  local h="$1" rep loc state defi sortie erreurs code_auth
   rep="$(requete "$h" "/smoke?origine=1" "cookie = $(cfg "$SSO_JAR")" "cookie-jar = $(cfg "$SSO_JAR")")"
   loc="$(entete_de "$rep" location)"
   [[ "$(code_de "$rep")" == 302 && "$loc" == "$gitlab_url/oauth/authorize?"* ]] \
     || erreur "$h : redirection vers GitLab attendue, HTTP $(code_de "$rep")"
-  state="$(sed -n 's/.*[?&]state=\([^&]*\).*/\1/p' <<<"$loc")"
-  defi="$(sed -n 's/.*[?&]code_challenge=\([^&]*\).*/\1/p' <<<"$loc")"
+  state="$(param state)" defi="$(param code_challenge)"
   [[ -n "$state" && -n "$defi" ]] || erreur "$h : state ou code_challenge absent de la redirection vers GitLab"
   erreurs="$(mktemp)"
   if ! sortie="$(dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_ID)" \
       -e SSO_URI="$schema://$h/oauth2/callback" -e SSO_SCOPES="$SSO_SCOPES_PASSERELLE" -e SSO_DEFI="$defi" \
-      -e SSO_GROUPE_ADMIN="$(env_valeur "$env_file" SSO_GROUPE_ADMIN)" \
       gitlab gitlab-rails runner "$CODE_GRANT" 2> "$erreurs")"; then
     cat "$erreurs" >&2
     rm -f "$erreurs"
@@ -765,8 +769,6 @@ ouvrir_session() { # <hôte>
   fi
   rm -f "$erreurs"
   code_auth="$(sed -n 's/^CODE=//p' <<<"$sortie" | tail -n1)"
-  root_email="$(sed -n 's/^EMAIL=//p' <<<"$sortie" | tail -n1)"
-  root_admin="$(sed -n 's/^ADMIN=//p' <<<"$sortie" | tail -n1)"
   [[ -n "$code_auth" ]] || erreur "code d'autorisation absent de la sortie de gitlab-rails"
   rep="$(requete "$h" "/oauth2/callback?code=$code_auth&state=$state" "cookie = $(cfg "$SSO_JAR")" \
     "cookie-jar = $(cfg "$SSO_JAR")")"
@@ -776,17 +778,20 @@ ouvrir_session() { # <hôte>
     || erreur "$h : callback de la passerelle : HTTP $(code_de "$rep") ${loc:+vers $loc} (attendu : 302 vers /smoke?origine=1)"
   cookie="$(grep -i "^set-cookie: $SSO_COOKIE=" <<<"$rep" | tail -n1)"
   [[ -n "$cookie" ]] || erreur "$h : cookie de session $SSO_COOKIE absent de la réponse du callback"
-  if [[ "$schema" == https ]]; then
-    [[ "${cookie,,}" == *"; secure"* ]] || erreur "$h : cookie de session sans attribut Secure en HTTPS"
-    attribut="Secure"
-  else
-    [[ "${cookie,,}" != *"; secure"* ]] || erreur "$h : cookie de session marqué Secure en TLS_MODE=none (inutilisable en HTTP)"
-    attribut="sans Secure"
-  fi
-  echo "    $h : session de root ouverte par le callback, retour sur l'URL demandée, cookie $attribut."
 }
 h_sso="${hotes_sso[0]}"
+sso_jar=1
+sso_debut="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+cookie=""
 ouvrir_session "$h_sso"
+if [[ "$schema" == https ]]; then
+  [[ "${cookie,,}" == *"; secure"* ]] || erreur "cookie de session sans attribut Secure en HTTPS"
+  attribut="Secure"
+else
+  [[ "${cookie,,}" != *"; secure"* ]] || erreur "cookie de session marqué Secure en TLS_MODE=none (inutilisable en HTTP)"
+  attribut="sans Secure"
+fi
+echo "    $h_sso : session de root ouverte par le callback, retour sur l'URL demandée, cookie $attribut."
 rep="$(requete "$h_sso" "/" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
 [[ "$(code_de "$rep")" == 200 ]] || erreur "$h_sso : accès authentifié refusé (HTTP $(code_de "$rep"))"
 rep="$(requete "$h_sso" "/oauth2/userinfo" "cookie = $(cfg "$SSO_JAR")")"
@@ -794,42 +799,109 @@ rep="$(requete "$h_sso" "/oauth2/userinfo" "cookie = $(cfg "$SSO_JAR")")"
   || erreur "$h_sso/oauth2/userinfo : identité de root attendue (HTTP $(code_de "$rep"))"
 echo "    $h_sso : accès authentifié (HTTP 200), identité transmise : root."
 
-# c. Arrivée connectée dans SonarQube (connexion automatique, relais sonarqube-sso) : session de root sur
-#    le hostname de SonarQube, puis compte SSO de root (créé à la première visite) malgré des en-têtes
-#    d'identité forgés (admin, sonar-administrators), groupes réécrits par le relais
+# c. Grafana (docs/sso.md, « Grafana ») : session de root sur son hostname, connexion automatique sans
+#    formulaire, compte et rôle attendus malgré les en-têtes forgés (rôle Admin compris). Rôle attendu
+#    déduit des groupes transmis par la passerelle (/oauth2/userinfo) et de SSO_GROUPE_ADMIN.
+h_grafana="$(env_valeur "$env_file" GRAFANA_HOSTNAME)"
+h_grafana="${h_grafana:-grafana.localhost}"
+groupe_admin="$(env_valeur "$env_file" SSO_GROUPE_ADMIN)"
+admin_grafana="$(env_valeur "$env_file" GRAFANA_ADMIN_USER)"
+admin_grafana="${admin_grafana:-admin}"
+ouvrir_session "$h_grafana"
+rep="$(requete "$h_grafana" "/oauth2/userinfo" "cookie = $(cfg "$SSO_JAR")")"
+[[ "$(code_de "$rep")" == 200 ]] || erreur "$h_grafana/oauth2/userinfo : HTTP $(code_de "$rep")"
+email_root="$(sed -n 's/.*"email":"\([^"]*\)".*/\1/p' <<<"$rep" | head -n1)"
+groupes_root="$(sed -n 's/.*"groups":\[\([^]]*\)\].*/\1/p' <<<"$rep" | head -n1)"
+role_attendu=Viewer
+if [[ -n "$groupe_admin" && ",${groupes_root,,}," == *",\"${groupe_admin,,}\","* ]]; then
+  role_attendu=Admin
+fi
+rep="$(requete "$h_grafana" "/" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
+[[ "$(code_de "$rep")" == 200 ]] \
+  || erreur "$h_grafana : HTTP $(code_de "$rep") $(entete_de "$rep" location) (attendu : 200, sans redirection vers le formulaire de Grafana)"
+rep="$(requete "$h_grafana" "/api/user" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
+[[ "$(code_de "$rep")" == 200 && "$rep" == *'"login":"root"'* && "$rep" == *"\"email\":\"$email_root\""* ]] \
+  || erreur "$h_grafana/api/user : compte Grafana de root (login, e-mail $email_root) attendu (HTTP $(code_de "$rep"))"
+rep="$(requete "$h_grafana" "/api/user/orgs" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
+[[ "$(code_de "$rep")" == 200 && "$rep" == *"\"role\":\"$role_attendu\""* ]] \
+  || erreur "$h_grafana/api/user/orgs : rôle $role_attendu attendu pour root (HTTP $(code_de "$rep") : $(tail -n2 <<<"$rep" | head -n1))"
+echo "    $h_grafana : root connecté sans formulaire (compte root, $email_root), rôle $role_attendu" \
+  "(SSO_GROUPE_ADMIN ${groupe_admin:-vide}), en-têtes forgés sans effet."
+
+# d. SonarQube (docs/sso.md, « SonarQube ») : session de root sur son hostname, connexion automatique
+#    par le relais sonarqube-sso, compte SSO de root (créé à la première visite) malgré des en-têtes
+#    forgés (compte admin local, groupe sonar-administrators) ; groupes réécrits par le relais :
+#    sonar-users, et sonar-administrators si et seulement si root est membre de SSO_GROUPE_ADMIN
+#    (groupes transmis par la passerelle, comme pour Grafana)
 sonar_hote="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
 sonar_hote="${sonar_hote:-sonarqube.localhost}"
+forges_sonar=()
+for f in "${SSO_FORGES_SONAR[@]}"; do forges_sonar+=("header = $(cfg "$f")"); done
 if [[ "$services" == *" sonarqube-sso "* ]]; then
   [[ "$(dc ps --format '{{.Health}}' sonarqube-sso 2> /dev/null)" == healthy ]] \
     || erreur "relais sonarqube-sso arrêté ou non healthy (make deploy ENV=$env)"
   ouvrir_session "$sonar_hote"
-  rep="$(requete "$sonar_hote" "/api/users/current" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
+  rep="$(requete "$sonar_hote" "/api/users/current" "cookie = $(cfg "$SSO_JAR")" "${forges_sonar[@]}")"
   [[ "$(code_de "$rep")" == 200 && "$rep" == *'"isLoggedIn":true'* ]] \
     || erreur "$sonar_hote/api/users/current : utilisateur connecté attendu (HTTP $(code_de "$rep")) : connexion automatique inactive"
   [[ "$rep" == *'"login":"root"'* ]] \
     || erreur "$sonar_hote : connecté sous un autre compte que root (en-têtes d'identité forgés acceptés ?)"
   [[ "$rep" == *'"local":false'* && "$rep" == *'"externalProvider":"sonarqube"'* ]] \
     || erreur "$sonar_hote : compte root attendu non local, créé par la connexion automatique (fournisseur sonarqube)"
-  [[ -z "$root_email" || "$rep" == *"\"email\":\"$root_email\""* ]] \
-    || erreur "$sonar_hote : e-mail de root ($root_email) non repris de GitLab"
+  [[ -z "$email_root" || "$rep" == *"\"email\":\"$email_root\""* ]] \
+    || erreur "$sonar_hote : e-mail de root ($email_root) non repris de GitLab"
   [[ "$rep" == *'"sonar-users"'* ]] \
     || erreur "$sonar_hote : root absent du groupe sonar-users (en-tête des groupes non réécrit par le relais ?)"
-  if [[ "$root_admin" == 1 ]]; then
+  if [[ "$role_attendu" == Admin ]]; then
     [[ "$rep" == *'"sonar-administrators"'* ]] \
       || erreur "$sonar_hote : root, membre de SSO_GROUPE_ADMIN, absent du groupe sonar-administrators"
-    statut_admin="membre de sonar-administrators (SSO_GROUPE_ADMIN)"
+    statut_admin="membre de sonar-administrators"
   else
     [[ "$rep" != *'"sonar-administrators"'* ]] \
       || erreur "$sonar_hote : root, hors de SSO_GROUPE_ADMIN, membre de sonar-administrators (groupe forgé accepté ?)"
-    statut_admin="hors de sonar-administrators (non membre de SSO_GROUPE_ADMIN)"
+    statut_admin="hors de sonar-administrators"
   fi
-  echo "    $sonar_hote : root connecté automatiquement (compte SSO, e-mail GitLab), en-têtes forgés sans effet, $statut_admin."
+  echo "    $sonar_hote : root connecté sans formulaire (compte SSO, $email_root), $statut_admin" \
+    "(SSO_GROUPE_ADMIN ${groupe_admin:-vide}), en-têtes forgés sans effet."
 else
   echo "Attention : relais sonarqube-sso absent de l'instance : connexion automatique à SonarQube non vérifiée." >&2
 fi
 dc exec -T gitlab-runner rm -f "$SSO_JAR" > /dev/null 2>&1 || true
 sso_jar=0
-# Jetons émis pour root par l'échange du code de test révoqués (la session de la passerelle n'en dépend pas)
+
+# Requête directe sur le réseau de la plateforme depuis gitlab-runner : <url> [en-tête…] ; sortie
+# comme requete()
+requete_directe() {
+  local config ligne
+  config="url = $(cfg "$1")"$'\n'
+  shift
+  for ligne in "$@"; do config+="header = $(cfg "$ligne")"$'\n'; done
+  # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+  dc exec -T gitlab-runner sh -c 'curl -sS -K - -D - -w "\nCODE=%{http_code}\n" || true' <<<"$config"
+}
+# Service de rôle : deux lignes de groupes (groupe admin en second, casse modifiée), groupe voisin,
+# homonyme du compte admin local
+if [[ -n "$groupe_admin" ]]; then
+  rep="$(requete_directe http://grafana-role:8080/ "X-Auth-Request-User: smoke" "X-Auth-Request-Groups: smoke/autre" \
+    "X-Auth-Request-Groups: ${groupe_admin^^}")"
+  [[ "$(entete_de "$rep" x-auth-request-role)" == Admin ]] \
+    || erreur "grafana-role : rôle Admin attendu pour un membre de $groupe_admin (HTTP $(code_de "$rep"))"
+fi
+rep="$(requete_directe http://grafana-role:8080/ "X-Auth-Request-User: smoke" "X-Auth-Request-Groups: ${groupe_admin:-smoke}x")"
+[[ "$(entete_de "$rep" x-auth-request-role)" == Viewer ]] \
+  || erreur "grafana-role : rôle Viewer attendu hors de ${groupe_admin:-SSO_GROUPE_ADMIN} (HTTP $(code_de "$rep"))"
+rep="$(requete_directe http://grafana-role:8080/ "X-Auth-Request-User: ${admin_grafana^^}")"
+[[ "$(code_de "$rep")" == 403 ]] \
+  || erreur "grafana-role : homonyme du compte admin local ($admin_grafana) non refusé (HTTP $(code_de "$rep"))"
+echo "    grafana-role : groupes → rôle conformes, homonyme du compte admin local refusé (403)."
+# Grafana joint sans Traefik (réseau de la plateforme) avec des en-têtes d'identité : source refusée
+rep="$(requete_directe http://grafana:3000/api/user "X-Auth-Request-User: root" "X-Auth-Request-Email: root@example.com" \
+  "X-Auth-Request-Role: Admin")"
+[[ "$(code_de "$rep")" != 200 && "$rep" != *'"login":"root"'* ]] \
+  || erreur "Grafana joint directement avec des en-têtes d'identité : connexion acceptée (adresse source non restreinte)"
+echo "    grafana:3000 hors Traefik, en-têtes d'identité forgés : refusé (HTTP $(code_de "$rep"))."
+
+# Jetons émis pour root par l'échange des codes de test révoqués (la session de la passerelle n'en dépend pas)
 # shellcheck disable=SC2016 # code Ruby
 readonly CODE_JETONS='
 app = Authn::OauthApplication.find_by(uid: ENV.fetch("SSO_CLIENT_ID")) or exit
@@ -842,20 +914,21 @@ dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_
   gitlab gitlab-rails runner "$CODE_JETONS" > /dev/null 2>&1 \
   || echo "Attention : jetons OAuth de test de root non révoqués (Admin > Applications)." >&2
 
-# d. Usurpation sur les routeurs hors passerelle : en-têtes d'identité forgés sans effet
+# e. Usurpation sur les routeurs hors passerelle : en-têtes d'identité forgés sans effet
 rep="$(requete "$gitlab_hote" "/api/v4/user" "${forges[@]}")"
 [[ "$(code_de "$rep")" == 401 ]] \
   || erreur "GitLab /api/v4/user avec en-têtes d'identité forgés : HTTP $(code_de "$rep") (attendu : 401)"
 echo "    $gitlab_hote : en-têtes d'identité forgés sans effet (API GitLab : 401)."
 if [[ "$services" == *" sonarqube "* ]]; then
-  # API publique hors passerelle : jeton invalide et en-têtes d'identité forgés → refusé
   rep="$(requete "$sonar_hote" "/api/authentication/validate" "${forges[@]}" \
     "header = $(cfg "Authorization: Bearer squ_jeton_factice_du_smoke_test")")"
   [[ "$(code_de "$rep")" == 200 && "$rep" == *'"valid":false'* ]] \
     || erreur "SonarQube /api (hors passerelle) avec en-têtes d'identité forgés : HTTP $(code_de "$rep"), session non refusée"
-  echo "    $sonar_hote : API hors passerelle (jeton invalide), en-têtes d'identité forgés sans effet (valid:false)."
-  # Routeur interne des jobs (sans passerelle) : sans jeton, en-têtes d'identité forgés → non connecté
-  rep="$(requete_vers http "$SONAR_INTERNE_HOTE" "$SONAR_INTERNE_PORT" "/api/users/current" "${forges[@]}")"
+  echo "    $sonar_hote : API hors passerelle (jeton), en-têtes d'identité forgés sans effet (valid:false)."
+  # Routeur interne des jobs (entrypoint interne de Traefik, sans passerelle) : sans jeton, en-têtes
+  # d'identité forgés → non connecté
+  rep="$(requete_directe "http://$ip_traefik:$SONAR_INTERNE_PORT/api/users/current" "Host: $SONAR_INTERNE_HOTE" \
+    "${SSO_FORGES_SONAR[@]}")"
   [[ "$(code_de "$rep")" == 401 || ("$(code_de "$rep")" == 200 && "$rep" == *'"isLoggedIn":false'*) ]] \
     || erreur "SonarQube, routeur interne ($SONAR_INTERNE_HOTE) avec en-têtes d'identité forgés : HTTP $(code_de "$rep"), utilisateur connecté"
   echo "    $SONAR_INTERNE_HOTE : routeur interne, en-têtes d'identité forgés sans effet (non connecté)."
@@ -866,7 +939,106 @@ if [[ "$services" == *" sonarqube "* ]]; then
   echo "    $sonar_hote : compte admin local accepté par l'API publique (Basic, hors passerelle)."
 fi
 
-# --- 11. Nettoyage --------------------------------------------------------------------------------
+# --- 11. Portainer --------------------------------------------------------------------------------
+
+etape "Portainer : connexion avec l'identité GitLab (docs/sso.md, « Portainer »)"
+verrou_tenu
+[[ "$services" == *" portainer "* ]] || erreur "service portainer absent de l'instance"
+[[ -n "$(dc ps -q --status running portainer)" ]] || erreur "service portainer arrêté (make deploy ENV=$env)"
+portainer_pret || erreur "API de Portainer injoignable depuis gitlab (docker compose logs portainer)"
+groupe_admin="$(env_valeur "$env_file" SSO_GROUPE_ADMIN)"
+portainer_hote="$(env_valeur "$env_file" PORTAINER_HOSTNAME)"
+portainer_hote="${portainer_hote:-portainer.localhost}"
+portainer_uri="$schema://$portainer_hote/"
+portainer_id="$(env_valeur_fichier "$env_file" SSO_PORTAINER_CLIENT_ID)"
+
+# a. Réglages OAuth et comptes, lus avec le compte admin local (accès de secours)
+sortie="$(portainer_api "$CODE_PORTAINER_CONTROLE" "$groupe_admin" "$gitlab_url/oauth/authorize" \
+  "$portainer_uri" "$portainer_id")" || erreur "lecture de la configuration de Portainer impossible (voir ci-dessus)"
+ecarts="$(sed -n 's/^ECART=//p' <<<"$sortie")"
+if [[ -n "$ecarts" ]]; then
+  while IFS= read -r ecart; do echo "    $ecart" >&2; done <<<"$ecarts"
+  erreur "connexion OAuth de Portainer absente ou différente de la configuration attendue : make bootstrap ENV=$env"
+fi
+echo "    Admin local accepté ; réglages OAuth conformes (application GitLab, retour $portainer_uri, sans création automatique de compte)."
+etrangers="$(sed -n 's/^ETRANGER=//p' <<<"$sortie" | paste -sd ' ' -)"
+[[ -z "$etrangers" ]] \
+  || erreur "compte(s) Portainer hors de ${groupe_admin:-SSO_GROUPE_ADMIN (vide)} : $etrangers (groupe modifié depuis le dernier bootstrap ? make bootstrap ENV=$env)"
+echo "    Comptes GitLab : $(sed -n 's/^COMPTES=//p' <<<"$sortie"), tous membres de ${groupe_admin:-SSO_GROUPE_ADMIN (vide)}."
+
+# b. Utilisateur GitLab hors du groupe : Portainer échange le code auprès de GitLab, lit l'identité,
+#    puis refuse la connexion (aucun compte)
+sortie="$(portainer_api "$CODE_PORTAINER_TEST" "$PORTAINER_TEST" "$groupe_admin")" \
+  || erreur "utilisateur GitLab de test $PORTAINER_TEST impossible à préparer (voir ci-dessus)"
+portainer_test_id="$(sed -n 's/^ID=//p' <<<"$sortie")"
+[[ -n "$portainer_test_id" ]] || erreur "identifiant de l'utilisateur de test absent"
+erreurs="$(mktemp)"
+if ! sortie="$(dc exec -T -e SSO_CLIENT_ID="$portainer_id" -e SSO_UTILISATEUR="$PORTAINER_TEST" \
+    -e SSO_URI="$portainer_uri" -e SSO_SCOPES="$PORTAINER_SCOPES" gitlab gitlab-rails runner "$CODE_GRANT" 2> "$erreurs")"; then
+  cat "$erreurs" >&2
+  rm -f "$erreurs"
+  erreur "code d'autorisation de test (Portainer) impossible à créer (voir ci-dessus)"
+fi
+rm -f "$erreurs"
+stdin_extra=("$(sed -n 's/^CODE=//p' <<<"$sortie" | tail -n1)")
+sortie="$(portainer_api "$CODE_PORTAINER_OAUTH")" || { stdin_extra=(); erreur "Portainer injoignable"; }
+stdin_extra=()
+code_oauth="$(sed -n 's/^CODE=//p' <<<"$sortie")"
+message_oauth="$(sed -n 's/^MESSAGE=//p' <<<"$sortie")"
+[[ "$code_oauth" == 403 && "$message_oauth" == *"not created beforehand"* ]] \
+  || erreur "connexion OAuth de $PORTAINER_TEST (hors groupe) : HTTP $code_oauth « $message_oauth » (attendu : 403, compte absent)"
+echo "    $PORTAINER_TEST (hors groupe) : identité lue auprès de GitLab, connexion refusée par Portainer (HTTP 403)."
+
+# c. Passerelle : session de l'utilisateur de test sur le hostname de Portainer, refusée hors du groupe
+#    (middleware portainer-admins). Sans objet si SSO_GROUPE_ADMIN est vide (pas de filtre) ou si
+#    SSO_GITLAB_GROUPE est renseigné (l'utilisateur de test, hors de ce groupe, n'ouvre pas de session).
+if [[ -z "$groupe_admin" ]]; then
+  echo "    Passerelle : SSO_GROUPE_ADMIN vide, pas de filtre de groupe devant Portainer (aucun compte)."
+elif [[ -n "$(env_valeur "$env_file" SSO_GITLAB_GROUPE)" ]]; then
+  echo "    Passerelle : filtre de groupe non testé (SSO_GITLAB_GROUPE renseigné, utilisateur de test refusé avant)."
+else
+  sso_jar=1
+  rep="$(requete "$portainer_hote" "/" "cookie-jar = $(cfg "$SSO_JAR")")"
+  loc="$(entete_de "$rep" location)"
+  [[ "$(code_de "$rep")" == 302 && "$loc" == "$gitlab_url/oauth/authorize?"* ]] \
+    || erreur "$portainer_hote : redirection vers GitLab attendue, HTTP $(code_de "$rep")"
+  state="$(param state)" defi="$(param code_challenge)"
+  erreurs="$(mktemp)"
+  if ! sortie="$(dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_ID)" \
+      -e SSO_UTILISATEUR="$PORTAINER_TEST" -e SSO_URI="$schema://$portainer_hote/oauth2/callback" \
+      -e SSO_SCOPES="$SSO_SCOPES_PASSERELLE" -e SSO_DEFI="$defi" \
+      gitlab gitlab-rails runner "$CODE_GRANT" 2> "$erreurs")"; then
+    cat "$erreurs" >&2
+    rm -f "$erreurs"
+    erreur "code d'autorisation de test (passerelle) impossible à créer (voir ci-dessus)"
+  fi
+  rm -f "$erreurs"
+  code_auth="$(sed -n 's/^CODE=//p' <<<"$sortie" | tail -n1)"
+  rep="$(requete "$portainer_hote" "/oauth2/callback?code=$code_auth&state=$state" "cookie = $(cfg "$SSO_JAR")" \
+    "cookie-jar = $(cfg "$SSO_JAR")")"
+  code_auth=""
+  [[ "$(code_de "$rep")" == 302 ]] || erreur "callback de la passerelle ($PORTAINER_TEST) : HTTP $(code_de "$rep")"
+  rep="$(requete "$portainer_hote" "/" "cookie = $(cfg "$SSO_JAR")")"
+  [[ "$(code_de "$rep")" == 403 ]] \
+    || erreur "$portainer_hote : $PORTAINER_TEST (hors de $groupe_admin) obtient HTTP $(code_de "$rep") avec sa session (attendu : 403)"
+  dc exec -T gitlab-runner rm -f "$SSO_JAR" > /dev/null 2>&1 || true
+  sso_jar=0
+  echo "    $portainer_hote : session de passerelle de $PORTAINER_TEST refusée hors de $groupe_admin (HTTP 403)."
+fi
+gitlab_api "$CODE_BLOCAGE" "$portainer_test_id" > /dev/null || erreur "blocage de l'utilisateur de test impossible"
+echo "    Utilisateur de test $PORTAINER_TEST bloqué (débloqué au prochain smoke test)."
+if ((nettoyer)); then
+  # shellcheck disable=SC2016 # code Ruby
+  code_supp_utilisateur='
+  code, _ = api("delete", "/users/#{ARGV[0]}?hard_delete=true")
+  abort("Suppression de l utilisateur #{ARGV[0]} : HTTP #{code}") unless [204, 404].include?(code)
+  '
+  gitlab_api "$code_supp_utilisateur" "$portainer_test_id" || erreur "suppression de l'utilisateur de test impossible"
+  echo "    Utilisateur de test $PORTAINER_TEST supprimé (NETTOYER=1)."
+fi
+portainer_test_id=""
+
+# --- 12. Nettoyage --------------------------------------------------------------------------------
 
 if ((nettoyer)); then
   etape "Nettoyage des projets de test (NETTOYER=1)"
@@ -908,5 +1080,5 @@ else
   echo "  Projet    : $projet_url"
   echo "  Pipeline  : $pipeline_url"
   echo "  SonarQube : $sonar_url/dashboard?id=$SONAR_CLE"
-  echo "  Supprimer les projets de test : make smoke ENV=$env NETTOYER=1"
+  echo "  Supprimer les projets et l'utilisateur de test : make smoke ENV=$env NETTOYER=1"
 fi

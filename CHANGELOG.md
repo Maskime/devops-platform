@@ -9,16 +9,26 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
-- Authentification unique : passerelle oauth2-proxy (fournisseur GitLab) devant la page d'accueil,
-  PlantUML, Grafana, SonarQube et Portainer ; sans session, redirection vers la connexion GitLab,
-  restriction facultative à un groupe (`SSO_GITLAB_GROUPE`). `make bootstrap` crée l'application OAuth
-  de confiance et désactive l'inscription libre et la visibilité publique de GitLab ; `make smoke`
-  vérifie la passerelle (`docs/sso.md`).
 - Connexion automatique à SonarQube avec l'identité GitLab (SSO par en-têtes, relais `sonarqube-sso`) :
   compte créé à la première visite (login et e-mail GitLab), groupes GitLab synchronisés, membres de
   `SSO_GROUPE_ADMIN` dans `sonar-administrators`. Scanner, API par jeton, serveur MCP et compte admin
   local inchangés ; `make smoke` vérifie l'arrivée connectée et les tentatives d'usurpation
   (`docs/sso.md`).
+- Connexion automatique à Grafana avec l'identité GitLab (`auth.proxy`) : compte créé à la première
+  visite, rôle `Admin` pour les membres du groupe `SSO_GROUPE_ADMIN`, `Viewer` pour les autres ;
+  identité acceptée de la seule adresse de Traefik sur le réseau dédié `grafana-proxy`
+  (`GRAFANA_PROXY_SUBNET`, `GRAFANA_PROXY_IP_TRAEFIK`) ; `make smoke` vérifie la connexion et le rôle
+  (`docs/sso.md`, « Grafana »).
+- Portainer : connexion avec l'identité GitLab (OAuth, seconde application GitLab de confiance créée par
+  `make bootstrap`), réservée aux membres du groupe `SSO_GROUPE_ADMIN` : filtre de groupe à la passerelle
+  et comptes Portainer administrateurs synchronisés par `make bootstrap` ; le compte `admin` local reste
+  l'accès de secours. `make smoke` vérifie les réglages et le refus d'un utilisateur hors du groupe
+  (`docs/sso.md`, « Portainer »).
+- Authentification unique : passerelle oauth2-proxy (fournisseur GitLab) devant la page d'accueil,
+  PlantUML, Grafana, SonarQube et Portainer ; sans session, redirection vers la connexion GitLab,
+  restriction facultative à un groupe (`SSO_GITLAB_GROUPE`). `make bootstrap` crée l'application OAuth
+  de confiance et désactive l'inscription libre et la visibilité publique de GitLab ; `make smoke`
+  vérifie la passerelle (`docs/sso.md`).
 - `make init ENV=<env> COMPLETER=1` : ajoute à un fichier d'instance existant les secrets générés qui
   lui manquent, sans modifier le reste (`docs/initialisation.md`).
 - `make stop ENV=<env>` : arrête les conteneurs de l'instance sans les supprimer (`docker compose stop`) ;
@@ -30,6 +40,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Migration
 
+- Portainer avec l'identité GitLab (`docs/sso.md`, « Portainer ») :
+  1. `make init ENV=<env> COMPLETER=1` (`SSO_PORTAINER_CLIENT_ID`, `SSO_PORTAINER_CLIENT_SECRET`) ;
+  2. renseigner `SSO_GROUPE_ADMIN` (groupe GitLab des administrateurs) dans `envs/<env>.env` ;
+  3. vérifier que `PORTAINER_ADMIN_PASSWORD` est bien le mot de passe actuel du compte `admin` de
+     Portainer (le reporter s'il a été changé dans l'interface) ;
+  4. supprimer dans Portainer les comptes locaux autres que `admin` qui ne correspondent pas à un membre
+     du groupe : `make bootstrap` s'arrête sans rien modifier tant qu'il en reste ;
+  5. `make deploy ENV=<env>`, `make bootstrap ENV=<env>`, `make smoke ENV=<env>`.
 - Authentification unique (`docs/sso.md`) :
   1. `make init ENV=<env> COMPLETER=1` (identifiants de la passerelle) ;
   2. `make deploy ENV=<env>` : les services protégés affichent « Passerelle d'authentification non
@@ -39,6 +57,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
   4. `make smoke ENV=<env>`.
 
   Les appels par jeton à l'API de Grafana ou de Portainer passent désormais par la passerelle.
+- Connexion automatique à Grafana (`docs/sso.md`, « Grafana ») : facultatif, `SSO_GROUPE_ADMIN` dans
+  `envs/<env>.env` ; `GRAFANA_ADMIN_USER=root` est refusé (homonyme du compte administrateur GitLab) ;
+  puis `make deploy ENV=<env>` (réseau `devops-platform_grafana-proxy` créé, Traefik et Grafana
+  recréés). Les comptes Grafana existants de même login qu'un utilisateur GitLab lui sont reliés.
 - Connexion automatique à SonarQube (`docs/sso.md`, « SonarQube ») :
   1. facultatif : `SSO_GROUPE_ADMIN=<chemin du groupe GitLab des administrateurs>` dans `envs/<env>.env` ;
   2. vérifier les comptes locaux créés à la main dans SonarQube : un utilisateur GitLab de même login
