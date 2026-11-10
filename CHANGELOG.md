@@ -85,6 +85,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Corrigé
 
+- Instance distante : `config/grafana/role/` est copié sur le serveur avec le reste de la configuration ;
+  `grafana-role` ne démarrait pas (source du montage absente du serveur), ce qui faisait échouer
+  `make deploy` et empêchait toute connexion à Grafana. En local, une modification du lanceur
+  redémarre `grafana-role` au `make deploy` suivant (#233).
 - `make backup` et `make restore` ne refusent plus une instance saine en lisant l'image de GitLab pour
   `gitlab-runner` (image d'un service lue dans sa propre définition, pas dans celles de ses dépendances).
 - `docs/montee-de-version.md` : sauvegarde et retour arrière par `make backup` / `make restore`, commandes

@@ -90,7 +90,8 @@ doivent donc y être présents.
 
 - `config/loki/loki-config.yaml`
 - `config/promtail/promtail-config.yaml`
-- `config/grafana/provisioning/`
+- `config/grafana/provisioning/` et `config/grafana/role/`
+- `config/home/`, `config/oauth2-proxy/` et `config/sonarqube-sso/`
 - en `TLS_MODE=custom` : `config/traefik/tls-custom.yml`, `config/certs/cert.pem` et
   `config/certs/key.pem`
 - en `TLS_MODE=custom`, à part : `config/certs/ca/ca.pem` s'il existe (seul fichier copié de
@@ -109,12 +110,12 @@ autre partie de la configuration ne les recrée donc pas.
 
 **Prise en compte d'une modification** : un fichier modifié produit une nouvelle empreinte, donc un
 nouveau répertoire. `make deploy` recrée alors les services qui montent la configuration (Loki,
-Promtail, Grafana, page d'accueil, et Traefik en `TLS_MODE=custom`), et eux seuls. Un changement de
-`ca.pem` recrée `gitlab-runner` et `sonarqube`, et eux seuls, par `make deploy` ou `make reload-certs`.
+Promtail, Grafana et son calcul de rôle `grafana-role`, page d'accueil, passerelle d'authentification,
+relais SonarQube, et Traefik en `TLS_MODE=custom`), et eux seuls. Un changement de `ca.pem` recrée `gitlab-runner` et `sonarqube`, et eux seuls, par `make deploy` ou `make reload-certs`.
 
-En local, les services montent `config/` directement : `make deploy` redémarre Loki, Promtail, Grafana ou
-la page d'accueil si leur configuration a été modifiée depuis leur démarrage (date de modification des
-fichiers), et eux seuls. Traefik relit ses certificats par `make reload-certs`.
+En local, les services montent `config/` directement : `make deploy` redémarre les services de la liste
+ci-dessus (hors Traefik) si leur configuration a été modifiée depuis leur démarrage (date de
+modification des fichiers), et eux seuls. Traefik relit ses certificats par `make reload-certs`.
 
 **Méthode de copie** : le transfert passe par le contexte Docker. Un conteneur `busybox` (sans réseau)
 extrait une archive tar envoyée depuis le poste. Il ne faut ni `rsync`, ni `scp`, ni `sudo`.
