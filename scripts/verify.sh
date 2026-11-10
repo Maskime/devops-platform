@@ -7,6 +7,8 @@ set -uo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT" || exit 1
 failed=0
+# shellcheck source=scripts/lib/config-montee.sh
+source "$ROOT/scripts/lib/config-montee.sh"
 
 # Images des linters : tag versionné ou digest (contrôlé par scripts/check-images.sh).
 # yamllint : aucun tag versionné publié, le tag 1 est figé par son digest.
@@ -165,6 +167,21 @@ config_cible() {
   [[ "$1" == *"|"* ]] && variables=(TLS_MODE="${1#*|}" "${VARS_MODE_TLS[@]}")
   env "${variables[@]}" docker compose --env-file "$env_file" -f compose.yml --profile '*' config 2>/dev/null
 }
+# Montages d'une configuration résolue (entrée standard), une ligne service:source:cible. Sortie
+# normalisée : clés de service à 4 espaces, éléments à 6, champs à 8.
+montages_config() {
+  awk '
+    function sortir() { if (src != "" || dst != "") print service ":" src ":" dst; src = dst = "" }
+    /^[^ ]/ { sortir(); dans_services = ($0 == "services:"); dans_vol = 0; next }
+    !dans_services { next }
+    /^  [^ ]/ { sortir(); service = $1; sub(/:$/, "", service); dans_vol = 0; next }
+    /^    [^ ]/ { sortir(); dans_vol = ($1 == "volumes:"); next }
+    dans_vol && /^      - / { sortir() }
+    dans_vol && /^ +(- )?source:/ { src = $NF }
+    dans_vol && /^ +(- )?target:/ { dst = $NF }
+    END { sortir() }
+  '
+}
 port_autorise() { # <service:publié:cible>
   local a
   for a in "${PORTS_AUTORISES[@]}"; do
@@ -252,17 +269,7 @@ if [[ -f compose.yml ]]; then
     # Montages (service:source:cible), réseaux (service:clé), réseaux internes (clé), arguments
     # (service<TAB>argument) et variables (service<TAB>clé) des proxys. Sortie normalisée : clés de
     # service à 4 espaces, éléments à 6, champs à 8.
-    mapfile -t montages < <(awk '
-      function sortir() { if (src != "" || dst != "") print service ":" src ":" dst; src = dst = "" }
-      /^[^ ]/ { sortir(); dans_services = ($0 == "services:"); dans_vol = 0; next }
-      !dans_services { next }
-      /^  [^ ]/ { sortir(); service = $1; sub(/:$/, "", service); dans_vol = 0; next }
-      /^    [^ ]/ { sortir(); dans_vol = ($1 == "volumes:"); next }
-      dans_vol && /^      - / { sortir() }
-      dans_vol && /^ +(- )?source:/ { src = $NF }
-      dans_vol && /^ +(- )?target:/ { dst = $NF }
-      END { sortir() }
-    ' <<< "$config")
+    mapfile -t montages < <(montages_config <<< "$config")
     mapfile -t reseaux < <(awk '
       /^[^ ]/ { dans_services = ($0 == "services:"); dans_net = 0; next }
       !dans_services { next }
@@ -344,6 +351,71 @@ if [[ -f compose.yml ]]; then
       ok "$f : socket monté par ${SOCKET_AUTORISES[*]} au plus ; ${PROXYS_ATTENDUS[*]} seuls avec leur client sur leur réseau interne ; logs : ${LOGS_AUTORISES[*]}"
     fi
   done
+else
+  ok "pas encore de compose.yml"
+fi
+
+# 3 sexies. Configuration copiée sur l'hôte d'une instance distante (scripts/lib/config-montee.sh) :
+#           chaque montage de ${PLATFORM_CONFIG_DIR}/… figure dans CONFIG_MONTEE (service attendu :
+#           SERVICE_CONFIG) ou dans CONFIG_MONTEE_CUSTOM ; sinon la source manque sur le serveur
+#           (create_host_path: false) et le service ne démarre pas. Aucun montage direct de config/
+#           (non copié en distant). Chaque entrée des listes est montée et existe dans config/.
+#           PLATFORM_CONFIG_DIR et PLATFORM_CA_DIR remplacés par des sentinelles. Mêmes cibles que
+#           les sections précédentes.
+section "configuration copiée sur l'hôte"
+SENTINELLE_CONFIG=/verify-platform-config
+SENTINELLE_CA=/verify-platform-ca
+if [[ -f compose.yml ]]; then
+  declare -A montees=()
+  for cible in "${cibles[@]}"; do
+    f="${cible%%|*}"
+    [[ "$cible" == *"|"* ]] && f="$f, TLS_MODE=${cible#*|}"
+    if ! config="$(PLATFORM_CONFIG_DIR="$SENTINELLE_CONFIG" PLATFORM_CA_DIR="$SENTINELLE_CA" \
+        config_cible "$cible")"; then
+      ko "$f : configuration illisible"; continue
+    fi
+    mapfile -t montages < <(montages_config <<< "$config")
+    interdits=() nb=0
+    for m in "${montages[@]}"; do
+      s="${m%%:*}" reste="${m#*:}" src="${reste%%:*}"
+      if [[ "$src" == "$ROOT/config" || "$src" == "$ROOT/config/"* ]]; then
+        interdits+=("$s monte ${src#"$ROOT"/} sans \${PLATFORM_CONFIG_DIR} ni \${PLATFORM_CA_DIR}")
+        continue
+      fi
+      [[ "$src" == "$SENTINELLE_CONFIG/"* ]] || continue
+      chemin="${src#"$SENTINELLE_CONFIG"/}" nb=$((nb + 1))
+      montees[$chemin]=1
+      if dans_liste "$chemin" "${CONFIG_MONTEE_CUSTOM[@]}"; then continue; fi
+      if ! dans_liste "$chemin" "${CONFIG_MONTEE[@]}"; then
+        interdits+=("$chemin (monté par $s) absent de CONFIG_MONTEE")
+      elif [[ "${SERVICE_CONFIG[$chemin]:-}" != "$s" ]]; then
+        interdits+=("$chemin monté par $s, SERVICE_CONFIG : ${SERVICE_CONFIG[$chemin]:-aucun}")
+      fi
+    done
+    if ((nb == 0)); then
+      ko "$f : aucun montage de \${PLATFORM_CONFIG_DIR} lu (format de docker compose config inattendu ?)"
+    elif ((${#interdits[@]})); then
+      ko "$f : ${interdits[*]} (scripts/lib/config-montee.sh)"
+    else
+      ok "$f : $nb montage(s) copiés sur l'hôte"
+    fi
+  done
+  # Entrées des listes : montées par au moins une cible, présentes dans config/, SERVICE_CONFIG complet
+  orphelins=()
+  for chemin in "${CONFIG_MONTEE[@]}" "${CONFIG_MONTEE_CUSTOM[@]}"; do
+    [[ -n "${montees[$chemin]:-}" ]] || orphelins+=("$chemin non monté")
+  done
+  for chemin in "${CONFIG_MONTEE[@]}"; do
+    [[ -e "config/$chemin" ]] || orphelins+=("config/$chemin introuvable")
+  done
+  for chemin in "${!SERVICE_CONFIG[@]}"; do
+    dans_liste "$chemin" "${CONFIG_MONTEE[@]}" || orphelins+=("SERVICE_CONFIG[$chemin] hors CONFIG_MONTEE")
+  done
+  if ((${#orphelins[@]})); then
+    ko "scripts/lib/config-montee.sh : ${orphelins[*]}"
+  else
+    ok "scripts/lib/config-montee.sh : ${#CONFIG_MONTEE[@]} + ${#CONFIG_MONTEE_CUSTOM[@]} entrée(s) montée(s)"
+  fi
 else
   ok "pas encore de compose.yml"
 fi

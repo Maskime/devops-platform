@@ -9,6 +9,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- `make verify` contrôle que chaque fichier de `config/` monté par un service est copié sur le serveur
+  d'une instance distante, avec le bon service à recréer (liste dans `scripts/lib/config-montee.sh`,
+  `docs/deploiement.md`).
 - Connexion automatique à SonarQube avec l'identité GitLab (SSO par en-têtes, relais `sonarqube-sso`) :
   compte créé à la première visite (login et e-mail GitLab), groupes GitLab synchronisés, membres de
   `SSO_GROUPE_ADMIN` dans `sonar-administrators`. Scanner, API par jeton, serveur MCP et compte admin
