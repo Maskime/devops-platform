@@ -28,6 +28,8 @@ source "$ROOT/scripts/lib/env.sh"
 source "$ROOT/scripts/lib/verrou.sh"
 # shellcheck source=scripts/lib/images.sh
 source "$ROOT/scripts/lib/images.sh"
+# shellcheck source=scripts/lib/config-montee.sh
+source "$ROOT/scripts/lib/config-montee.sh"
 # Verrou hérité par scripts/bootstrap/gitlab.sh : jamais repris du shell de l'opérateur
 unset VERROU_PID_HERITE
 
@@ -38,20 +40,7 @@ readonly PARALLELISME_SSH=4
 # Étapes de make bootstrap, dans l'ordre d'exécution (scripts/bootstrap/<étape>.sh) : SonarQube
 # d'abord, son token d'analyse servant à la configuration de GitLab
 readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
-# Fichiers de config/ montés par les services (les env_file, lus par Compose sur le poste, n'en font
-# pas partie). TLS_MODE=custom : fichiers de compose/tls/custom.yml en plus. La CA facultative, montée
-# par gitlab-runner et sonarqube (compose/tls/gitlab/custom.yml, compose/tls/sonarqube/custom.yml), a sa
-# propre copie et sa propre empreinte : un autre changement de config ne recrée pas ces services, et
-# seul ca.pem est copié (jamais une clé de CA déposée à côté).
-readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning
-  grafana/role home oauth2-proxy sonarqube-sso)
-# Service qui lit chaque élément de CONFIG_MONTEE à son démarrage (à garder synchronisé) : en local, le
-# montage pointe directement sur config/ et `up` ne le recrée pas après une modification (appliquer_config)
-declare -rA SERVICE_CONFIG=([loki/loki-config.yaml]=loki [promtail/promtail-config.yaml]=promtail
-  [grafana/provisioning]=grafana [grafana/role]=grafana-role [home]=home [oauth2-proxy]=oauth2-proxy
-  [sonarqube-sso]=sonarqube-sso)
-readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.pem)
-readonly CA_CUSTOM=config/certs/ca/ca.pem
+# CONFIG_MONTEE, SERVICE_CONFIG, CONFIG_MONTEE_CUSTOM et CA_CUSTOM : scripts/lib/config-montee.sh
 # Verrou de l'instance, dans le volume du runner (même fichier dans scripts/bootstrap/gitlab.sh et
 # scripts/smoke.sh)
 readonly FICHIER_VERROU=/etc/gitlab-runner/.bootstrap.lock

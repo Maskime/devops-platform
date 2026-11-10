@@ -97,6 +97,16 @@ doivent donc y être présents.
 - en `TLS_MODE=custom`, à part : `config/certs/ca/ca.pem` s'il existe (seul fichier copié de
   `config/certs/ca/` : [CA privée](certificats.md#ca-privée))
 
+La liste est définie dans `scripts/lib/config-montee.sh`, avec le service qui monte chaque élément.
+`make verify` la contrôle pour chaque environnement et chaque mode TLS :
+
+- chaque montage `${PLATFORM_CONFIG_DIR}/…` des fichiers compose y figure, avec le bon service ;
+- aucun service ne monte `config/` directement, sans `${PLATFORM_CONFIG_DIR}` ni `${PLATFORM_CA_DIR}` ;
+- chaque entrée de la liste est montée par un service et existe dans `config/`.
+
+Un montage absent de la liste échouerait sur le serveur seulement : sa source n'y serait pas copiée et
+le service ne démarrerait pas.
+
 **Où** : dans `${DEPLOY_DIR}/config-<empreinte>` sur le serveur. L'empreinte est calculée sur les
 chemins et le contenu de ces fichiers. Les montages pointent vers ce répertoire via la variable interne
 `PLATFORM_CONFIG_DIR`, qui vaut par défaut `config/` du repo.
