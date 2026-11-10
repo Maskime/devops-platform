@@ -17,6 +17,9 @@ DEPLOY_SSH=ssh://deploy@devops.mondomaine.fr     # vide ou absente : moteur Dock
 | `make down ENV=<env>` | Arrête l'instance : conteneurs et réseaux supprimés, **volumes conservés**. Instance distante : [confirmation](#arrêt) |
 | `make backup ENV=<env>` / `make restore ENV=<env> SAUVEGARDE=<répertoire>` | Sauvegarde des données sur le poste, restauration : [Sauvegarde et restauration](sauvegarde.md) |
 
+Les mêmes cibles `deploy` et `status` se lancent aussi depuis GitHub Actions :
+[Déploiement depuis GitHub Actions](deploiement-github.md).
+
 `DEPLOY_SSH` et `DEPLOY_DIR` sont lues **dans le fichier uniquement** : contrairement aux autres
 variables, une valeur exportée dans le shell est ignorée, pour que la cible d'une commande ne dépende
 que du fichier de l'instance.

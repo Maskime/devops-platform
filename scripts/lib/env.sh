@@ -4,6 +4,12 @@
 # scripts de bootstrap et de smoke test.
 # Fichier à sourcer : ne modifie pas les options du shell appelant.
 
+# Clés d'un fichier d'instance dont la valeur est secrète : masquée dans les logs de GitHub Actions
+# (scripts/ci/preparer-poste.sh). make verify contrôle que chaque secret de envs/.env.example (lignes
+# non commentées) y correspond.
+# shellcheck disable=SC2034 # utilisé par les scripts qui sourcent ce fichier
+MOTIF_CLE_SENSIBLE='(PASSWORD|PASSWD|SECRET|TOKEN|KEY|CLIENT_ID|SALT|CREDENTIAL)'
+
 # Dernière affectation de <clé> dans <fichier>, guillemets englobants retirés (vide si absente)
 env_valeur_fichier() { # <fichier> <clé>
   local ligne valeur=""

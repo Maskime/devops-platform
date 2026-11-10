@@ -82,6 +82,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Installation pas à pas](docs/installation.md) | Instance vierge de bout en bout : prérequis (serveur, DNS, ports, ressources), choix du `TLS_MODE`, `init` → `host-prereqs` → `deploy` → `bootstrap` → `smoke`, dépannage |
 | [Préparation d'un serveur](docs/serveur.md) | `scripts/host-prereqs.sh` : Docker, `vm.max_map_count`, `daemon.json`, pare-feu, nettoyage Docker planifié |
 | [Déploiement](docs/deploiement.md) | `make deploy` / `status` / `stop` / `down`, serveur distant (`DEPLOY_SSH`), copie de la config |
+| [Déploiement depuis GitHub Actions](docs/deploiement-github.md) | Workflow `deploy` (`deploy`, `status`) : environnement GitHub protégé, clé SSH dédiée, `known_hosts`, secrets, masquage des logs, exposition SSH |
 | [Initialisation](docs/initialisation.md) | `make init` : questions, secrets générés, régénération (`FORCE=1`), complément (`COMPLETER=1`) |
 | [Bootstrap](docs/bootstrap.md) | `make bootstrap` : enchaînement des étapes, GitLab (jeton d'administration, runner d'instance, image auxiliaire), idempotence |
 | [Analyse SonarQube depuis la CI](docs/analyse-sonarqube.md) | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN`, exemple de job `sonar-scanner` |

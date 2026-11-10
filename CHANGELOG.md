@@ -9,6 +9,12 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Déploiement depuis GitHub Actions : workflow `deploy` (déclenchement manuel, `deploy` ou `status`) qui
+  pilote une instance distante dans l'environnement GitHub du même nom, protégé (branche `main` seule,
+  relecteur obligatoire, contrôlés avant tout accès aux secrets). `scripts/ci/preparer-poste.sh`
+  reconstitue le poste (fichier d'instance, clé SSH dédiée, `known_hosts` vérifié, certificats) et
+  masque les secrets et `DEPLOY_SSH` dans les logs. `make verify` contrôle les workflows (actionlint) et
+  le masquage de chaque secret de `envs/.env.example` (`docs/deploiement-github.md`).
 - `make verify` contrôle que chaque fichier de `config/` monté par un service est copié sur le serveur
   d'une instance distante, avec le bon service à recréer (liste dans `scripts/lib/config-montee.sh`,
   `docs/deploiement.md`).

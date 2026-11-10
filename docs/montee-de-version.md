@@ -49,6 +49,7 @@ Images d'outillage, épinglées en dur dans les scripts (variables `*_IMAGE`, co
 |---|---|---|
 | `koalaman/shellcheck` | `scripts/verify.sh` | lint des scripts |
 | `cytopia/yamllint` | `scripts/verify.sh` | lint YAML (aucun tag versionné publié : figé par digest) |
+| `rhysd/actionlint` | `scripts/verify.sh` | lint des workflows GitHub Actions (shellcheck des blocs `run:` inclus) |
 | `alpine` | `scripts/bootstrap/gitlab.sh` | image par défaut des jobs du runner d'instance |
 | `busybox` | `scripts/lib/images.sh` | lecture et écriture du marqueur d'instance sur l'hôte (`scripts/instance.sh`), sentinelles de l'isolation des projets co-localisés (`make smoke`), copie des volumes par `make backup` et `make restore` (`scripts/sauvegarde.sh`) |
 

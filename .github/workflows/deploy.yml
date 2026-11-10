@@ -1,0 +1,154 @@
+# Pilotage d'une instance distante depuis l'onglet Actions (docs/deploiement-github.md) : mêmes cibles
+# make que sur le poste de l'opérateur, via le contexte Docker SSH (DEPLOY_SSH). Le runner reconstitue
+# le poste à partir des secrets de l'environnement GitHub du même nom que l'instance.
+#
+# Dépôt public : déclenchement manuel uniquement (jamais push, pull_request ni pull_request_target),
+# depuis main, environnement protégé (relecteur obligatoire), permissions minimales, actions épinglées
+# par SHA. Aucune action destructive (stop, down, restore, FORCER=1) n'est proposée.
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance:
+        description: "Instance (nom de l'environnement GitHub et de envs/<instance>.env)"
+        required: true
+        type: string
+      action:
+        description: "Cible make à exécuter"
+        required: true
+        type: choice
+        options:
+          - status
+          - deploy
+        default: status
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Contrôles sans environnement GitHub ni secret : un nom invalide ne doit pas viser (ni créer) un
+  # environnement, un run hors de main ne doit pas atteindre ses secrets
+  controle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read  # lecture de la configuration des environnements
+    steps:
+      - name: Branche main
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "$REF" != refs/heads/main ]]; then
+            echo "::error::Déploiement réservé à la branche main (run lancé depuis $REF)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Nom d'instance
+        env:
+          INSTANCE: ${{ inputs.instance }}
+        run: make check-env-name ENV="$INSTANCE"
+
+      # Un job qui vise un environnement inexistant le crée, sans protection : il doit exister, avec ses
+      # règles, avant le premier run. Seules ces règles protègent les secrets (un workflow modifié sur une
+      # autre branche contournerait les contrôles de ce fichier).
+      - name: Environnement GitHub protégé
+        env:
+          INSTANCE: ${{ inputs.instance }}
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}/repos/${{ github.repository }}/environments
+        run: |
+          appel() { curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$1"; }
+          if ! envt="$(appel "$API/$INSTANCE")"; then
+            echo "::error::Environnement GitHub « $INSTANCE » introuvable : le créer avec ses règles et ses secrets (docs/deploiement-github.md)."
+            exit 1
+          fi
+          erreurs=()
+          jq -e '.protection_rules // [] | any(.type == "required_reviewers")' <<<"$envt" >/dev/null \
+            || erreurs+=("aucun relecteur obligatoire (Required reviewers)")
+          if jq -e '.deployment_branch_policy.custom_branch_policies == true' <<<"$envt" >/dev/null; then
+            branches="$(appel "$API/$INSTANCE/deployment-branch-policies" \
+              | jq -r '[.branch_policies[] | "\(.type // "branch"):\(.name)"] | sort | join(" ")')"
+            [[ "$branches" == "branch:main" ]] \
+              || erreurs+=("déploiement autorisé depuis « $branches » (attendu : la seule branche main)")
+          else
+            erreurs+=("déploiement non restreint à la branche main (Deployment branches and tags)")
+          fi
+          if ((${#erreurs[@]})); then
+            for e in "${erreurs[@]}"; do echo "::error::Environnement « $INSTANCE » : $e."; done
+            echo "Règles attendues : docs/deploiement-github.md"
+            exit 1
+          fi
+          echo "Environnement « $INSTANCE » : relecteur obligatoire, branche main seule."
+
+  instance:
+    needs: controle
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.instance }}
+    # Un run par instance à la fois, jamais annulé en cours (déploiement interrompu)
+    concurrency:
+      group: deploy-${{ inputs.instance }}
+      cancel-in-progress: false
+    # make deploy : arrêt gracieux du runner GitLab (GITLAB_RUNNER_STOP_GRACE_PERIOD, 1 h par défaut),
+    # attente de santé (15 min au plus), puis éventuelle application de la CA privée (15 min au plus).
+    # Variable de dépôt DEPLOY_TIMEOUT_MINUTES pour une période d'arrêt plus longue.
+    timeout-minutes: ${{ fromJSON(vars.DEPLOY_TIMEOUT_MINUTES || '120') }}
+    steps:
+      - name: Branche main
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "$REF" != refs/heads/main ]]; then
+            echo "::error::Déploiement réservé à la branche main (run lancé depuis $REF)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Secrets passés à cette seule étape ; valeurs sensibles masquées avant toute commande make
+      - name: Préparation du poste
+        env:
+          INSTANCE: ${{ inputs.instance }}
+          INSTANCE_ENV: ${{ secrets.INSTANCE_ENV }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          TLS_CERT_PEM: ${{ secrets.TLS_CERT_PEM }}
+          TLS_KEY_PEM: ${{ secrets.TLS_KEY_PEM }}
+          TLS_CA_PEM: ${{ secrets.TLS_CA_PEM }}
+        run: scripts/ci/preparer-poste.sh "$INSTANCE"
+
+      - name: Versions de Docker
+        run: |
+          docker version --format 'Docker {{.Client.Version}} (moteur local {{.Server.Version}})'
+          docker compose version
+
+      - name: make ${{ inputs.action }}
+        env:
+          INSTANCE: ${{ inputs.instance }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          case "$ACTION" in
+            deploy | status) ;;
+            *) echo "::error::Action non autorisée : $ACTION"; exit 1 ;;
+          esac
+          make "$ACTION" ENV="$INSTANCE"
+
+      # Runner hébergé éphémère : nettoyage par précaution (clé, fichier d'instance, contexte Docker)
+      - name: Nettoyage
+        if: always()
+        env:
+          INSTANCE: ${{ inputs.instance }}
+        run: |
+          rm -f ~/.ssh/id_deploy ~/.ssh/known_hosts_deploy ~/.ssh/config "envs/$INSTANCE.env" config/certs/*.pem config/certs/ca/ca.pem
+          docker context rm -f "devops-platform-$INSTANCE" >/dev/null 2>&1 || true
