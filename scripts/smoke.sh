@@ -6,9 +6,10 @@
 # jobs (conteneurs sentinelles), attend que le pipeline passe au vert et que l'analyse du commit
 # apparaisse dans SonarQube, puis interroge les serveurs MCP (SonarQube s'il est actif, GitLab) avec des
 # jetons éphémères, vérifie la passerelle d'authentification (redirection vers GitLab sans session,
-# accès avec une session de root, en-têtes d'identité forgés sans effet) et la connexion de Portainer à
-# GitLab (réglages OAuth, comptes limités à SSO_GROUPE_ADMIN, refus d'un utilisateur de test hors du
-# groupe). NETTOYER=1 : projets de test GitLab et SonarQube et utilisateur de test supprimés après un
+# accès avec une session de root, connexion automatique à Grafana avec le rôle attendu, en-têtes
+# d'identité forgés sans effet) et la connexion de Portainer à GitLab (réglages OAuth, comptes limités à
+# SSO_GROUPE_ADMIN, refus d'un utilisateur de test hors du groupe). NETTOYER=1 : projets de test GitLab
+# et SonarQube et utilisateur de test supprimés après un
 # succès.
 # Lancé par `make smoke ENV=<env>` (scripts/instance.sh smoke), qui positionne la cible Docker (contexte
 # SSH d'une instance distante). Documentation : docs/smoke-test.md.
@@ -75,7 +76,7 @@ readonly SSO_JAR=/tmp/devops-platform-smoke-sso.jar
 # Utilisateur GitLab de test de Portainer (hors de SSO_GROUPE_ADMIN), bloqué en fin de smoke test
 readonly PORTAINER_TEST=devops-platform-smoke-portainer
 readonly SSO_FORGES=("X-Auth-Request-User: root" "X-Auth-Request-Email: admin@example.com"
-  "X-Auth-Request-Groups: admins" "X-Auth-Request-Preferred-Username: root")
+  "X-Auth-Request-Groups: admins" "X-Auth-Request-Preferred-Username: root" "X-Auth-Request-Role: Admin")
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -724,15 +725,6 @@ done
 # b. Session de root : demande d'autorisation (cookie CSRF, state, défi PKCE), code d'autorisation créé
 #    par gitlab-rails pour root (comme après une connexion GitLab), callback de la passerelle sur le
 #    hostname de la page d'accueil, puis accès authentifié et identité lue par /oauth2/userinfo
-h_sso="${hotes_sso[0]}"
-sso_jar=1
-rep="$(requete "$h_sso" "/smoke?origine=1" "cookie-jar = $(cfg "$SSO_JAR")")"
-loc="$(entete_de "$rep" location)"
-[[ "$(code_de "$rep")" == 302 && "$loc" == "$gitlab_url/oauth/authorize?"* ]] \
-  || erreur "$h_sso : redirection vers GitLab attendue, HTTP $(code_de "$rep")"
-param() { sed -n "s/.*[?&]$1=\([^&]*\).*/\1/p" <<<"$loc"; }
-state="$(param state)" defi="$(param code_challenge)"
-[[ -n "$state" && -n "$defi" ]] || erreur "state ou code_challenge absent de la redirection vers GitLab"
 # shellcheck disable=SC2016 # code Ruby
 # Code d'autorisation pour l'application d'identifiant SSO_CLIENT_ID et l'utilisateur SSO_UTILISATEUR
 # (root par défaut), avec défi PKCE si SSO_DEFI est fourni (passerelle ; Portainer n'en utilise pas)
@@ -750,26 +742,43 @@ end
 g = Doorkeeper::AccessGrant.create!(attrs)
 puts "CODE=#{g.plaintext_token || g.token}"
 '
-sso_debut="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-erreurs="$(mktemp)"
-if ! sortie="$(dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_ID)" \
-    -e SSO_URI="$schema://$h_sso/oauth2/callback" -e SSO_SCOPES="$SSO_SCOPES_PASSERELLE" -e SSO_DEFI="$defi" \
-    gitlab gitlab-rails runner "$CODE_GRANT" 2> "$erreurs")"; then
-  cat "$erreurs" >&2
+# Paramètre <nom> de l'URL de redirection vers GitLab (variable loc)
+param() { sed -n "s/.*[?&]$1=\([^&]*\).*/\1/p" <<<"$loc"; }
+# Ouvre une session de root sur <hôte> (cookie propre au hostname, dans le jar) ; en-tête Set-Cookie
+# du callback dans la variable cookie
+ouvrir_session() { # <hôte>
+  local h="$1" rep loc state defi sortie erreurs code_auth
+  rep="$(requete "$h" "/smoke?origine=1" "cookie = $(cfg "$SSO_JAR")" "cookie-jar = $(cfg "$SSO_JAR")")"
+  loc="$(entete_de "$rep" location)"
+  [[ "$(code_de "$rep")" == 302 && "$loc" == "$gitlab_url/oauth/authorize?"* ]] \
+    || erreur "$h : redirection vers GitLab attendue, HTTP $(code_de "$rep")"
+  state="$(param state)" defi="$(param code_challenge)"
+  [[ -n "$state" && -n "$defi" ]] || erreur "$h : state ou code_challenge absent de la redirection vers GitLab"
+  erreurs="$(mktemp)"
+  if ! sortie="$(dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_ID)" \
+      -e SSO_URI="$schema://$h/oauth2/callback" -e SSO_SCOPES="$SSO_SCOPES_PASSERELLE" -e SSO_DEFI="$defi" \
+      gitlab gitlab-rails runner "$CODE_GRANT" 2> "$erreurs")"; then
+    cat "$erreurs" >&2
+    rm -f "$erreurs"
+    erreur "code d'autorisation de test impossible à créer (voir ci-dessus)"
+  fi
   rm -f "$erreurs"
-  erreur "code d'autorisation de test impossible à créer (voir ci-dessus)"
-fi
-rm -f "$erreurs"
-code_auth="$(sed -n 's/^CODE=//p' <<<"$sortie" | tail -n1)"
-[[ -n "$code_auth" ]] || erreur "code d'autorisation absent de la sortie de gitlab-rails"
-rep="$(requete "$h_sso" "/oauth2/callback?code=$code_auth&state=$state" "cookie = $(cfg "$SSO_JAR")" \
-  "cookie-jar = $(cfg "$SSO_JAR")")"
-code_auth=""
-loc="$(entete_de "$rep" location)"
-[[ "$(code_de "$rep")" == 302 && "$loc" == */smoke\?origine=1 ]] \
-  || erreur "callback de la passerelle : HTTP $(code_de "$rep") ${loc:+vers $loc} (attendu : 302 vers /smoke?origine=1)"
-cookie="$(grep -i "^set-cookie: $SSO_COOKIE=" <<<"$rep" | tail -n1)"
-[[ -n "$cookie" ]] || erreur "cookie de session $SSO_COOKIE absent de la réponse du callback"
+  code_auth="$(sed -n 's/^CODE=//p' <<<"$sortie" | tail -n1)"
+  [[ -n "$code_auth" ]] || erreur "code d'autorisation absent de la sortie de gitlab-rails"
+  rep="$(requete "$h" "/oauth2/callback?code=$code_auth&state=$state" "cookie = $(cfg "$SSO_JAR")" \
+    "cookie-jar = $(cfg "$SSO_JAR")")"
+  code_auth=""
+  loc="$(entete_de "$rep" location)"
+  [[ "$(code_de "$rep")" == 302 && "$loc" == */smoke\?origine=1 ]] \
+    || erreur "$h : callback de la passerelle : HTTP $(code_de "$rep") ${loc:+vers $loc} (attendu : 302 vers /smoke?origine=1)"
+  cookie="$(grep -i "^set-cookie: $SSO_COOKIE=" <<<"$rep" | tail -n1)"
+  [[ -n "$cookie" ]] || erreur "$h : cookie de session $SSO_COOKIE absent de la réponse du callback"
+}
+h_sso="${hotes_sso[0]}"
+sso_jar=1
+sso_debut="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+cookie=""
+ouvrir_session "$h_sso"
 if [[ "$schema" == https ]]; then
   [[ "${cookie,,}" == *"; secure"* ]] || erreur "cookie de session sans attribut Secure en HTTPS"
   attribut="Secure"
@@ -784,9 +793,71 @@ rep="$(requete "$h_sso" "/oauth2/userinfo" "cookie = $(cfg "$SSO_JAR")")"
 [[ "$(code_de "$rep")" == 200 && "$rep" == *'"preferredUsername":"root"'* ]] \
   || erreur "$h_sso/oauth2/userinfo : identité de root attendue (HTTP $(code_de "$rep"))"
 echo "    $h_sso : accès authentifié (HTTP 200), identité transmise : root."
+
+# c. Grafana (docs/sso.md, « Grafana ») : session de root sur son hostname, connexion automatique sans
+#    formulaire, compte et rôle attendus malgré les en-têtes forgés (rôle Admin compris). Rôle attendu
+#    déduit des groupes transmis par la passerelle (/oauth2/userinfo) et de SSO_GROUPE_ADMIN.
+h_grafana="$(env_valeur "$env_file" GRAFANA_HOSTNAME)"
+h_grafana="${h_grafana:-grafana.localhost}"
+groupe_admin="$(env_valeur "$env_file" SSO_GROUPE_ADMIN)"
+admin_grafana="$(env_valeur "$env_file" GRAFANA_ADMIN_USER)"
+admin_grafana="${admin_grafana:-admin}"
+ouvrir_session "$h_grafana"
+rep="$(requete "$h_grafana" "/oauth2/userinfo" "cookie = $(cfg "$SSO_JAR")")"
+[[ "$(code_de "$rep")" == 200 ]] || erreur "$h_grafana/oauth2/userinfo : HTTP $(code_de "$rep")"
+email_root="$(sed -n 's/.*"email":"\([^"]*\)".*/\1/p' <<<"$rep" | head -n1)"
+groupes_root="$(sed -n 's/.*"groups":\[\([^]]*\)\].*/\1/p' <<<"$rep" | head -n1)"
+role_attendu=Viewer
+if [[ -n "$groupe_admin" && ",${groupes_root,,}," == *",\"${groupe_admin,,}\","* ]]; then
+  role_attendu=Admin
+fi
+rep="$(requete "$h_grafana" "/" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
+[[ "$(code_de "$rep")" == 200 ]] \
+  || erreur "$h_grafana : HTTP $(code_de "$rep") $(entete_de "$rep" location) (attendu : 200, sans redirection vers le formulaire de Grafana)"
+rep="$(requete "$h_grafana" "/api/user" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
+[[ "$(code_de "$rep")" == 200 && "$rep" == *'"login":"root"'* && "$rep" == *"\"email\":\"$email_root\""* ]] \
+  || erreur "$h_grafana/api/user : compte Grafana de root (login, e-mail $email_root) attendu (HTTP $(code_de "$rep"))"
+rep="$(requete "$h_grafana" "/api/user/orgs" "cookie = $(cfg "$SSO_JAR")" "${forges[@]}")"
+[[ "$(code_de "$rep")" == 200 && "$rep" == *"\"role\":\"$role_attendu\""* ]] \
+  || erreur "$h_grafana/api/user/orgs : rôle $role_attendu attendu pour root (HTTP $(code_de "$rep") : $(tail -n2 <<<"$rep" | head -n1))"
+echo "    $h_grafana : root connecté sans formulaire (compte root, $email_root), rôle $role_attendu" \
+  "(SSO_GROUPE_ADMIN ${groupe_admin:-vide}), en-têtes forgés sans effet."
 dc exec -T gitlab-runner rm -f "$SSO_JAR" > /dev/null 2>&1 || true
 sso_jar=0
-# Jetons émis pour root par l'échange du code de test révoqués (la session de la passerelle n'en dépend pas)
+
+# Requête directe sur le réseau de la plateforme depuis gitlab-runner : <url> [en-tête…] ; sortie
+# comme requete()
+requete_directe() {
+  local config ligne
+  config="url = $(cfg "$1")"$'\n'
+  shift
+  for ligne in "$@"; do config+="header = $(cfg "$ligne")"$'\n'; done
+  # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+  dc exec -T gitlab-runner sh -c 'curl -sS -K - -D - -w "\nCODE=%{http_code}\n" || true' <<<"$config"
+}
+# Service de rôle : deux lignes de groupes (groupe admin en second, casse modifiée), groupe voisin,
+# homonyme du compte admin local
+if [[ -n "$groupe_admin" ]]; then
+  rep="$(requete_directe http://grafana-role:8080/ "X-Auth-Request-User: smoke" "X-Auth-Request-Groups: smoke/autre" \
+    "X-Auth-Request-Groups: ${groupe_admin^^}")"
+  [[ "$(entete_de "$rep" x-auth-request-role)" == Admin ]] \
+    || erreur "grafana-role : rôle Admin attendu pour un membre de $groupe_admin (HTTP $(code_de "$rep"))"
+fi
+rep="$(requete_directe http://grafana-role:8080/ "X-Auth-Request-User: smoke" "X-Auth-Request-Groups: ${groupe_admin:-smoke}x")"
+[[ "$(entete_de "$rep" x-auth-request-role)" == Viewer ]] \
+  || erreur "grafana-role : rôle Viewer attendu hors de ${groupe_admin:-SSO_GROUPE_ADMIN} (HTTP $(code_de "$rep"))"
+rep="$(requete_directe http://grafana-role:8080/ "X-Auth-Request-User: ${admin_grafana^^}")"
+[[ "$(code_de "$rep")" == 403 ]] \
+  || erreur "grafana-role : homonyme du compte admin local ($admin_grafana) non refusé (HTTP $(code_de "$rep"))"
+echo "    grafana-role : groupes → rôle conformes, homonyme du compte admin local refusé (403)."
+# Grafana joint sans Traefik (réseau de la plateforme) avec des en-têtes d'identité : source refusée
+rep="$(requete_directe http://grafana:3000/api/user "X-Auth-Request-User: root" "X-Auth-Request-Email: root@example.com" \
+  "X-Auth-Request-Role: Admin")"
+[[ "$(code_de "$rep")" != 200 && "$rep" != *'"login":"root"'* ]] \
+  || erreur "Grafana joint directement avec des en-têtes d'identité : connexion acceptée (adresse source non restreinte)"
+echo "    grafana:3000 hors Traefik, en-têtes d'identité forgés : refusé (HTTP $(code_de "$rep"))."
+
+# Jetons émis pour root par l'échange des codes de test révoqués (la session de la passerelle n'en dépend pas)
 # shellcheck disable=SC2016 # code Ruby
 readonly CODE_JETONS='
 app = Authn::OauthApplication.find_by(uid: ENV.fetch("SSO_CLIENT_ID")) or exit
@@ -799,7 +870,7 @@ dc exec -T -e SSO_CLIENT_ID="$(env_valeur_fichier "$env_file" SSO_GITLAB_CLIENT_
   gitlab gitlab-rails runner "$CODE_JETONS" > /dev/null 2>&1 \
   || echo "Attention : jetons OAuth de test de root non révoqués (Admin > Applications)." >&2
 
-# c. Usurpation sur les routeurs hors passerelle : en-têtes d'identité forgés sans effet
+# d. Usurpation sur les routeurs hors passerelle : en-têtes d'identité forgés sans effet
 rep="$(requete "$gitlab_hote" "/api/v4/user" "${forges[@]}")"
 [[ "$(code_de "$rep")" == 401 ]] \
   || erreur "GitLab /api/v4/user avec en-têtes d'identité forgés : HTTP $(code_de "$rep") (attendu : 401)"

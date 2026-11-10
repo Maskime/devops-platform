@@ -73,7 +73,7 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      # platform, ci et consumers : réseaux à passerelle (socket-proxy-traefik et gitlab-proxy sont internes), porteurs des
+      # platform, ci et consumers : réseaux à passerelle (socket-proxy-traefik, gitlab-proxy et grafana-proxy sont internes), porteurs des
       # ports publiés et de l'accès sortant (ACME). Pas de gw_priority : il exigerait Compose 2.33 /
       # Engine 28, au-delà des versions minimales de scripts/host-prereqs.sh (#145).
       platform:
@@ -104,6 +104,9 @@ services:
         aliases: *alias-clients
       # Lien vers le nginx de GitLab, seul sous-réseau auquel GitLab fait confiance pour X-Forwarded-For
       gitlab-proxy: {}
+      # Lien vers Grafana : seule adresse source dont Grafana accepte l'identité (auth.proxy)
+      grafana-proxy:
+        ipv4_address: ${GRAFANA_PROXY_IP_TRAEFIK:-172.31.254.30}
       # Accès à l'API Docker filtrée (compose/socket-proxy.yml), réseau partagé avec son seul proxy
       socket-proxy-traefik: {}
 
@@ -169,6 +172,7 @@ services:
       traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Preferred-Username: ""
       traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Access-Token: ""
       traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Redirect: ""
+      traefik.http.middlewares.passerelle-sans-identite.headers.customrequestheaders.X-Auth-Request-Role: ""
     volumes:
       - type: bind
         source: ${PLATFORM_CONFIG_DIR:-../config}/oauth2-proxy
@@ -224,3 +228,12 @@ networks:
     ipam:
       config:
         - subnet: ${GITLAB_PROXY_SUBNET:-172.31.254.0/28}
+  # Lien Traefik → Grafana, sous-réseau fixé, adresse de Traefik fixée (confiance auth.proxy de
+  # compose/observability.yml). Définition strictement identique dans compose/observability.yml.
+  grafana-proxy:
+    name: devops-platform_grafana-proxy
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${GRAFANA_PROXY_SUBNET:-172.31.254.16/28}
