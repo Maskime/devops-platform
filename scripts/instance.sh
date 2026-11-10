@@ -43,12 +43,13 @@ readonly ETAPES_BOOTSTRAP=(sonarqube gitlab)
 # par gitlab-runner et sonarqube (compose/tls/gitlab/custom.yml, compose/tls/sonarqube/custom.yml), a sa
 # propre copie et sa propre empreinte : un autre changement de config ne recrée pas ces services, et
 # seul ca.pem est copié (jamais une clé de CA déposée à côté).
-readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning home
-  oauth2-proxy sonarqube-sso)
+readonly CONFIG_MONTEE=(loki/loki-config.yaml promtail/promtail-config.yaml grafana/provisioning
+  grafana/role home oauth2-proxy sonarqube-sso)
 # Service qui lit chaque élément de CONFIG_MONTEE à son démarrage (à garder synchronisé) : en local, le
 # montage pointe directement sur config/ et `up` ne le recrée pas après une modification (appliquer_config)
 declare -rA SERVICE_CONFIG=([loki/loki-config.yaml]=loki [promtail/promtail-config.yaml]=promtail
-  [grafana/provisioning]=grafana [home]=home [oauth2-proxy]=oauth2-proxy [sonarqube-sso]=sonarqube-sso)
+  [grafana/provisioning]=grafana [grafana/role]=grafana-role [home]=home [oauth2-proxy]=oauth2-proxy
+  [sonarqube-sso]=sonarqube-sso)
 readonly CONFIG_MONTEE_CUSTOM=(traefik/tls-custom.yml certs/cert.pem certs/key.pem)
 readonly CA_CUSTOM=config/certs/ca/ca.pem
 # Verrou de l'instance, dans le volume du runner (même fichier dans scripts/bootstrap/gitlab.sh et
