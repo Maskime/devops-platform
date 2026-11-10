@@ -7,6 +7,8 @@ set -uo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT" || exit 1
 failed=0
+# shellcheck source=scripts/lib/env.sh
+source "$ROOT/scripts/lib/env.sh"
 # shellcheck source=scripts/lib/config-montee.sh
 source "$ROOT/scripts/lib/config-montee.sh"
 
@@ -14,6 +16,7 @@ source "$ROOT/scripts/lib/config-montee.sh"
 # yamllint : aucun tag versionné publié, le tag 1 est figé par son digest.
 SHELLCHECK_IMAGE="koalaman/shellcheck:v0.11.0"
 YAMLLINT_IMAGE="cytopia/yamllint:1@sha256:596fb19eb71e55ba5b2fa56d8c18a615ec82adc8d3bf2d73918cb78c8f3240fb"
+ACTIONLINT_IMAGE="rhysd/actionlint:1.7.12"
 
 section() { echo; echo "==> $*"; }
 ko() { echo "    ✖ $*"; failed=1; }
@@ -57,6 +60,38 @@ if ((${#yml_files[@]})); then
   fi
 else
   ok "aucun fichier YAML"
+fi
+
+# 2 bis. actionlint sur les workflows GitHub Actions (syntaxe, expressions, shellcheck des `run:` par
+#        l'image, qui embarque shellcheck)
+section "actionlint"
+mapfile -t workflows < <(git ls-files --cached --others --exclude-standard '.github/workflows/*.yml' \
+  '.github/workflows/*.yaml')
+if ((${#workflows[@]})); then
+  if docker run --rm -v "$ROOT:/repo:ro" -w /repo "$ACTIONLINT_IMAGE" -color "${workflows[@]}"; then
+    ok "${#workflows[@]} workflow(s)"
+  else
+    ko "actionlint"
+  fi
+else
+  ok "aucun workflow"
+fi
+
+# 2 ter. Secrets du fichier d'instance masqués par le workflow de déploiement (scripts/ci/
+#        preparer-poste.sh) : chaque clé affectée (non commentée) de envs/.env.example est un secret
+#        à renseigner, son nom doit correspondre à MOTIF_CLE_SENSIBLE (scripts/lib/env.sh)
+section "secrets masqués en CI"
+mapfile -t cles_secretes < <(sed -nE 's/^([A-Z0-9_]+)=.*/\1/p' envs/.env.example)
+non_masquees=()
+for cle in "${cles_secretes[@]}"; do
+  [[ "$cle" =~ $MOTIF_CLE_SENSIBLE ]] || non_masquees+=("$cle")
+done
+if ((${#cles_secretes[@]} == 0)); then
+  ko "envs/.env.example : aucune clé affectée lue"
+elif ((${#non_masquees[@]})); then
+  ko "envs/.env.example : ${non_masquees[*]} non masqué(s) en CI (MOTIF_CLE_SENSIBLE, scripts/lib/env.sh)"
+else
+  ok "${#cles_secretes[@]} secret(s) de envs/.env.example masqué(s)"
 fi
 
 # 3. docker compose config pour chaque environnement (dont l'exemple), et pour chaque mode TLS ; tous les
