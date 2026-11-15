@@ -1,14 +1,18 @@
 # Déploiement depuis GitHub Actions
 
 Le workflow `deploy` (`.github/workflows/deploy.yml`) exécute `make deploy` ou `make status` sur une
-instance **distante** depuis l'onglet *Actions* de GitHub, sans dépendre du poste de l'opérateur. Le
-runner GitHub reconstitue le poste à partir des secrets d'un **environnement GitHub** du même nom que
-l'instance, puis lance les mêmes cibles `make` qu'en [déploiement depuis le poste](deploiement.md), qui
-reste le mode nominal.
+instance **distante** depuis GitHub, sans dépendre du poste de l'opérateur. Le runner GitHub reconstitue
+le poste à partir des secrets d'un **environnement GitHub** du même nom que l'instance. Il lance ensuite
+les mêmes cibles `make` qu'en [déploiement depuis le poste](deploiement.md).
+
+Chaque déploiement correspond à une **version publiée** (tag `vX.Y.Z`), jamais à la tête de `main`.
 
 ```text
-Actions > deploy > Run workflow (instance, action)
-  controle : branche main, nom d'instance, environnement GitHub protégé
+git push origin vX.Y.Z                       → make deploy sur chaque instance de INSTANCES_TAG
+Actions > deploy > Run workflow (main)       → make status
+Actions > deploy > Run workflow (tag vX.Y.Z) → make deploy ou make status
+  controle : ref (tag de version atteignable depuis main), noms d'instance, environnements protégés,
+             ruleset des tags
   instance : approbation d'un relecteur → secrets → scripts/ci/preparer-poste.sh → make <action>
 ```
 
@@ -16,13 +20,21 @@ Actions > deploy > Run workflow (instance, action)
 
 Le dépôt est **public** : n'importe qui lit le workflow et les logs des runs.
 
-- **Déclenchement manuel uniquement** (`workflow_dispatch`), jamais sur `push`, `pull_request` ni
-  `pull_request_target`.
-- **Les règles de l'environnement GitHub sont la seule vraie protection des secrets.** Le workflow
-  vérifie aussi la branche, mais une personne ayant le droit d'écriture pourrait lancer depuis une autre
-  branche un workflow modifié sans ces contrôles. Seules les règles « branche `main` seule » et
-  « relecteur obligatoire » de l'environnement l'en empêchent : le job `controle` refuse un
-  environnement qui ne les a pas.
+- **Déclencheurs** : push d'un tag `v*` et lancement manuel (`workflow_dispatch`). Jamais de push de
+  branche, de `pull_request` ni de `pull_request_target`. Seul l'opérateur peut pousser un tag `v*`
+  ([ruleset](#5-ruleset-des-tags-de-version)), et un relecteur valide chaque déploiement.
+- **Ref contrôlée avant tout contact avec le serveur** (`scripts/ci/controler-ref.sh`, dans les deux
+  jobs) :
+  - `deploy` vise uniquement un tag de version `v<X>.<Y>.<Z>`, sans zéro initial ni suffixe, dont le
+    commit est atteignable depuis `main` (`git merge-base --is-ancestor`) ;
+  - `status` est aussi accepté depuis `main` ;
+  - toute autre branche est refusée.
+- **Les règles de l'environnement GitHub et le ruleset sont la seule vraie protection des secrets.**
+  Une personne ayant le droit d'écriture pourrait lancer depuis une autre branche un workflow modifié,
+  sans ces contrôles. De même, GitHub exécute le workflow **tel qu'il est au commit tagué** : un tag
+  posé hors de `main` porterait le workflow de son choix. Seules les règles de l'environnement
+  (« branche `main` et tags `v*` », « relecteur obligatoire ») et le ruleset des tags l'en empêchent.
+  Le job `controle` refuse un environnement ou un dépôt qui ne les a pas.
 - **Aucun secret de dépôt ou d'organisation** nommé `INSTANCE_ENV`, `SSH_PRIVATE_KEY`,
   `SSH_KNOWN_HOSTS` ou `TLS_*` : un job en hériterait si l'environnement n'avait pas le sien.
 - **Secrets masqués** avant toute commande `make` (`::add-mask::`) : valeurs des clés sensibles du
@@ -30,7 +42,8 @@ Le dépôt est **public** : n'importe qui lit le workflow et les logs des runs.
   sur `envs/.env.example`), clé SSH, clé TLS, et `DEPLOY_SSH` (utilisateur, hôte et port du serveur).
   Les secrets ne sont transmis qu'à l'étape de préparation : aucune variable du shell ne prime sur le
   fichier d'instance pendant `make`.
-- **Aucune action destructive** : ni `stop`, ni `down`, ni `restore`, ni `FORCER=1`. Les garde-fous du
+- **Aucune action destructive** : ni `stop`, ni `down`, ni `restore`, ni `FORCER=1`, ni retour arrière
+  (`RETOUR_ARRIERE=1`, [version déployée](deploiement.md#version-déployée)). Les garde-fous du
   poste s'appliquent tels quels (`make check-env`, [une instance par serveur](deploiement.md#une-instance-par-serveur)).
 - **Runners hébergés par GitHub** (`ubuntu-24.04`, éphémères). Pas de runner auto-hébergé sur le
   serveur : son accès à Docker équivaut à root, et GitHub le déconseille sur un dépôt public.
@@ -93,7 +106,7 @@ crée sans aucune protection (le job `controle` arrête alors le run avant).
 | Réglage | Valeur |
 |---|---|
 | *Required reviewers* | au moins un relecteur ; il approuve chaque run avant l'accès aux secrets |
-| *Deployment branches and tags* | *Selected branches and tags*, une seule règle : branche `main` |
+| *Deployment branches and tags* | *Selected branches and tags*, exactement deux règles : branche `main` (pour `status`) et tag `v*` |
 
 *Prevent self-review* est facultatif : sans lui, l'opérateur qui lance le run peut l'approuver.
 
@@ -121,7 +134,33 @@ puis l'application d'une CA privée (15 min). Avec une période d'arrêt plus lo
 de dépôt `DEPLOY_TIMEOUT_MINUTES` (*Settings > Secrets and variables > Actions > Variables*). Un run
 coupé par le délai laisse le déploiement inachevé : le relancer.
 
-### 5. Accès SSH depuis les runners
+### 5. Ruleset des tags de version
+
+*Settings > Rules > Rulesets > New ruleset > New tag ruleset* :
+
+| Réglage | Valeur |
+|---|---|
+| *Enforcement status* | *Active* |
+| *Bypass list* | l'opérateur, ou le rôle *Repository admin* |
+| *Target tags* | *Include by pattern* : `v*` (aucune exclusion) |
+| *Rules* | *Restrict creations*, *Restrict updates*, *Restrict deletions* |
+
+Seuls les membres de la *Bypass list* peuvent alors créer, déplacer ou supprimer un tag `v*`. Sans
+personne dans cette liste, plus personne ne peut publier de version.
+
+Le job `controle` vérifie qu'un ruleset de tags actif couvre `v*` avec ces trois règles. La *Bypass list*
+n'est pas lisible avec le jeton du workflow : sa vérification revient à l'opérateur.
+
+### 6. Instances déployées par un tag
+
+Variable de dépôt `INSTANCES_TAG` (*Settings > Secrets and variables > Actions > Variables*) : noms des
+instances que le push d'un tag déploie, séparés par des espaces ou des virgules (`prod`, ou
+`prod, prod-2`). Chaque instance a son environnement GitHub, approuvé séparément.
+
+Si la variable est vide ou absente, le push d'un tag ne déploie rien. Le run le signale (annotation et
+résumé) et se termine sans erreur.
+
+### 7. Accès SSH depuis les runners
 
 Les runners GitHub ont des adresses variables, réparties sur de larges plages : le port SSH du serveur
 doit être joignable **depuis Internet**. Pour un serveur derrière une box : redirection du port SSH vers
@@ -139,20 +178,64 @@ Risques et précautions :
 
 Un accès par réseau privé (Tailscale, WireGuard) éviterait cette exposition : il n'est pas proposé.
 
-## Lancer un run
+## Publier une version
 
-*Actions > deploy > Run workflow*, branche `main`, puis :
+1. **CHANGELOG** : par une PR mergée dans `main`, la section « Non publié » de `CHANGELOG.md` devient
+   `## [X.Y.Z] - <date>`. Le numéro suit le [Semantic Versioning](https://semver.org/lang/fr/) et doit
+   être supérieur à la version en place.
+2. **Tag annoté**, sur le commit de `main` qui porte cette PR :
+
+   ```bash
+   git fetch origin
+   git tag -a vX.Y.Z -m "Version X.Y.Z" origin/main
+   ```
+
+3. **Push du seul tag** :
+
+   ```bash
+   git push origin vX.Y.Z
+   ```
+
+   Ne pas utiliser `git push --tags` : au-delà de trois tags poussés ensemble, GitHub ne déclenche
+   aucun workflow.
+4. **Validation** : *Actions > deploy*, le run du tag attend l'approbation de chaque environnement de
+   `INSTANCES_TAG`. Après relecture (*Review deployments*), `make deploy` met l'instance à jour et
+   inscrit la version sur le serveur ([version déployée](deploiement.md#version-déployée)).
+
+Le relecteur approuve chaque run. L'historique des runs de l'environnement sert de journal des
+déploiements (*Deployments*).
+
+Un run est refusé dans trois cas :
+
+- tag hors format (`v1.2`, `v1.2.3-rc1`, `v01.2.3`) ;
+- tag posé sur un commit absent de `main` ;
+- version inférieure à celle en place.
+
+Un tag posé sur un commit antérieur à l'ajout du déclenchement par tag ne déclenche rien. Un nouveau tag
+sur le même commit (aucun changement d'image) redéploie à l'identique et inscrit la nouvelle version.
+
+Le retour à une version antérieure ne passe pas par GitHub. C'est une opération explicite depuis le
+poste ([retour arrière](deploiement.md#version-déployée)).
+
+## Lancer un run manuel
+
+*Actions > deploy > Run workflow*, puis :
+
+| *Use workflow from* | Actions acceptées |
+|---|---|
+| branche `main` | `status` uniquement (`deploy` refusé : le déploiement ne vise que des tags) |
+| tag `vX.Y.Z` | `status` ou `deploy` (redéploiement de cette version sur une instance) |
 
 | Entrée | Valeur |
 |---|---|
 | `instance` | nom de l'instance (et de l'environnement GitHub) |
-| `action` | `status` (défaut) : état des services et URLs ; `deploy` : démarrage ou mise à jour, attente de santé |
+| `action` | `status` (défaut) : version déployée, état des services et URLs ; `deploy` : démarrage ou mise à jour, attente de santé |
 
-Le relecteur approuve ensuite le run (*Review deployments*). L'historique des runs de l'environnement
-sert de journal des déploiements (*Deployments*).
+Toute autre branche est refusée. Le relecteur approuve ensuite le run.
 
-Un seul run par instance à la fois, jamais annulé en cours. GitHub ne garde qu'un run en attente par
-instance : un troisième lancement annule le run qui attendait.
+Un seul run par instance à la fois, jamais annulé en cours, qu'il vienne d'un tag ou d'un lancement
+manuel. GitHub ne garde qu'un run en attente par instance : un troisième run annule celui qui
+attendait.
 
 ## Modifier l'instance
 
@@ -161,8 +244,11 @@ instance : un troisième lancement annule le run qui attendait.
 remettre le secret à jour, puis lancer `deploy`. Un fichier du poste différent du secret ferait
 diverger les deux modes de déploiement.
 
-Les fichiers de `config/` (configuration de Loki, Grafana, passerelle…) viennent de la branche `main` :
-une modification passe par une PR mergée avant le run.
+Les fichiers de `config/` (configuration de Loki, Grafana, passerelle…) viennent du tag déployé : une
+modification passe par une PR mergée, puis par une nouvelle version.
+
+Une instance installée en local passe au déploiement depuis GitHub selon la procédure
+[Passage d'une instance locale en mode distant](passage-distant.md).
 
 ## Limites
 
