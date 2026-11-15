@@ -188,6 +188,48 @@ refusée).
 `make restore` applique la même règle aux données : il refuse de remplacer des volumes non vides sans
 `FORCER=1` ([Sauvegarde et restauration](sauvegarde.md#restauration)).
 
+### Version déployée
+
+Sur une instance distante, `make deploy` inscrit la version de la plateforme dans
+`${DEPLOY_DIR}/version`, à côté du marqueur `instance`. `make status` l'affiche, avec la version du
+checkout courant :
+
+```text
+Version déployée : v0.5.0 (checkout courant : v0.5.0-2-g1a2b3c4)
+```
+
+La version est celle du checkout :
+
+- un tag de version `vX.Y.Z` : `v0.5.0` ;
+- un commit postérieur au tag : `v0.5.0-2-g1a2b3c4`, au format de `git describe` ;
+- des modifications non commitées : suffixe `-dirty`.
+
+Depuis GitHub Actions, la version est le tag du run ([Déploiement depuis GitHub
+Actions](deploiement-github.md)).
+
+Le fichier n'est écrit qu'à la fin d'un déploiement complet : services healthy, configuration et CA
+appliquées. Un déploiement en échec laisse donc l'ancienne version inscrite, même si certains services
+tournent déjà sur les nouvelles images.
+
+**Version inférieure refusée.** Avant toute modification du serveur, `make deploy` et `make restore`
+comparent la version du checkout (`X.Y.Z` seuls) à la version inscrite. Si elle est inférieure, ils
+refusent. Une version égale est acceptée : redéploiement idempotent, ou commit postérieur au même tag.
+Une version non comparable est acceptée avec un message : fichier absent (premier déploiement), ou
+checkout hors de tout tag.
+
+**Retour arrière** : c'est une opération explicite, depuis le poste. `RETOUR_ARRIERE=1` n'est accepté
+que sur la ligne de commande et n'est jamais passé par le workflow GitHub :
+
+```bash
+git switch --detach v0.4.0          # checkout de la version visée
+make deploy ENV=prod RETOUR_ARRIERE=1
+```
+
+Une version antérieure peut ne pas savoir relire les données d'une version plus récente (migrations
+GitLab, SonarQube). Avant un retour arrière, consulter [Montée de version](montee-de-version.md). Le
+retour sûr reste la restauration de la sauvegarde prise avant la montée
+([Sauvegarde et restauration](sauvegarde.md)).
+
 ## Commandes manuelles sur une instance distante
 
 Une commande `docker compose` lancée à la main n'a ni le contexte ni `PLATFORM_CONFIG_DIR`. Pour une

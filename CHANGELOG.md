@@ -7,6 +7,25 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+### Ajouté
+
+- Déploiement de production au push d'un tag de version `vX.Y.Z` : le workflow `deploy` lance
+  `make deploy` sur chaque instance de la variable de dépôt `INSTANCES_TAG`, après approbation de son
+  environnement. Le job `controle` refuse, avant tout contact avec le serveur, un tag hors format, un
+  tag dont le commit n'est pas atteignable depuis `main` et un `deploy` lancé depuis une branche
+  (`scripts/ci/controler-ref.sh`). Il vérifie aussi les règles des environnements (relecteur, branche
+  `main` et tags `v*`) et le ruleset des tags (`docs/deploiement-github.md`, « Publier une version »).
+- Version déployée inscrite sur le serveur d'une instance distante (`${DEPLOY_DIR}/version`) et
+  affichée par `make status`. Une version inférieure à la version en place est refusée par
+  `make deploy` et `make restore`, sauf avec `RETOUR_ARRIERE=1` depuis le poste (`docs/deploiement.md`,
+  « Version déployée »).
+- Procédure de passage d'une instance installée en local au mode distant (`docs/passage-distant.md`).
+
+### Modifié
+
+- Workflow `deploy` : le lancement manuel accepte `status` depuis `main`, et `deploy` uniquement depuis
+  un tag de version. Les environnements GitHub doivent autoriser la branche `main` **et** les tags `v*`.
+
 ## [0.4.0] - 2026-11-15
 
 Authentification unique par GitLab, sauvegarde et restauration, réseau dédié aux projets co-localisés

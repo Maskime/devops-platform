@@ -17,7 +17,9 @@
 # Garde-fous de configuration (make check-env) : appliqués par le Makefile avant deploy et reload-certs.
 # Variables transmises par le Makefile : FORCER=1 (garde-fou de l'hôte), ROTATION=1 (bootstrap : token
 # d'analyse SonarQube remplacé, voir scripts/bootstrap/sonarqube.sh), CONFIRMER=1 (stop ou down d'une
-# instance distante sans question, obligatoire hors terminal), DESTINATION et AVEC_LOKI (backup).
+# instance distante sans question, obligatoire hors terminal), DESTINATION et AVEC_LOKI (backup),
+# RETOUR_ARRIERE=1 (deploy, restore : version inférieure à celle de l'hôte acceptée) et VERSION_DEPLOYEE
+# (tag déployé par le workflow GitHub, à défaut de `git describe`).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,6 +32,8 @@ source "$ROOT/scripts/lib/verrou.sh"
 source "$ROOT/scripts/lib/images.sh"
 # shellcheck source=scripts/lib/config-montee.sh
 source "$ROOT/scripts/lib/config-montee.sh"
+# shellcheck source=scripts/lib/version.sh
+source "$ROOT/scripts/lib/version.sh"
 # Verrou hérité par scripts/bootstrap/gitlab.sh : jamais repris du shell de l'opérateur
 unset VERROU_PID_HERITE
 
@@ -168,6 +172,63 @@ verifier_instance() { # <ecrire : 0|1>
   if (($1)); then
     utilitaire -v "$deploy_dir:/dst" "$BUSYBOX_IMAGE" sh -c 'printf "%s\n" "$1" > /dst/instance' sh "$env"
   fi
+}
+
+# --- Version déployée (instance distante) ----------------------------------------------------------
+
+# Version inscrite dans ${DEPLOY_DIR}/version (vide si absente). Lecture seule, par le parent, comme
+# verifier_instance 0 : ne crée pas DEPLOY_DIR sur un hôte jamais déployé.
+# shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+lire_version() {
+  local parent base
+  parent="$(dirname "$deploy_dir")" base="$(basename "$deploy_dir")"
+  utilitaire -v "$parent:/parent:ro" "$BUSYBOX_IMAGE" sh -c \
+    'head -n1 "/parent/$1/version" 2>/dev/null || true' sh "$base"
+}
+
+# Refus, avant toute modification de l'hôte, d'une version du checkout inférieure à la version inscrite
+# (X.Y.Z comparés), sauf RETOUR_ARRIERE=1 (poste uniquement : jamais passé par le workflow). Version non
+# comparable : accepté avec un message, sauf version du checkout inconnue sur GitHub Actions.
+controler_version() {
+  local en_place cmp
+  case "${RETOUR_ARRIERE:-}" in
+    '' | 1) ;;
+    *) erreur "RETOUR_ARRIERE invalide : $RETOUR_ARRIERE (attendu : 1)" ;;
+  esac
+  if [[ -n "${VERSION_DEPLOYEE:-}" && ! "$VERSION_DEPLOYEE" =~ $SEMVER_REGEX ]]; then
+    erreur "VERSION_DEPLOYEE invalide : $VERSION_DEPLOYEE (attendu : vX.Y.Z)"
+  fi
+  version="$(version_locale "$ROOT")"
+  if [[ "$version" == inconnue && "${GITHUB_ACTIONS:-}" == true ]]; then
+    erreur "version du checkout inconnue (ni VERSION_DEPLOYEE ni tag de version) : déploiement refusé"
+  fi
+  en_place="$(lire_version)"
+  if ! cmp="$(version_comparer "$version" "$en_place")"; then
+    echo "Version : $version (en place : ${en_place:-non inscrite}), pas de comparaison possible."
+    return 0
+  fi
+  if ((cmp < 0)); then
+    if [[ "${RETOUR_ARRIERE:-}" != 1 ]]; then
+      echo "Erreur : version $version inférieure à la version en place sur $deploy_ssh ($en_place)." >&2
+      echo "  Retour arrière volontaire, depuis le poste : make $action ENV=$env RETOUR_ARRIERE=1" >&2
+      echo "  (docs/deploiement.md, « Version déployée »)." >&2
+      exit 1
+    fi
+    echo "Attention : retour arrière de $en_place à $version (RETOUR_ARRIERE=1)." >&2
+  elif [[ "$version" != "$en_place" ]]; then
+    echo "Version : $en_place → $version."
+  else
+    echo "Version : $version (déjà en place)."
+  fi
+}
+
+# Inscription de la version (controler_version), une fois le déploiement complet : écriture puis
+# renommage, le fichier n'est jamais lu à moitié écrit
+# shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+inscrire_version() {
+  utilitaire -v "$deploy_dir:/dst" "$BUSYBOX_IMAGE" sh -c \
+    'printf "%s\n" "$1" > /dst/version.tmp && mv /dst/version.tmp /dst/version' sh "$version"
+  echo "Version $version inscrite dans $deploy_dir/version."
 }
 
 # --- Fichiers de config sur l'hôte cible -----------------------------------------------------------
@@ -526,7 +587,7 @@ projet="$(sed -n 's/^name: //p' <<<"$config" | head -n1)"
 case "$action" in
   deploy)
     afficher_cible
-    if [[ -n "$deploy_ssh" ]]; then verifier_instance 1; copier_config; fi
+    if [[ -n "$deploy_ssh" ]]; then verifier_instance 1; controler_version; copier_config; fi
     # Conteneurs en double (lancés hors compose.yml ou sous un autre projet) : refus avant `up`
     scripts/check-doublons.sh "$env_file"
     retirer_ancien_proxy
@@ -550,7 +611,7 @@ case "$action" in
     retirer_ancien_reseau_proxy
     appliquer_config
     appliquer_ca
-    if [[ -n "$deploy_ssh" ]]; then nettoyer_config; fi
+    if [[ -n "$deploy_ssh" ]]; then inscrire_version; nettoyer_config; fi
     "${compose[@]}" ps -a --format 'table {{.Service}}\t{{.Status}}'
     recapitulatif
     ;;
@@ -568,7 +629,11 @@ case "$action" in
     ;;
   status)
     afficher_cible
-    if [[ -n "$deploy_ssh" ]]; then verifier_instance 0; fi
+    if [[ -n "$deploy_ssh" ]]; then
+      verifier_instance 0
+      en_place="$(lire_version)"
+      echo "Version déployée : ${en_place:-non inscrite} (checkout courant : $(version_locale "$ROOT"))"
+    fi
     echo
     "${compose[@]}" ps -a --format 'table {{.Service}}\t{{.Status}}\t{{.Image}}'
     recapitulatif
@@ -632,7 +697,9 @@ case "$action" in
     # Restauration des volumes ; make restore enchaîne make deploy. Garde-fou de l'hôte écrit, comme
     # pour deploy : la restauration installe l'instance sur un serveur neuf.
     afficher_cible
-    if [[ -n "$deploy_ssh" ]]; then verifier_instance 1; fi
+    # Version contrôlée avant de toucher aux volumes : make restore enchaîne make deploy, qui la refuserait
+    # après coup sur une instance arrêtée
+    if [[ -n "$deploy_ssh" ]]; then verifier_instance 1; controler_version; fi
     scripts/sauvegarde.sh restaurer "$env_file" "$1"
     ;;
   compose)
