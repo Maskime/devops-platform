@@ -1,13 +1,23 @@
-# Pilotage d'une instance distante depuis l'onglet Actions (docs/deploiement-github.md) : mêmes cibles
-# make que sur le poste de l'opérateur, via le contexte Docker SSH (DEPLOY_SSH). Le runner reconstitue
-# le poste à partir des secrets de l'environnement GitHub du même nom que l'instance.
+# Pilotage d'une instance distante depuis GitHub Actions (docs/deploiement-github.md) : mêmes cibles make
+# que sur le poste de l'opérateur, via le contexte Docker SSH (DEPLOY_SSH). Le runner reconstitue le
+# poste à partir des secrets de l'environnement GitHub du même nom que l'instance.
+#   - push d'un tag de version vX.Y.Z : make deploy de chaque instance de la variable de dépôt
+#     INSTANCES_TAG (vide : aucun déploiement) ;
+#   - lancement manuel : status depuis main, deploy ou status depuis un tag de version.
 #
-# Dépôt public : déclenchement manuel uniquement (jamais push, pull_request ni pull_request_target),
-# depuis main, environnement protégé (relecteur obligatoire), permissions minimales, actions épinglées
-# par SHA. Aucune action destructive (stop, down, restore, FORCER=1) n'est proposée.
+# Dépôt public : jamais de déclenchement pull_request, pull_request_target ni push de branche ; ref
+# contrôlée (scripts/ci/controler-ref.sh : tag atteignable depuis main), environnement protégé
+# (relecteur obligatoire, main et tags v* seuls), ruleset réservant les tags v* à l'opérateur,
+# permissions minimales, actions épinglées par SHA. Aucune action destructive (stop, down, restore,
+# FORCER=1, RETOUR_ARRIERE=1) n'est proposée.
+# Sur un push de tag, GitHub exécute ce fichier tel qu'il est au commit tagué : seuls le ruleset (qui
+# pousse un tag) et les règles de l'environnement (relecteur) protègent vraiment les secrets.
 name: deploy
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       instance:
@@ -15,7 +25,7 @@ on:
         required: true
         type: string
       action:
-        description: "Cible make à exécuter"
+        description: "Cible make à exécuter (deploy : depuis un tag de version uniquement)"
         required: true
         type: choice
         options:
@@ -31,95 +41,154 @@ defaults:
     shell: bash
 
 jobs:
-  # Contrôles sans environnement GitHub ni secret : un nom invalide ne doit pas viser (ni créer) un
-  # environnement, un run hors de main ne doit pas atteindre ses secrets
+  # Contrôles sans environnement GitHub ni secret : une ref ou un nom invalide ne doit pas viser (ni
+  # créer) un environnement, ni atteindre ses secrets
   controle:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
       actions: read  # lecture de la configuration des environnements
+    outputs:
+      instances: ${{ steps.cible.outputs.instances }}
+      action: ${{ steps.cible.outputs.action }}
     steps:
-      - name: Branche main
-        env:
-          REF: ${{ github.ref }}
-        run: |
-          if [[ "$REF" != refs/heads/main ]]; then
-            echo "::error::Déploiement réservé à la branche main (run lancé depuis $REF)."
-            exit 1
-          fi
-
+      # Tout l'historique : origin/main et les tags, pour le contrôle d'ascendance
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
-      - name: Nom d'instance
+      - name: Action et instances
+        id: cible
         env:
-          INSTANCE: ${{ inputs.instance }}
-        run: make check-env-name ENV="$INSTANCE"
+          EVENT: ${{ github.event_name }}
+          INPUT_INSTANCE: ${{ inputs.instance }}
+          INPUT_ACTION: ${{ inputs.action }}
+          INSTANCES_TAG: ${{ vars.INSTANCES_TAG }}
+        run: |
+          case "$EVENT" in
+            push) action=deploy; read -r -a noms <<<"${INSTANCES_TAG//,/ }" ;;
+            workflow_dispatch) action="$INPUT_ACTION"; noms=("$INPUT_INSTANCE") ;;
+            *) echo "::error::Événement non autorisé : $EVENT"; exit 1 ;;
+          esac
+          for n in "${noms[@]}"; do make check-env-name ENV="$n"; done
+          mapfile -t noms < <(printf '%s\n' "${noms[@]}" | sed '/^$/d' | sort -u)
+          if ((${#noms[@]} == 0)); then
+            echo "::notice::Variable de dépôt INSTANCES_TAG vide ou absente : aucune instance déployée."
+            echo "Aucune instance déployée : variable de dépôt \`INSTANCES_TAG\` vide ou absente." >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "Action $action : ${noms[*]}"
+          fi
+          {
+            echo "action=$action"
+            echo "instances=$(jq -cn '$ARGS.positional' --args "${noms[@]}")"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Ref
+        env:
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          ACTION: ${{ steps.cible.outputs.action }}
+        run: scripts/ci/controler-ref.sh "$REF" "$ACTION" "$SHA"
 
       # Un job qui vise un environnement inexistant le crée, sans protection : il doit exister, avec ses
       # règles, avant le premier run. Seules ces règles protègent les secrets (un workflow modifié sur une
-      # autre branche contournerait les contrôles de ce fichier).
-      - name: Environnement GitHub protégé
+      # autre branche, ou au commit d'un tag, contournerait les contrôles de ce fichier).
+      - name: Environnements GitHub protégés
         env:
-          INSTANCE: ${{ inputs.instance }}
+          INSTANCES: ${{ steps.cible.outputs.instances }}
           GH_TOKEN: ${{ github.token }}
           API: ${{ github.api_url }}/repos/${{ github.repository }}/environments
         run: |
           appel() { curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$1"; }
-          if ! envt="$(appel "$API/$INSTANCE")"; then
-            echo "::error::Environnement GitHub « $INSTANCE » introuvable : le créer avec ses règles et ses secrets (docs/deploiement-github.md)."
-            exit 1
-          fi
-          erreurs=()
-          jq -e '.protection_rules // [] | any(.type == "required_reviewers")' <<<"$envt" >/dev/null \
-            || erreurs+=("aucun relecteur obligatoire (Required reviewers)")
-          if jq -e '.deployment_branch_policy.custom_branch_policies == true' <<<"$envt" >/dev/null; then
-            branches="$(appel "$API/$INSTANCE/deployment-branch-policies" \
-              | jq -r '[.branch_policies[] | "\(.type // "branch"):\(.name)"] | sort | join(" ")')"
-            [[ "$branches" == "branch:main" ]] \
-              || erreurs+=("déploiement autorisé depuis « $branches » (attendu : la seule branche main)")
-          else
-            erreurs+=("déploiement non restreint à la branche main (Deployment branches and tags)")
-          fi
-          if ((${#erreurs[@]})); then
-            for e in "${erreurs[@]}"; do echo "::error::Environnement « $INSTANCE » : $e."; done
-            echo "Règles attendues : docs/deploiement-github.md"
-            exit 1
-          fi
-          echo "Environnement « $INSTANCE » : relecteur obligatoire, branche main seule."
+          echec=0
+          mapfile -t noms < <(jq -r '.[]' <<<"$INSTANCES")
+          for instance in "${noms[@]}"; do
+            if ! envt="$(appel "$API/$instance")"; then
+              echo "::error::Environnement GitHub « $instance » introuvable : le créer avec ses règles et ses secrets (docs/deploiement-github.md)."
+              echec=1; continue
+            fi
+            erreurs=()
+            jq -e '.protection_rules // [] | any(.type == "required_reviewers")' <<<"$envt" >/dev/null \
+              || erreurs+=("aucun relecteur obligatoire (Required reviewers)")
+            if jq -e '.deployment_branch_policy.custom_branch_policies == true' <<<"$envt" >/dev/null; then
+              regles="$(appel "$API/$instance/deployment-branch-policies" \
+                | jq -r '[.branch_policies[] | "\(.type // "branch"):\(.name)"] | sort | join(" ")')"
+              [[ "$regles" == "branch:main tag:v*" ]] \
+                || erreurs+=("déploiement autorisé depuis « $regles » (attendu : branche main et tags v*)")
+            else
+              erreurs+=("déploiement non restreint à la branche main et aux tags v* (Deployment branches and tags)")
+            fi
+            if ((${#erreurs[@]})); then
+              for e in "${erreurs[@]}"; do echo "::error::Environnement « $instance » : $e."; done
+              echec=1
+            else
+              echo "Environnement « $instance » : relecteur obligatoire, branche main et tags v* seuls."
+            fi
+          done
+          if ((echec)); then echo "Règles attendues : docs/deploiement-github.md"; exit 1; fi
+
+      # Ruleset de tags : création, mise à jour et suppression des tags v* réservées à la liste de
+      # contournement (l'opérateur). Cette liste n'est pas lisible avec le jeton du workflow : sa
+      # vérification revient à l'opérateur.
+      - name: Ruleset des tags de version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}/repos/${{ github.repository }}/rulesets
+        run: |
+          appel() { curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$1"; }
+          mapfile -t ids < <(appel "$API?targets=tag&includes_parents=true&per_page=100" \
+            | jq -r '.[] | select(.target == "tag" and .enforcement == "active") | .id')
+          for id in "${ids[@]}"; do
+            if appel "$API/$id" | jq -e '
+                (.conditions.ref_name.include // [] | any(. == "refs/tags/v*" or . == "~ALL"))
+                and (.conditions.ref_name.exclude // [] | length == 0)
+                and (["creation", "update", "deletion"] - [.rules[].type] | length == 0)' >/dev/null; then
+              echo "Ruleset de tags actif ($id) : création, mise à jour et suppression des tags v* restreintes."
+              echo "Liste de contournement (opérateur seul) non lisible ici : à vérifier dans Settings > Rules."
+              exit 0
+            fi
+          done
+          echo "::error::Aucun ruleset de tags actif restreignant création, mise à jour et suppression des tags v* (docs/deploiement-github.md)."
+          exit 1
 
   instance:
     needs: controle
+    if: needs.controle.outputs.instances != '[]'
     runs-on: ubuntu-24.04
-    environment: ${{ inputs.instance }}
+    strategy:
+      fail-fast: false
+      matrix:
+        instance: ${{ fromJSON(needs.controle.outputs.instances) }}
+    environment: ${{ matrix.instance }}
     # Un run par instance à la fois, jamais annulé en cours (déploiement interrompu)
     concurrency:
-      group: deploy-${{ inputs.instance }}
+      group: deploy-${{ matrix.instance }}
       cancel-in-progress: false
     # make deploy : arrêt gracieux du runner GitLab (GITLAB_RUNNER_STOP_GRACE_PERIOD, 1 h par défaut),
     # attente de santé (15 min au plus), puis éventuelle application de la CA privée (15 min au plus).
     # Variable de dépôt DEPLOY_TIMEOUT_MINUTES pour une période d'arrêt plus longue.
     timeout-minutes: ${{ fromJSON(vars.DEPLOY_TIMEOUT_MINUTES || '120') }}
     steps:
-      - name: Branche main
-        env:
-          REF: ${{ github.ref }}
-        run: |
-          if [[ "$REF" != refs/heads/main ]]; then
-            echo "::error::Déploiement réservé à la branche main (run lancé depuis $REF)."
-            exit 1
-          fi
-
+      # Tout l'historique : contrôle d'ascendance rejoué, version du checkout (git describe)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      # Défense en profondeur : même contrôle que le job controle
+      - name: Ref
+        env:
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          ACTION: ${{ needs.controle.outputs.action }}
+        run: scripts/ci/controler-ref.sh "$REF" "$ACTION" "$SHA"
 
       # Secrets passés à cette seule étape ; valeurs sensibles masquées avant toute commande make
       - name: Préparation du poste
         env:
-          INSTANCE: ${{ inputs.instance }}
+          INSTANCE: ${{ matrix.instance }}
           INSTANCE_ENV: ${{ secrets.INSTANCE_ENV }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
@@ -133,22 +202,31 @@ jobs:
           docker version --format 'Docker {{.Client.Version}} (moteur local {{.Server.Version}})'
           docker compose version
 
-      - name: make ${{ inputs.action }}
+      # deploy : version déployée = tag du run (VERSION_DEPLOYEE), inscrite sur l'hôte et comparée à
+      # la version en place (refus d'une version inférieure)
+      - name: make ${{ needs.controle.outputs.action }}
         env:
-          INSTANCE: ${{ inputs.instance }}
-          ACTION: ${{ inputs.action }}
+          INSTANCE: ${{ matrix.instance }}
+          ACTION: ${{ needs.controle.outputs.action }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
+          options=()
           case "$ACTION" in
-            deploy | status) ;;
+            deploy)
+              [[ "$REF_TYPE" == tag ]] || { echo "::error::deploy réservé aux tags de version."; exit 1; }
+              options=(VERSION_DEPLOYEE="$REF_NAME")
+              ;;
+            status) ;;
             *) echo "::error::Action non autorisée : $ACTION"; exit 1 ;;
           esac
-          make "$ACTION" ENV="$INSTANCE"
+          make "$ACTION" ENV="$INSTANCE" "${options[@]}"
 
       # Runner hébergé éphémère : nettoyage par précaution (clé, fichier d'instance, contexte Docker)
       - name: Nettoyage
         if: always()
         env:
-          INSTANCE: ${{ inputs.instance }}
+          INSTANCE: ${{ matrix.instance }}
         run: |
           rm -f ~/.ssh/id_deploy ~/.ssh/known_hosts_deploy ~/.ssh/config "envs/$INSTANCE.env" config/certs/*.pem config/certs/ca/ca.pem
           docker context rm -f "devops-platform-$INSTANCE" >/dev/null 2>&1 || true
