@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+## [0.5.1] - 2026-11-16
+
+Aucun changement fonctionnel ni d'image : version de validation du redéploiement idempotent par le
+push d'un tag (cycle réel de la US 13-4).
+
 ## [0.5.0] - 2026-11-15
 
 Déploiement de production au push d'un tag de version, version déployée inscrite sur le serveur
@@ -574,7 +579,8 @@ Base de référence : extraction à l'identique de l'infrastructure de Software 
 
 - Portainer passe à la variante `2.45.1-alpine` (même version) pour permettre un healthcheck.
 
-[Non publié]: https://github.com/Maskime/devops-platform/compare/v0.5.0...HEAD
+[Non publié]: https://github.com/Maskime/devops-platform/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Maskime/devops-platform/releases/tag/v0.5.1
 [0.5.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.3.0
