@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+## [0.4.0] - 2026-11-15
+
+Authentification unique par GitLab, sauvegarde et restauration, réseau dédié aux projets co-localisés
+et déploiement depuis GitHub Actions (épopées 11 et 14, premières US des épopées 12 et 13).
+
 ### Ajouté
 
 - Déploiement depuis GitHub Actions : workflow `deploy` (déclenchement manuel, `deploy` ou `status`) qui
@@ -545,7 +550,8 @@ Base de référence : extraction à l'identique de l'infrastructure de Software 
 
 - Portainer passe à la variante `2.45.1-alpine` (même version) pour permettre un healthcheck.
 
-[Non publié]: https://github.com/Maskime/devops-platform/compare/v0.3.0...HEAD
+[Non publié]: https://github.com/Maskime/devops-platform/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.1.0
