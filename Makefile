@@ -11,7 +11,7 @@ ENV ?=
 ENV_FILE := envs/$(ENV).env
 COMPOSE := docker compose --env-file $(ENV_FILE)
 
-.PHONY: help verify check-images check-secrets install-hooks init check-env-name check-env-file check-env deploy stop down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke backup restore
+.PHONY: help verify check-images check-secrets install-hooks init check-env-name check-env-file check-env check-version deploy stop down status reload-certs bootstrap bootstrap-sonarqube bootstrap-gitlab smoke backup restore
 
 help: ## Affiche cette aide
 	@echo "Usage : make <cible> [ENV=<env>]"
@@ -110,8 +110,17 @@ check-env: check-env-file
 	@scripts/check-loki-config.sh "$(ENV_FILE)" >/dev/null
 
 # Instance locale, ou distante si DEPLOY_SSH est défini dans le fichier (docs/deploiement.md)
-deploy: check-env ## [ENV] Démarre l'instance ENV (locale ou distante) et attend que tous les services soient healthy
-	@FORCER="$(FORCER)" scripts/instance.sh deploy "$(ENV)"
+# Version (instance distante, docs/deploiement.md) : RETOUR_ARRIERE et VERSION_DEPLOYEE acceptés
+# seulement sur la ligne de commande, comme FORCER
+check-version: check-env-name
+	@for v in "RETOUR_ARRIERE:$(origin RETOUR_ARRIERE)" "VERSION_DEPLOYEE:$(origin VERSION_DEPLOYEE)"; do \
+	  if [[ "$${v#*:}" == "environment" ]]; then \
+	    echo "$${v%%:*} hérité du shell refusé : le passer explicitement, make $(MAKECMDGOALS) ENV=$(ENV) $${v%%:*}=…" >&2; exit 1; \
+	  fi; \
+	done
+
+deploy: check-env check-version ## [ENV] Démarre l'instance ENV (locale ou distante) et attend que tous les services soient healthy ; distante : RETOUR_ARRIERE=1 pour une version inférieure
+	@FORCER="$(FORCER)" RETOUR_ARRIERE="$(RETOUR_ARRIERE)" VERSION_DEPLOYEE="$(VERSION_DEPLOYEE)" scripts/instance.sh deploy "$(ENV)"
 
 # Instance distante : confirmation demandée (terminal) ou CONFIRMER=1, accepté seulement sur la ligne de
 # commande, comme NETTOYER
@@ -170,9 +179,9 @@ backup: check-env-file ## [ENV] Sauvegarde à froid (instance arrêtée le temps
 	@FORCER="$(FORCER)" DESTINATION="$(DESTINATION)" AVEC_LOKI="$(AVEC_LOKI)" scripts/instance.sh backup "$(ENV)"
 
 # Restauration d'une sauvegarde, puis make deploy. FORCER=1 : volumes non vides remplacés
-restore: check-env ## [ENV] Restaure SAUVEGARDE=<répertoire> (empreintes, versions, architecture contrôlées) puis déploie ; FORCER=1 si volumes non vides
+restore: check-env check-version ## [ENV] Restaure SAUVEGARDE=<répertoire> (empreintes, versions, architecture contrôlées) puis déploie ; FORCER=1 si volumes non vides
 	@if [[ "$(origin SAUVEGARDE)" != "command line" ]]; then \
 	  echo "SAUVEGARDE à passer sur la ligne de commande : make restore ENV=$(ENV) SAUVEGARDE=<répertoire>" >&2; exit 1; \
 	fi
-	@FORCER="$(FORCER)" scripts/instance.sh restore "$(ENV)" "$(SAUVEGARDE)"
-	@FORCER="$(FORCER)" scripts/instance.sh deploy "$(ENV)"
+	@FORCER="$(FORCER)" RETOUR_ARRIERE="$(RETOUR_ARRIERE)" scripts/instance.sh restore "$(ENV)" "$(SAUVEGARDE)"
+	@FORCER="$(FORCER)" RETOUR_ARRIERE="$(RETOUR_ARRIERE)" scripts/instance.sh deploy "$(ENV)"
