@@ -97,7 +97,7 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Let's Encrypt](docs/letsencrypt.md) | `TLS_MODE=letsencrypt` : prérequis, challenge, stockage, renouvellement |
 | [GitLab derrière le proxy](docs/gitlab-proxy.md) | URL publique, nginx interne, SSH, runner, réseaux des jobs et des projets co-localisés |
 | [Dimensionnement](docs/dimensionnement.md) | Profils `small` / `medium` / `large` : ressources minimales et réglages |
-| [Rétention des logs](docs/logs.md) | Durée de rétention Loki, délai de purge |
+| [Logs](docs/logs.md) | Collecte (plateforme, conteneurs hors plateforme sur adhésion), labels, limites de débit, visibilité, rétention Loki |
 | [Accès à l'API Docker](docs/acces-docker.md) | Proxys de socket filtrants de Traefik et Promtail : endpoints autorisés par client, isolement, limites |
 | [Garde-fous](docs/garde-fous.md) | Lancements compose en double, fuites de secrets (CI, hook pre-commit), images épinglées (CI) |
 | [Serveurs MCP](docs/mcp.md) | Agents IA (Claude Code…) : URLs, authentification, activation par `TLS_MODE`, CA privée, licence |

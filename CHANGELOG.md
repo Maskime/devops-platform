@@ -7,6 +7,15 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+### Ajouté
+
+- Logs des conteneurs de l'hôte hors plateforme : Promtail collecte aussi les conteneurs portant le
+  label `devops-platform.logs=true` (job `host-containers`, labels `project` et `service`, sans
+  identifiant de conteneur), avec des limites de débit par projet et globales qui préservent les logs
+  de la plateforme. Liste blanche du proxy de socket inchangée. `make smoke` vérifie la collecte d'une
+  sentinelle avec le label et l'absence d'une sentinelle sans. Documentation : `docs/logs.md`,
+  `docs/branchement-projet.md` (US 15-2).
+
 ## [0.5.1] - 2026-11-16
 
 Aucun changement fonctionnel ni d'image : version de validation du redéploiement idempotent par le

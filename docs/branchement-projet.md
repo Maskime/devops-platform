@@ -181,6 +181,30 @@ rôles :
 URL de GitLab selon le tableau ci-dessus, pour le runner comme pour ses jobs. Il surcharge `SONAR_HOST_URL` en variable de projet ou de
 groupe si l'URL de la variable d'instance ne lui convient pas.
 
+### Logs dans Grafana
+
+Les logs des conteneurs du projet sont collectés dans Loki, et consultables dans Grafana comme ceux de
+la plateforme, s'ils portent le label `devops-platform.logs=true` :
+
+```yaml
+# compose.yml du projet
+services:
+  app:
+    labels:
+      devops-platform.logs: "true"
+```
+
+Après `docker compose up -d` (qui recrée le service), ils apparaissent sous
+`{job="host-containers", project="<projet Compose>", service="<service>"}`. Le label facultatif
+`devops-platform.logs.service` remplace le nom du service.
+
+- **Visibilité** : tout utilisateur autorisé de Grafana les voit, sans cloisonnement par projet. Le
+  projet ne doit journaliser **ni secret ni donnée personnelle en clair**.
+- **Débit limité** : 100 lignes/s par projet (rafale 500) ; au-delà, les lignes sont jetées.
+- **Noms stables** : un nom de projet Compose fixe (`name:` ou `-p`), pas un nom généré.
+
+Labels, limites et historique relu à l'adhésion : [logs](logs.md#conteneurs-hors-plateforme).
+
 ### Limites
 
 - **Entre projets co-localisés** : le réseau des consommateurs est partagé par tous les projets

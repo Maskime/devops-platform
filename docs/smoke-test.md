@@ -27,6 +27,7 @@ non satisfaite, avec la cause et la commande à lancer.
 | 5 | Isolation des projets co-localisés : Traefik seul membre de la plateforme sur le réseau des consommateurs ; deux [sentinelles](#sentinelles), l'une sur ce réseau, l'autre sur le réseau des jobs, joignent Traefik mais pas l'autre ; la première ne joint aucun service interne | instance déployée avant ce réseau (`make deploy`), service rattaché par erreur |
 | 6 | Fichiers de `scripts/smoke/projet/` et liste des cibles d'isolation poussés sur `main` (un commit) | — |
 | 7 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs, service de la plateforme ou sentinelle joignable depuis un job |
+| 7 bis | Logs hors plateforme (si Promtail, Loki et Grafana tournent) : une [sentinelle](#sentinelles) portant `devops-platform.logs=true` est retrouvée dans Loki sous `job="host-containers"`, `project="hors-compose"`, `service="smoke-logs"`, sans label `container` ; une sentinelle sans ce label n'y est pas | job `host-containers` absent de la configuration de Promtail (`make deploy`), Promtail ne joignant pas son proxy de socket |
 | 8 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
 | 9 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
 | 10 | Passerelle d'authentification ([détails](sso.md)) : passerelle active ; chaque service protégé, appelé sans session avec des en-têtes d'identité forgés, redirige vers l'autorisation GitLab avec une URI de retour sur son hostname ; session de root ouverte sur la page d'accueil (code d'autorisation créé par `gitlab-rails`, callback, cookie `Secure` en HTTPS seulement), accès authentifié et identité transmise ; session de root sur Grafana : connexion sans formulaire, compte `root` et rôle attendu (`Admin` si root est membre de `SSO_GROUPE_ADMIN`, `Viewer` sinon) malgré des en-têtes forgés (`X-Auth-Request-Role: Admin` compris) ; service `grafana-role` (groupes sur plusieurs en-têtes, groupe voisin, homonyme du compte admin local refusé) ; Grafana joint hors Traefik avec des en-têtes d'identité refusé ; session de root sur SonarQube ([connexion automatique](sso.md#sonarqube)) : `api/users/current` connecté sous `root` (compte non local, e-mail GitLab, `sonar-users`, `sonar-administrators` si et seulement si root est membre de `SSO_GROUPE_ADMIN`) malgré des en-têtes forgés (`admin`, `sonar-administrators`) ; en-têtes forgés sans effet sur l'API GitLab, sur l'API SonarQube exemptée (jeton invalide refusé) et sur le routeur interne de SonarQube (non connecté) ; compte `admin` local de SonarQube accepté par l'API publique | passerelle en mode refus (`make bootstrap`), routeur sans middleware, en-têtes d'identité acceptés, Grafana affichant son formulaire ou rôle inattendu, adresse source non restreinte, relais `sonarqube-sso` absent ou non *healthy*, groupes SonarQube non réécrits |
@@ -64,6 +65,14 @@ négatifs : aucune ne joint l'autre, par alias ni par IP ; le consommateur ne jo
 `sonarqube-db:5432`, ni `loki:3100`. Les sentinelles portent le label `devops-platform.smoke=<env>` ;
 elles sont supprimées après le pipeline, en échec comme en succès, et une exécution interrompue laisse
 les siennes au smoke test suivant, qui les supprime.
+
+L'étape 7 bis lance deux autres sentinelles `busybox` (même label `devops-platform.smoke=<env>`), sans
+réseau, qui écrivent chacune un jeton unique chaque seconde ; l'une porte `devops-platform.logs=true`
+et `devops-platform.logs.service=smoke-logs` ([logs hors plateforme](logs.md#conteneurs-hors-plateforme)).
+Le smoke test interroge Loki depuis le conteneur `grafana` : le jeton de la première doit apparaître
+dans les 90 s avec les labels attendus, puis, 15 s plus tard, celui de la seconde doit être absent de
+tous les flux. Elles sont supprimées à la fin de l'étape. Leurs lignes restent dans Loki jusqu'à la
+purge par la rétention.
 
 Le job ne demande pas la quality gate (`sonar.qualitygate.wait`) : le résultat de l'analyse d'un code
 d'exemple ne dit rien de l'instance. Seule compte la présence de l'analyse.
