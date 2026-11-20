@@ -29,6 +29,12 @@ client a besoin : Traefik ne lit pas les logs, Promtail ne suit pas les événem
   | `GET` | `/containers/<id>/logs` | | ✔ | lecture des logs (flux continu) |
   | `GET` | `/networks` | | ✔ | labels de réseau de `docker_sd_configs` |
 
+  La collecte des [conteneurs hors plateforme](logs.md#conteneurs-hors-plateforme) n'ajoute aucun
+  endpoint : Promtail demande la liste des conteneurs portant le label d'adhésion par un paramètre de
+  `/containers/json` (le proxy ne filtre que le chemin), puis lit leurs logs par
+  `/containers/<id>/logs`, déjà permis pour tout conteneur. Le choix des conteneurs collectés est fait
+  par Promtail, pas par le proxy.
+
   Aucune méthode d'écriture (`POST`, `PUT`, `DELETE`…) n'est permise : ni création, ni `exec`, ni
   arrêt de conteneur. Sont aussi refusés en lecture `/containers/<id>/archive` et `/export` (fichiers
   des conteneurs), `/info`, `/images`, `/volumes`, `/secrets`…
@@ -69,6 +75,9 @@ supprime son conteneur avant de démarrer les nouveaux proxys, puis son réseau
 - **Lecture encore large.** Un client compromis peut lire la configuration de tous les conteneurs de
   l'hôte (`/containers/<id>/json`, variables d'environnement comprises : mots de passe initiaux de
   GitLab et Grafana, par exemple) et leurs logs. C'est le minimum requis par la découverte des routes.
+- **Collecte par labels déclaratifs.** Promtail se fie aux labels des conteneurs, posés par leur
+  créateur : un conteneur de l'hôte qui porte `com.docker.compose.project=devops-platform` est collecté
+  comme la plateforme (job `containers`, sans les limites de débit des projets, [logs](logs.md#limites)).
 - **Proxy de Promtail sans observabilité.** Brique observabilité désactivée, `socket-proxy-promtail`
   reste démarré, socket monté, sans client
   ([#166](https://github.com/Maskime/devops-platform/issues/166)).

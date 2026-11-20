@@ -19,8 +19,8 @@ scrape_configs:
         filters:
           - name: status
             values: [running]
-          # Seuls les conteneurs de la plateforme (nom de projet fixé dans compose.yml) :
-          # les autres stacks de l'hôte ne sont pas collectées.
+          # Seuls les conteneurs de la plateforme (nom de projet fixé dans compose.yml) ; les autres
+          # conteneurs de l'hôte ne sont collectés que sur adhésion (job host-containers ci-dessous).
           - name: label
             values: ["com.docker.compose.project=devops-platform"]
     relabel_configs:
@@ -35,3 +35,56 @@ scrape_configs:
         target_label: service
       - source_labels: [__meta_docker_container_log_stream]
         target_label: stream
+
+  # Conteneurs de l'hôte hors plateforme (projets co-localisés, services voisins), sur adhésion
+  # explicite : label devops-platform.logs=true. Second job car Docker combine les filtres label en ET.
+  # Mêmes endpoints du proxy que le job containers. Documentation : docs/logs.md.
+  - job_name: host-containers
+    docker_sd_configs:
+      - host: tcp://socket-proxy-promtail:2375
+        refresh_interval: 5s
+        filters:
+          - name: status
+            values: [running]
+          - name: label
+            values: ["devops-platform.logs=true"]
+    relabel_configs:
+      # Un conteneur de la plateforme portant le label reste collecté par le seul job containers
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        regex: devops-platform
+        action: drop
+      - target_label: job
+        replacement: host-containers
+      # Labels à cardinalité bornée : projet et service Compose, jamais le nom ni l'identifiant du
+      # conteneur. Valeur par défaut posée d'abord (une source vide supprimerait le label), remplacée
+      # ensuite si la source est renseignée.
+      - target_label: project
+        replacement: hors-compose
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        regex: '(.+)'
+        target_label: project
+      - target_label: service
+        replacement: hors-compose
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        regex: '(.+)'
+        target_label: service
+      # Nom de service choisi par le projet (prioritaire), notamment hors Compose
+      - source_labels: [__meta_docker_container_label_devops_platform_logs_service]
+        regex: '(.+)'
+        target_label: service
+      - source_labels: [__meta_docker_container_log_stream]
+        target_label: stream
+    # Limites de débit, en lignes par seconde, propres à ce job (un pipeline partagé par toutes ses
+    # cibles) : lignes en excès jetées. Par projet, puis pour l'ensemble des projets : au pire
+    # 300 lignes/s de 16 Ko (≈ 4,8 Mo/s, rafale ≈ 16 Mo), sous les limites d'ingestion de Loki
+    # (ingestion_rate_mb 16, ingestion_burst_size_mb 32) qui restent disponibles pour la plateforme.
+    pipeline_stages:
+      - limit:
+          rate: 100
+          burst: 500
+          by_label_name: project
+          drop: true
+      - limit:
+          rate: 300
+          burst: 1000
+          drop: true

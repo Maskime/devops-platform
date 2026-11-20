@@ -252,7 +252,7 @@ ces valeurs.
 
 Les services dotés d'un healthcheck doivent être `healthy`. Loki n'a pas de healthcheck (image
 distroless) : il doit être démarré, et sa santé est couverte par celui de Promtail
-([Rétention des logs](logs.md)).
+([Rétention des logs](logs.md#rétention)).
 
 ## Arrêt
 

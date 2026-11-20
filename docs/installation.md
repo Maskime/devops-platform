@@ -276,7 +276,7 @@ fois changés dans l'interface, le fichier ne fait plus foi pour eux. Mot de pas
 
 L'instance est prête. Pour la suite : [Branchement d'un projet](branchement-projet.md),
 [Analyse SonarQube depuis la CI](analyse-sonarqube.md),
-[Montée de version](montee-de-version.md), [Rétention des logs](logs.md).
+[Montée de version](montee-de-version.md), [Rétention des logs](logs.md#rétention).
 
 ## Dépannage
 

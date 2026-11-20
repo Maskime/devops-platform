@@ -3,7 +3,8 @@
 # root/devops-platform-smoke dans GitLab, y pousse scripts/smoke/projet/ (.gitlab-ci.yml avec un job
 # simple, un job d'isolation réseau et un job sonar-scanner) et la liste des cibles injoignables depuis
 # un job (ISOLATION_FICHIER), vérifie l'isolation entre le réseau des projets co-localisés et celui des
-# jobs (conteneurs sentinelles), attend que le pipeline passe au vert et que l'analyse du commit
+# jobs (conteneurs sentinelles), attend que le pipeline passe au vert, vérifie la collecte dans Loki des
+# logs d'un conteneur hors plateforme qui y adhère (et seulement de lui), attend que l'analyse du commit
 # apparaisse dans SonarQube, puis interroge les serveurs MCP (SonarQube s'il est actif, GitLab) avec des
 # jetons éphémères, vérifie la passerelle d'authentification (redirection vers GitLab sans session,
 # accès avec une session de root, connexion automatique à Grafana avec le rôle attendu et à SonarQube
@@ -534,6 +535,67 @@ retirer_sentinelles || erreur "suppression des sentinelles impossible"
 sentinelles=0
 
 verrou_tenu
+
+# --- 7 bis. Logs des conteneurs hors plateforme ----------------------------------------------------
+
+etape "Collecte des logs hors plateforme (docs/logs.md)"
+# Brique observabilité désactivable : contrôle ignoré si Promtail, Loki ou Grafana (client HTTP sur
+# le réseau de Loki, image distroless) ne tourne pas
+if [[ -z "$(dc ps -q --status running promtail 2> /dev/null)" || -z "$(dc ps -q --status running loki 2> /dev/null)" \
+  || -z "$(dc ps -q --status running grafana 2> /dev/null)" ]]; then
+  echo "    Promtail, Loki ou Grafana arrêté (brique observabilité désactivée ?) : contrôle ignoré."
+else
+  # Deux sentinelles hors Compose, sans réseau, écrivant chacune un jeton unique chaque seconde : l'une
+  # adhère à la collecte (label devops-platform.logs=true), l'autre non
+  jeton="smoke-logs-$(date +%s)-$RANDOM"
+  lancer_emetteur() { # <jeton> [options docker run…] : identifiant sur stdout
+    local jeton="$1"; shift
+    # shellcheck disable=SC2016 # $0 évalué par le shell de la sentinelle
+    docker run -d --rm --label "$SENTINELLE_LABEL=$env" "$@" --network none \
+      "$BUSYBOX_IMAGE" sh -c 'while :; do echo "$0"; sleep 1; done' "$jeton"
+  }
+  sentinelles=1
+  lancer_emetteur "$jeton-avec" --label devops-platform.logs=true --label devops-platform.logs.service=smoke-logs \
+    > /dev/null || erreur "sentinelle de logs avec label non démarrée"
+  lancer_emetteur "$jeton-sans" > /dev/null || erreur "sentinelle de logs sans label non démarrée"
+
+  encoder_url() { # <texte> : encodage des caractères hors [A-Za-z0-9._~-] (wget de busybox ne le fait pas)
+    local s="$1" i c r=""
+    for ((i = 0; i < ${#s}; i++)); do
+      c="${s:i:1}"
+      case "$c" in
+        [A-Za-z0-9._~-]) r+="$c" ;;
+        *) printf -v c '%%%02X' "'$c"; r+="$c" ;;
+      esac
+    done
+    printf '%s' "$r"
+  }
+  # Flux de la dernière heure (heure du serveur Loki) contenant le jeton, tous jobs confondus ; réponse
+  # JSON dans LOKI
+  loki_cherche() { # <jeton>
+    local requete
+    requete="$(encoder_url "{job=~\".+\"} |= \"$1\"")"
+    LOKI="$(dc exec -T grafana wget -qO- "http://loki:3100/loki/api/v1/query_range?query=$requete&limit=5")" \
+      && [[ "$LOKI" == *'"status":"success"'* ]]
+  }
+  logs_trouves() { loki_cherche "$1" && [[ "$LOKI" == *"\"$1\""* ]]; }
+  attendre "Logs de la sentinelle avec label" 90 logs_trouves "$jeton-avec" \
+    || erreur "logs de la sentinelle avec label devops-platform.logs=true absents de Loki après 90 s (Promtail : job host-containers)"
+  flux="$(grep -o '"stream":{[^}]*}' <<<"$LOKI" | head -n1)"
+  for attendu_label in '"job":"host-containers"' '"project":"hors-compose"' '"service":"smoke-logs"'; do
+    [[ "$flux" == *"$attendu_label"* ]] || erreur "labels du flux inattendus : $flux (attendu : $attendu_label)"
+  done
+  [[ "$flux" != *'"container":'* ]] || erreur "label container présent sur un flux hors plateforme : $flux"
+  echo "    Sentinelle avec label collectée : $flux"
+  # Même découverte (refresh 5 s) et même lot d'envoi : marge avant de conclure à l'absence
+  sleep 15
+  loki_cherche "$jeton-sans" || erreur "requête Loki en échec"
+  [[ "$LOKI" == *'"result":[]'* ]] \
+    || erreur "logs de la sentinelle sans label collectés : $(grep -o '"stream":{[^}]*}' <<<"$LOKI" | head -n1)"
+  echo "    Sentinelle sans label non collectée."
+  retirer_sentinelles || erreur "suppression des sentinelles de logs impossible"
+  sentinelles=0
+fi
 
 # --- 8. Analyse SonarQube -------------------------------------------------------------------------
 
