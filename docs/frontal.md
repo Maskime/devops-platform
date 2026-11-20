@@ -158,7 +158,14 @@ tls:
 
 Contrôle depuis un poste : `curl -sI https://gitlab.devops.mondomaine.fr/users/sign_in` doit répondre,
 et `scripts/instance.sh compose <env> logs traefik` doit montrer l'IP publique du poste, pas
-`FRONTAL_IP`.
+`FRONTAL_IP`. `make smoke ENV=<env>` vérifie le contrat de bout en bout :
+- présence du frontal ;
+- chaque hostname servi par le frontal ;
+- PROXY protocol ;
+- aucun port web publié.
+
+Il signale aussi un frontal absent ou défaillant, distinct d'une plateforme en panne
+([smoke test](smoke-test.md#instance-derrière-un-frontal)).
 
 ## Passer de `directe` à `frontal`
 
@@ -184,7 +191,8 @@ redémarrer le frontal avec la nouvelle `FRONTAL_IP`.
   connexion sans en-tête, de quelque adresse qu'elle vienne. C'est nécessaire au runner, aux jobs et aux
   projets co-localisés, qui joignent le même entrypoint par les alias, sans en-tête. Un frontal mal
   configuré, sans PROXY protocol, fonctionne donc, mais les logs montrent alors `FRONTAL_IP` au lieu
-  de l'IP des clients. Aucun port n'étant publié, l'extérieur n'atteint la plateforme que par le frontal.
+  de l'IP des clients. `make smoke` le détecte ; il vérifie aussi qu'un en-tête forgé depuis une autre
+  adresse est ignoré. Aucun port n'étant publié, l'extérieur n'atteint la plateforme que par le frontal.
 - **Entrypoints internes joignables depuis le réseau du frontal.** Traefik écoute sur toutes ses
   interfaces : `interne` (:8000, HTTP clair, routeurs des jobs CI vers GitLab et SonarQube) et
   `traefik` (:8080, sonde de santé) sont joignables depuis `devops-platform_frontal`. D'où la règle 7

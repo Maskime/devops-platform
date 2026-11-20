@@ -9,6 +9,16 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Smoke test d'une instance derrière un frontal (`EXPOSITION=frontal`). Une étape dédiée vérifie :
+  - aucun port web publié ;
+  - présence du frontal ;
+  - chaque hostname servi par le frontal et remis à Traefik avec le PROXY protocol ;
+  - en-tête PROXY forgé ignoré sur le réseau du frontal.
+
+  Les appels MCP SonarQube et la passerelle d'authentification passent par le frontal. Les diagnostics
+  distinguent un frontal absent ou mal configuré d'une plateforme en panne. Comportement inchangé en
+  `directe`. Documentation : `docs/smoke-test.md` (US 15-4).
+
 - Exposition derrière un frontal d'hôte (`EXPOSITION=frontal`) : l'instance partage les ports 80/443
   du serveur avec d'autres sites. Traefik ne publie plus de port web, n'écoute qu'en HTTPS et rejoint
   le réseau `devops-platform_frontal` (`FRONTAL_SUBNET`, `FRONTAL_IP_TRAEFIK`), où il honore le PROXY

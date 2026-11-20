@@ -16,11 +16,15 @@ Comme `make bootstrap`, il vise le moteur Docker local ou le serveur de `DEPLOY_
 conteneurs `gitlab` et `sonarqube`. Il échoue (code de sortie non nul) à la première vérification
 non satisfaite, avec la cause et la commande à lancer.
 
+Une instance en `EXPOSITION=frontal` exige un frontal en service : le smoke test joint alors les
+services par le frontal ([instance derrière un frontal](#instance-derrière-un-frontal)).
+
 ## Déroulement
 
 | Ordre | Vérification | Échec typique |
 |---|---|---|
 | 1 | Services `gitlab`, `gitlab-runner` et `sonarqube` présents et démarrés, verrou de l'instance pris, GitLab prêt, SonarQube `UP`, mot de passe admin SonarQube accepté | instance non déployée ou non bootstrapée |
+| 1 bis | En `EXPOSITION=frontal` seulement : exposition derrière le frontal ([détails](#instance-derrière-un-frontal)) | frontal arrêté ou mal configuré, port web publié |
 | 2 | Jeton d'accès personnel root éphémère créé | — |
 | 3 | Variables CI d'instance `SONAR_HOST_URL` et `SONAR_TOKEN` présentes, `SONAR_TOKEN` accepté par SonarQube, au moins un runner d'instance en ligne | `make bootstrap` non lancé, token révoqué |
 | 4 | Projet GitLab `root/devops-platform-smoke` et projet SonarQube `devops-platform-smoke` créés, ou réutilisés | — |
@@ -29,8 +33,8 @@ non satisfaite, avec la cause et la commande à lancer.
 | 7 | Pipeline du commit au vert | runner, clone, image du scanner, SonarQube injoignable depuis les jobs, service de la plateforme ou sentinelle joignable depuis un job |
 | 7 bis | Logs hors plateforme (si Promtail, Loki et Grafana tournent) : une [sentinelle](#sentinelles) portant `devops-platform.logs=true` est retrouvée dans Loki sous `job="host-containers"`, `project="hors-compose"`, `service="smoke-logs"`, sans label `container` ; une sentinelle sans ce label n'y est pas | job `host-containers` absent de la configuration de Promtail (`make deploy`), Promtail ne joignant pas son proxy de socket |
 | 8 | Analyse SonarQube de la branche `main` portant la révision du commit | token refusé, intégration en échec |
-| 9 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
-| 10 | Passerelle d'authentification ([détails](sso.md)) : passerelle active ; chaque service protégé, appelé sans session avec des en-têtes d'identité forgés, redirige vers l'autorisation GitLab avec une URI de retour sur son hostname ; session de root ouverte sur la page d'accueil (code d'autorisation créé par `gitlab-rails`, callback, cookie `Secure` en HTTPS seulement), accès authentifié et identité transmise ; session de root sur Grafana : connexion sans formulaire, compte `root` et rôle attendu (`Admin` si root est membre de `SSO_GROUPE_ADMIN`, `Viewer` sinon) malgré des en-têtes forgés (`X-Auth-Request-Role: Admin` compris) ; service `grafana-role` (groupes sur plusieurs en-têtes, groupe voisin, homonyme du compte admin local refusé) ; Grafana joint hors Traefik avec des en-têtes d'identité refusé ; session de root sur SonarQube ([connexion automatique](sso.md#sonarqube)) : `api/users/current` connecté sous `root` (compte non local, e-mail GitLab, `sonar-users`, `sonar-administrators` si et seulement si root est membre de `SSO_GROUPE_ADMIN`) malgré des en-têtes forgés (`admin`, `sonar-administrators`) ; en-têtes forgés sans effet sur l'API GitLab, sur l'API SonarQube exemptée (jeton invalide refusé) et sur le routeur interne de SonarQube (non connecté) ; compte `admin` local de SonarQube accepté par l'API publique | passerelle en mode refus (`make bootstrap`), routeur sans middleware, en-têtes d'identité acceptés, Grafana affichant son formulaire ou rôle inattendu, adresse source non restreinte, relais `sonarqube-sso` absent ou non *healthy*, groupes SonarQube non réécrits |
+| 9 | Serveurs MCP : SonarQube (s'il est actif) liste le projet de test (`search_my_sonarqube_projects`), aussi par son URL publique en frontal, GitLab le lit (`get_project`) ; jetons éphémères ([serveurs MCP](mcp.md#vérification)) | `sonarqube-mcp` arrêté, accès au MCP GitLab non autorisé (`make bootstrap`) |
+| 10 | Passerelle d'authentification ([détails](sso.md)), par le frontal en `EXPOSITION=frontal` : passerelle active ; chaque service protégé, appelé sans session avec des en-têtes d'identité forgés, redirige vers l'autorisation GitLab avec une URI de retour sur son hostname ; session de root ouverte sur la page d'accueil (code d'autorisation créé par `gitlab-rails`, callback, cookie `Secure` en HTTPS seulement), accès authentifié et identité transmise ; session de root sur Grafana : connexion sans formulaire, compte `root` et rôle attendu (`Admin` si root est membre de `SSO_GROUPE_ADMIN`, `Viewer` sinon) malgré des en-têtes forgés (`X-Auth-Request-Role: Admin` compris) ; service `grafana-role` (groupes sur plusieurs en-têtes, groupe voisin, homonyme du compte admin local refusé) ; Grafana joint hors Traefik avec des en-têtes d'identité refusé ; session de root sur SonarQube ([connexion automatique](sso.md#sonarqube)) : `api/users/current` connecté sous `root` (compte non local, e-mail GitLab, `sonar-users`, `sonar-administrators` si et seulement si root est membre de `SSO_GROUPE_ADMIN`) malgré des en-têtes forgés (`admin`, `sonar-administrators`) ; en-têtes forgés sans effet sur l'API GitLab, sur l'API SonarQube exemptée (jeton invalide refusé) et sur le routeur interne de SonarQube (non connecté) ; compte `admin` local de SonarQube accepté par l'API publique | passerelle en mode refus (`make bootstrap`), routeur sans middleware, en-têtes d'identité acceptés, Grafana affichant son formulaire ou rôle inattendu, adresse source non restreinte, relais `sonarqube-sso` absent ou non *healthy*, groupes SonarQube non réécrits |
 | 11 | Portainer ([détails](sso.md#portainer)) : connexion du compte `admin` local, réglages OAuth conformes (application, URIs, création automatique de compte désactivée), comptes limités aux membres de `SSO_GROUPE_ADMIN` ; utilisateur GitLab de test hors du groupe : Portainer échange son code d'autorisation (créé par `gitlab-rails`), lit son identité et refuse la connexion (403) ; si `SSO_GROUPE_ADMIN` est renseigné et `SSO_GITLAB_GROUPE` vide, sa session de passerelle est refusée sur le hostname de Portainer (403) | `make bootstrap` non lancé, groupe modifié depuis le dernier bootstrap, mot de passe admin Portainer différent |
 | 12 | Avec `NETTOYER=1` : projets GitLab et SonarQube et utilisateur de test supprimés | — |
 
@@ -47,6 +51,47 @@ Le pipeline poussé (`scripts/smoke/projet/.gitlab-ci.yml`) compte trois jobs :
 - **`sonar-scanner`** : `sonarsource/sonar-scanner-cli` (version épinglée, celle de
   [l'exemple de job](analyse-sonarqube.md#exemple-de-job)), qui n'utilise que les variables CI
   d'instance : il valide `SONAR_HOST_URL` et `SONAR_TOKEN` tels que les reçoit tout projet hébergé.
+
+## Instance derrière un frontal
+
+En `EXPOSITION=frontal` ([frontal d'hôte](frontal.md)), le smoke test l'annonce dès le départ : il
+dépend d'un frontal en service. L'étape 1 bis s'exécute avant toute donnée de test. Ses messages
+d'erreur indiquent qui doit corriger :
+
+- **« Plateforme »** : la correction se fait sur l'instance, en général avec `make deploy` ;
+- **« Frontal absent »** : aucun conteneur n'occupe `FRONTAL_IP`, il faut démarrer le frontal ;
+- **« Frontal »** : le frontal tourne mais ne respecte pas son
+  [contrat](frontal.md#contrat-attendu-du-frontal).
+
+Une plateforme en panne n'est jamais imputée au frontal : elle est testée sans lui avant toute sonde
+par le frontal.
+
+| Vérification | Échec signalé |
+|---|---|
+| Traefik démarré, rattaché à `devops-platform_frontal` à `FRONTAL_IP_TRAEFIK` | Plateforme |
+| Aucun port publié sur l'hôte par l'instance, hormis le SSH de GitLab (`GITLAB_SSH_PORT`) | Plateforme |
+| Un conteneur à `FRONTAL_IP` sur `devops-platform_frontal` | Frontal absent |
+| GitLab répond par l'alias de Traefik (sans frontal) | Plateforme en panne |
+| Par le frontal : `/users/sign_in` de GitLab (200), `/api/v4/mcp` sans jeton (401), API de SonarQube avec le compte admin (`UP`), accueil, Grafana, Portainer et PlantUML redirigés vers l'autorisation GitLab (302), serveur MCP SonarQube sans jeton (401) | Frontal : rien n'écoute sur le 443, hostname non routé (SNI), certificat inattendu (TLS terminé par le frontal) |
+| Chaque requête faite par le frontal figure dans les logs d'accès de Traefik, avec une autre adresse client que `FRONTAL_IP` | Frontal : requête non transmise, ou envoyée sans PROXY protocol |
+| Une [sentinelle](#sentinelles) sur `devops-platform_frontal` : port 80 de Traefik fermé ; connexion directe sans PROXY protocol, et avec un en-tête PROXY forgé (`203.0.113.7`), journalisées à l'adresse de la sentinelle | Plateforme (en-tête PROXY honoré hors de `FRONTAL_IP`) |
+
+Les requêtes par le frontal partent du conteneur `gitlab-runner`. Elles visent le port 443 de la
+passerelle IPv4 du réseau de la plateforme (`PLATFORM_NETWORK`), c'est-à-dire de l'hôte. Le hostname
+est imposé et le certificat validé (CA privée en `custom`), comme pour un navigateur. Chaque requête
+porte un marqueur unique (`?devops-platform-smoke-frontal=…`) qui permet de la retrouver dans les logs
+d'accès de Traefik.
+
+Les appels MCP SonarQube de l'étape 9 et toute l'étape 10 (passerelle d'authentification) passent
+aussi par le frontal. Les autres étapes ne changent pas : le runner, les jobs et les projets
+co-localisés joignent Traefik par les alias réseau, sans frontal.
+
+**PROXY protocol.** Traefik honore l'en-tête PROXY de la seule `FRONTAL_IP`, mais ne refuse aucune
+connexion ([limites du frontal](frontal.md#limites)). Le smoke test vérifie donc deux choses :
+
+- une connexion directe à Traefik sur le réseau du frontal est admise, mais journalisée à l'adresse
+  réelle de l'appelant ;
+- un en-tête forgé est ignoré : l'adresse d'un client n'est pas usurpable.
 
 ### Sentinelles
 
@@ -74,6 +119,12 @@ dans les 90 s avec les labels attendus, puis, 15 s plus tard, celui de la second
 tous les flux. Elles sont supprimées à la fin de l'étape. Leurs lignes restent dans Loki jusqu'à la
 purge par la rétention.
 
+En `EXPOSITION=frontal`, l'étape 1 bis lance une sentinelle sur `devops-platform_frontal` (même
+label). Elle utilise l'image du conteneur `gitlab-runner` (curl, en-tête PROXY forgé par
+`--haproxy-clientip`). Elle reçoit une adresse fixe libre du sous-réseau, jamais `FRONTAL_IP` : le
+frontal peut redémarrer pendant le test. Elle est supprimée à la fin de l'étape et s'arrête d'elle-même
+après 2 min.
+
 Le job ne demande pas la quality gate (`sonar.qualitygate.wait`) : le résultat de l'analyse d'un code
 d'exemple ne dit rien de l'instance. Seule compte la présence de l'analyse.
 
@@ -99,7 +150,7 @@ hôte sans accès à `registry.gitlab.com`) renvoie à `GITLAB_RUNNER_HELPER_IMA
 | Projet GitLab | `root/devops-platform-smoke` | privé, Auto DevOps désactivé |
 | Projet SonarQube | `devops-platform-smoke` | privé |
 | Jeton utilisateur SonarQube (compte admin), application OAuth GitLab (scope `mcp`) | `devops-platform-smoke-mcp` | supprimés en fin d'étape 9, succès ou échec |
-| Conteneurs [sentinelles](#sentinelles) | label `devops-platform.smoke=<env>` | supprimés après le pipeline, succès ou échec |
+| Conteneurs [sentinelles](#sentinelles) | label `devops-platform.smoke=<env>` | supprimés après le pipeline (celle du réseau du frontal, en fin d'étape 1 bis), succès ou échec |
 | Utilisateur GitLab hors de `SSO_GROUPE_ADMIN` (étape 11) | `devops-platform-smoke-portainer` | bloqué en fin d'étape, succès ou échec ; débloqué et réutilisé au smoke test suivant |
 | Compte Grafana de root (rôle synchronisé, voir [Grafana](sso.md#grafana)) | `root` | conservé : le même compte que lors d'une visite de root |
 
@@ -139,6 +190,14 @@ l'API) n'est pas validée : le smoke test l'indique et continue.
 ## Limites
 
 - **Service SonarQube absent** de l'instance : le smoke test refuse de s'exécuter.
+- **Frontal joint par la passerelle du réseau de la plateforme** : il doit publier son port 443 sur
+  toutes les adresses de l'hôte. Le chemin repose sur la redirection de port de Docker entre réseaux.
+  Une publication sur une seule adresse, ou un pare-feu d'hôte qui filtre ce trafic, donne « rien
+  n'écoute sur le port 443 de l'hôte » alors que le frontal fonctionne.
+- **Sentinelle sur le réseau du frontal** : le contrat réserve ce réseau au frontal. La sentinelle est
+  une exception temporaire, propre au test.
+- **Logs d'accès de Traefik** au format par défaut (adresse du client en premier champ), lus dans les
+  5 000 dernières lignes.
 - **Réseau** : le pipeline télécharge l'image du scanner (Docker Hub) et, sauf
   `GITLAB_RUNNER_HELPER_IMAGE`, l'image auxiliaire du runner (`registry.gitlab.com`) : un serveur sans
   accès à ces registres échoue au job ([image auxiliaire](bootstrap.md#image-auxiliaire-des-jobs)).
