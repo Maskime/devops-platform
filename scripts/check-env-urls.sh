@@ -17,6 +17,10 @@
 #     plateforme (isolation des jobs CI et des projets co-localisés) ; GITLAB_PROXY_SUBNET et
 #     GRAFANA_PROXY_SUBNET : CIDR IPv4 de /16 à /29, disjoints ; GRAFANA_PROXY_IP_TRAEFIK : adresse du
 #     second, hors adresse réseau, broadcast et passerelle Docker.
+#   - EXPOSITION ∈ {directe, frontal} (vide ou absente : directe) ; en frontal (docs/frontal.md),
+#     TLS_MODE=custom ou letsencrypt avec ACME_CHALLENGE=tls seulement (le frontal ne transmet que le
+#     443, en passthrough), FRONTAL_SUBNET, FRONTAL_IP et FRONTAL_IP_TRAEFIK valides
+#     (reseau_frontal_valide, scripts/lib/env.sh).
 #   - SONARQUBE_MCP_ENABLED : true, false ou absente ; serveur MCP SonarQube forcé en TLS_MODE=none
 #     signalé (jetons en clair). Son hostname n'est contrôlé (certificat, Let's Encrypt) que s'il est actif.
 #
@@ -52,6 +56,30 @@ if [[ -n "${TLS_MODE+x}" ]]; then
 fi
 
 erreurs=0
+
+# Mode d'exposition (scripts/lib/env.sh) ; en frontal, modes TLS compatibles et réseau du frontal
+if exposition="$(exposition_valide "$fichier")"; then
+  if [[ "$exposition" == frontal ]]; then
+    challenge="$(valeur_effective ACME_CHALLENGE)"
+    if [[ "$tls_mode" == none ]]; then
+      echo "TLS_MODE=none incompatible avec EXPOSITION=frontal : le frontal ne transmet que le HTTPS (443)." >&2
+      echo "  Corriger dans $fichier : TLS_MODE=custom, ou TLS_MODE=letsencrypt avec ACME_CHALLENGE=tls" >&2
+      erreurs=1
+    elif [[ "$tls_mode" == letsencrypt && "${challenge:-http}" != tls ]]; then
+      echo "ACME_CHALLENGE=${challenge:-http} incompatible avec EXPOSITION=frontal : le port 80 appartient au" >&2
+      echo "  frontal, seul le challenge TLS-ALPN-01 (443, en passthrough) aboutit à Traefik." >&2
+      echo "  Corriger dans $fichier : ACME_CHALLENGE=tls" >&2
+      erreurs=1
+    fi
+    reseau_frontal_valide "$fichier" || erreurs=1
+  fi
+else
+  erreurs=1
+fi
+if [[ -n "${EXPOSITION+x}" ]]; then
+  echo "Attention : EXPOSITION=${EXPOSITION} vient du shell et remplace la valeur de $fichier." >&2
+fi
+
 for service in gitlab sonarqube grafana; do
   cle_url="${service^^}_EXTERNAL_URL"
   cle_hote="${service^^}_HOSTNAME"
