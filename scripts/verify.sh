@@ -94,16 +94,38 @@ else
   ok "${#cles_secretes[@]} secret(s) de envs/.env.example masqué(s)"
 fi
 
-# 3. docker compose config pour chaque environnement (dont l'exemple), et pour chaque mode TLS ; tous les
-#    profils actifs (--profile '*') : services à profil, comme sonarqube-mcp, contrôlés aussi
+# 3. docker compose config pour chaque environnement (dont l'exemple), pour chaque mode TLS et pour chaque
+#    mode d'exposition ; tous les profils actifs (--profile '*') : services à profil, comme sonarqube-mcp,
+#    contrôlés aussi
 section "docker compose config"
 shopt -s nullglob
 tls_modes=(compose/tls/*.yml)
 shopt -u nullglob
 tls_modes=("${tls_modes[@]##*/}") tls_modes=("${tls_modes[@]%.yml}")
+shopt -s nullglob
+expositions=(compose/exposition/*.yml)
+shopt -u nullglob
+expositions=("${expositions[@]##*/}") expositions=("${expositions[@]%.yml}")
 # Variables obligatoires d'un mode, absentes de l'exemple (lignes commentées) : valeurs de test
 # fournies quand un mode est imposé (ACME_EMAIL : TLS_MODE=letsencrypt)
 VARS_MODE_TLS=(ACME_EMAIL=verify@devops-platform.test)
+# Variables obligatoires d'EXPOSITION=frontal (docs/frontal.md), absentes de l'exemple : valeurs de test
+VARS_FRONTAL=(FRONTAL_SUBNET=172.31.253.0/29 FRONTAL_IP=172.31.253.2 FRONTAL_IP_TRAEFIK=172.31.253.3)
+# Combinaisons admises par make check-env : en frontal, TLS_MODE custom ou letsencrypt (ACME_CHALLENGE=tls)
+combinaison_admise() { # <TLS_MODE> <EXPOSITION>
+  [[ "$2" != frontal || "$1" != none ]]
+}
+# Variables imposées pour un TLS_MODE et une EXPOSITION (vides : valeurs du fichier) → VARIABLES_CIBLE
+variables_cible() { # <TLS_MODE ou vide> <EXPOSITION ou vide>
+  VARIABLES_CIBLE=()
+  if [[ -n "$1" ]]; then VARIABLES_CIBLE+=(TLS_MODE="$1" "${VARS_MODE_TLS[@]}"); fi
+  if [[ "$2" == frontal ]]; then
+    VARIABLES_CIBLE+=(EXPOSITION=frontal "${VARS_FRONTAL[@]}")
+    if [[ "$1" == letsencrypt ]]; then VARIABLES_CIBLE+=(ACME_CHALLENGE=tls); fi
+  elif [[ -n "$2" ]]; then
+    VARIABLES_CIBLE+=(EXPOSITION="$2")
+  fi
+}
 if [[ -f compose.yml ]]; then
   shopt -s nullglob dotglob
   env_files=(envs/*.env envs/.env.example)
@@ -119,6 +141,18 @@ if [[ -f compose.yml ]]; then
     else
       ko "envs/.env.example, TLS_MODE=$mode"
     fi
+  done
+  # Chaque overlay de mode d'exposition (compose/exposition/<mode>.yml) avec chaque mode TLS admis
+  for expo in "${expositions[@]}"; do
+    for mode in "${tls_modes[@]}"; do
+      combinaison_admise "$mode" "$expo" || continue
+      variables_cible "$mode" "$expo"
+      if env "${VARIABLES_CIBLE[@]}" docker compose --env-file envs/.env.example -f compose.yml --profile '*' config -q; then
+        ok "envs/.env.example, TLS_MODE=$mode, EXPOSITION=$expo"
+      else
+        ko "envs/.env.example, TLS_MODE=$mode, EXPOSITION=$expo"
+      fi
+    done
   done
   # Entrypoint de sonarqube en TLS_MODE=custom (compose/tls/sonarqube/custom.yml) : les options de l'image
   # (agent du plugin branch) sont complétées dans le conteneur, jamais interpolées (vidées) par Compose
@@ -188,19 +222,30 @@ else
   ok "pas encore de compose.yml"
 fi
 
-# 3 quater. Ports publiés : seuls 80 (et 443, TLS) via Traefik et le SSH GitLab (US 3-6). Le web passe
-#           par Traefik (routage par hostname). Liste blanche service:publié:cible, contrôlée pour chaque
-#           environnement et pour chaque mode TLS (sur l'exemple) ; `*` = port publié libre
-#           (GITLAB_SSH_PORT). `expose` ne publie rien (non contrôlé).
+# 3 quater. Ports publiés, par mode d'exposition. En directe : seuls 80 (et 443, TLS) via Traefik et le
+#           SSH GitLab ; le web passe par Traefik (routage par hostname). En frontal : le SSH GitLab seul
+#           (80 et 443 de l'hôte appartiennent au frontal, docs/frontal.md), entrypoint web de Traefik
+#           limité à la boucle locale et PROXY protocol configuré. Liste blanche service:publié:cible,
+#           contrôlée pour chaque environnement et pour chaque mode TLS et d'exposition (sur l'exemple) ;
+#           `*` = port publié libre (GITLAB_SSH_PORT). `expose` ne publie rien (non contrôlé).
 #           Un network_mode host, service:… ou container:… contournerait la liste : refusé.
 section "ports publiés"
 # traefik:443:443 : HTTPS (TLS_MODE custom ou letsencrypt, overlay compose/tls/<mode>.yml)
-PORTS_AUTORISES=(traefik:80:80 traefik:443:443 'gitlab:*:22')
-# Configuration résolue d'une cible <fichier env>[|<TLS_MODE imposé>] (sections 3 quater et quinquies)
-config_cible() {
-  local env_file="${1%%|*}" variables=()
-  [[ "$1" == *"|"* ]] && variables=(TLS_MODE="${1#*|}" "${VARS_MODE_TLS[@]}")
-  env "${variables[@]}" docker compose --env-file "$env_file" -f compose.yml --profile '*' config 2>/dev/null
+PORTS_AUTORISES_DIRECTE=(traefik:80:80 traefik:443:443 'gitlab:*:22')
+PORTS_AUTORISES_FRONTAL=('gitlab:*:22')
+# Cible : <fichier env>[|<TLS_MODE imposé>|<EXPOSITION imposée>] → CIBLE_FICHIER, CIBLE_TLS, CIBLE_EXPO
+# et CIBLE_LIBELLE (sections 3 quater à sexies)
+decouper_cible() { # <cible>
+  IFS='|' read -r CIBLE_FICHIER CIBLE_TLS CIBLE_EXPO <<<"$1"
+  CIBLE_LIBELLE="$CIBLE_FICHIER"
+  if [[ -n "$CIBLE_TLS" ]]; then CIBLE_LIBELLE+=", TLS_MODE=$CIBLE_TLS"; fi
+  if [[ -n "$CIBLE_EXPO" ]]; then CIBLE_LIBELLE+=", EXPOSITION=$CIBLE_EXPO"; fi
+}
+# Configuration résolue d'une cible (sections 3 quater à sexies)
+config_cible() { # <cible>
+  decouper_cible "$1"
+  variables_cible "$CIBLE_TLS" "$CIBLE_EXPO"
+  env "${VARIABLES_CIBLE[@]}" docker compose --env-file "$CIBLE_FICHIER" -f compose.yml --profile '*' config 2>/dev/null
 }
 # Montages d'une configuration résolue (entrée standard), une ligne service:source:cible. Sortie
 # normalisée : clés de service à 4 espaces, éléments à 6, champs à 8.
@@ -226,12 +271,26 @@ port_autorise() { # <service:publié:cible>
   return 1
 }
 if [[ -f compose.yml ]]; then
-  # Cible : <fichier env>[|<TLS_MODE imposé>]
+  # Cibles : chaque environnement, puis l'exemple dans chaque mode TLS (exposition du fichier : directe),
+  # et dans chaque mode TLS admis de chaque autre mode d'exposition
   cibles=("${env_files[@]}")
-  for mode in "${tls_modes[@]}"; do cibles+=("envs/.env.example|$mode"); done
+  for mode in "${tls_modes[@]}"; do cibles+=("envs/.env.example|$mode|"); done
+  for expo in "${expositions[@]}"; do
+    [[ "$expo" == directe ]] && continue
+    for mode in "${tls_modes[@]}"; do
+      if combinaison_admise "$mode" "$expo"; then cibles+=("envs/.env.example|$mode|$expo"); fi
+    done
+  done
   for cible in "${cibles[@]}"; do
-    f="${cible%%|*}" mode=""
-    [[ "$cible" == *"|"* ]] && mode="${cible#*|}" f="$f, TLS_MODE=$mode"
+    decouper_cible "$cible"
+    f="$CIBLE_LIBELLE"
+    # Liste blanche du mode d'exposition effectif (imposé, sinon celui du fichier)
+    expo="${CIBLE_EXPO:-$(env_valeur "$CIBLE_FICHIER" EXPOSITION)}"
+    if [[ "${expo:-directe}" == frontal ]]; then
+      PORTS_AUTORISES=("${PORTS_AUTORISES_FRONTAL[@]}")
+    else
+      PORTS_AUTORISES=("${PORTS_AUTORISES_DIRECTE[@]}")
+    fi
     # Sortie normalisée : service à 2 espaces, `ports:` / `network_mode:` à 4, éléments `- ` à 6,
     # champs `target:` / `published:` à 8
     if ! config="$(config_cible "$cible")"; then
@@ -263,6 +322,13 @@ if [[ -f compose.yml ]]; then
     for m in "${modes[@]}"; do
       [[ "${m#*:}" =~ ^(host|service:|container:) ]] && interdits+=("network_mode ${m}")
     done
+    # Frontal : entrypoint web sur la boucle locale seulement, en-tête PROXY honoré du seul frontal
+    if [[ "${expo:-directe}" == frontal ]]; then
+      grep -qxE ' +TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: "?127\.0\.0\.1:80"?' <<< "$config" \
+        || interdits+=("entrypoint web de traefik hors boucle locale")
+      grep -qE '^ +TRAEFIK_ENTRYPOINTS_WEBSECURE_PROXYPROTOCOL_TRUSTEDIPS: "?[0-9]' <<< "$config" \
+        || interdits+=("PROXY protocol de websecure non configuré")
+    fi
     if ((${#interdits[@]})); then
       ko "$f : exposition hors liste autorisée (${PORTS_AUTORISES[*]}) : ${interdits[*]}"
     else
@@ -296,8 +362,8 @@ dans_liste() { # <valeur> <motifs…>
 }
 if [[ -f compose.yml ]]; then
   for cible in "${cibles[@]}"; do
-    f="${cible%%|*}" mode=""
-    [[ "$cible" == *"|"* ]] && mode="${cible#*|}" f="$f, TLS_MODE=$mode"
+    decouper_cible "$cible"
+    f="$CIBLE_LIBELLE"
     if ! config="$(config_cible "$cible")"; then
       ko "$f : configuration illisible"; continue
     fi
@@ -403,8 +469,8 @@ SENTINELLE_CA=/verify-platform-ca
 if [[ -f compose.yml ]]; then
   declare -A montees=()
   for cible in "${cibles[@]}"; do
-    f="${cible%%|*}"
-    [[ "$cible" == *"|"* ]] && f="$f, TLS_MODE=${cible#*|}"
+    decouper_cible "$cible"
+    f="$CIBLE_LIBELLE"
     if ! config="$(PLATFORM_CONFIG_DIR="$SENTINELLE_CONFIG" PLATFORM_CA_DIR="$SENTINELLE_CA" \
         config_cible "$cible")"; then
       ko "$f : configuration illisible"; continue
@@ -461,8 +527,8 @@ section "variables documentées"
 if [[ -f compose.yml && -f envs/.env.example ]]; then
   # Variables interpolées, et sources `environment: <VAR>` des secrets (lues sans interpolation)
   mapfile -t compose_vars < <({
-    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml | sed -E 's/.*\$\{//'
-    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml
+    grep -ohE '(^|[^$])\$\{[A-Z][A-Z0-9_]*' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml compose/exposition/*.yml | sed -E 's/.*\$\{//'
+    awk '/^[^ ]/ { s = ($0 == "secrets:") } s && /^    environment: [A-Z]/ { print $2 }' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml compose/exposition/*.yml
   } | sort -u)
   missing=0
   for v in "${compose_vars[@]}"; do
@@ -486,7 +552,7 @@ scripts/check-images.sh || ko "images épinglées (voir ci-dessus)"
 # 6. Noms de conteneurs : Compose les attribue, les scripts ciblent les services
 #    (`docker compose exec <service>`). Commentaires ignorés ; `docker run` et `docker inspect <id>` admis.
 section "noms de conteneurs"
-if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml; then
+if [[ -f compose.yml ]] && grep -nE '^[[:space:]]*container_name:' compose.yml compose/*.yml compose/tls/*.yml compose/tls/*/*.yml compose/exposition/*.yml; then
   ko "nom de conteneur fixé dans un fichier compose (voir ci-dessus)"
 else
   ok "aucun nom fixé dans les fichiers compose"
@@ -517,11 +583,12 @@ if [[ -f compose.yml ]]; then
     fi
   }
   if sortie="$(compose_propre)"; then ok "compose.yml : accepté"; else ko "compose.yml : refusé : $sortie"; fi
-  for f in compose/*.yml compose/tls/*.yml compose/tls/*/*.yml; do
+  for f in compose/*.yml compose/tls/*.yml compose/tls/*/*.yml compose/exposition/*.yml; do
     m="$(basename "$f" .yml)"
     case "$f" in
       compose/tls/*/*) m="tls-$(basename "$(dirname "$f")")-$m" ;;
       compose/tls/*) m="tls-$m" ;;
+      compose/exposition/*) m="exposition-$m" ;;
     esac
     grep -qE "^x-garde-fou-${m}: \"\\$\{PLATFORM_GARDE_FOU:\?" "$f" || ko "$f : extension x-garde-fou-${m} absente"
     refus_attendu "PLATFORM_GARDE_FOU" "$f seul" -f "$f"
