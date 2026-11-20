@@ -9,7 +9,10 @@
 # jetons éphémères, vérifie la passerelle d'authentification (redirection vers GitLab sans session,
 # accès avec une session de root, connexion automatique à Grafana avec le rôle attendu et à SonarQube
 # avec les groupes attendus, en-têtes d'identité forgés sans effet) et la connexion de Portainer à GitLab (réglages OAuth, comptes limités à
-# SSO_GROUPE_ADMIN, refus d'un utilisateur de test hors du groupe). NETTOYER=1 : projets de test GitLab
+# SSO_GROUPE_ADMIN, refus d'un utilisateur de test hors du groupe). En EXPOSITION=frontal, vérifie d'abord
+# l'exposition (aucun port web publié, frontal présent, chaque hostname servi par le frontal avec le PROXY
+# protocol, en-tête PROXY forgé ignoré sur le réseau du frontal), puis passe par le frontal pour les
+# contrôles des URLs publiques (MCP SonarQube, passerelle). NETTOYER=1 : projets de test GitLab
 # et SonarQube et utilisateur de test supprimés après un
 # succès.
 # Lancé par `make smoke ENV=<env>` (scripts/instance.sh smoke), qui positionne la cible Docker (contexte
@@ -83,6 +86,12 @@ readonly SSO_FORGES_SONAR=("X-Auth-Request-User: admin" "X-Auth-Request-Email: a
   "X-Auth-Request-Groups: sonar-administrators" "X-Auth-Request-Preferred-Username: admin")
 # Routeur interne de SonarQube (entrypoint interne de Traefik, labels de compose/sonarqube.yml)
 readonly SONAR_INTERNE_HOTE=sonarqube.devops-platform.internal SONAR_INTERNE_PORT=8000
+# EXPOSITION=frontal (docs/frontal.md) : réseau partagé avec le frontal (compose/exposition/frontal.yml),
+# paramètre de requête qui marque chaque sonde dans les logs d'accès de Traefik, adresse forgée dans
+# l'en-tête PROXY de la sentinelle (TEST-NET-3, jamais attribuée)
+readonly FRONTAL_RESEAU=devops-platform_frontal
+readonly FRONTAL_MARQUE=devops-platform-smoke-frontal
+readonly FRONTAL_IP_FORGEE=203.0.113.7
 
 erreur() { echo "Erreur : $*" >&2; exit 1; }
 etape() { echo; echo "==> $*"; }
@@ -104,6 +113,14 @@ case "${NETTOYER:-}" in
   "" | 0) nettoyer=0 ;;
   *) erreur "NETTOYER invalide : ${NETTOYER} (attendu : 1)" ;;
 esac
+
+# Mode d'exposition : en frontal, les services sont joints par leur URL publique à travers le frontal
+# d'hôte (étapes 1 bis, 9 et 10), qui doit donc être en service
+exposition="$(exposition_valide "$env_file")" || exit 1
+if [[ "$exposition" == frontal ]]; then
+  echo "Mode frontal (EXPOSITION=frontal) : les services sont joints par leur URL publique, à travers le"
+  echo "frontal d'hôte. Ce smoke test exige un frontal en service (docs/frontal.md)."
+fi
 
 # Lu dans le fichier uniquement, comme scripts/bootstrap/sonarqube.sh
 admin_mdp="$(env_valeur_fichier "$env_file" SONARQUBE_ADMIN_PASSWORD)"
@@ -210,6 +227,233 @@ attendre "SonarQube" "$ATTENTE_SONAR" sonar_pret \
 identite_valide "$admin" \
   || erreur "SONARQUBE_ADMIN_PASSWORD refusé par SonarQube : instance non bootstrapée ? (make bootstrap ENV=$env)"
 echo "    SonarQube est prêt."
+
+# Fonctions communes aux sondes HTTP (étapes 1 bis et 10) et aux sentinelles (étapes 1 bis et 5)
+ip_sur_reseau() { # <identifiant> <réseau>
+  docker inspect -f "{{(index .NetworkSettings.Networks \"$2\").IPAddress}}" "$1" 2> /dev/null
+}
+code_de() { sed -n 's/^CODE=//p' <<<"$1" | tail -n1; }
+entete_de() { grep -i "^$2:" <<<"$1" | tail -n1 | sed 's/^[^:]*: *//; s/\r$//'; }
+
+# --- 1 bis. Exposition derrière le frontal --------------------------------------------------------
+
+# Adresse publique de l'instance vue depuis gitlab-runner : vide en directe (étape 10 : alias de Traefik)
+fr_ip_publique=""
+if [[ "$exposition" == frontal ]]; then
+  etape "Exposition derrière le frontal (docs/frontal.md)"
+  echo "    Contrôles par le frontal d'hôte : il doit être en service. Diagnostic « Frontal absent » ou"
+  echo "    « Frontal » : à corriger côté frontal ; « Plateforme » : à corriger sur l'instance."
+  reseau_frontal_valide "$env_file" || erreur "Plateforme : variables du frontal invalides (make check-env ENV=$env)"
+  fr_ip="$(env_valeur "$env_file" FRONTAL_IP)"
+  fr_ip_traefik="$(env_valeur "$env_file" FRONTAL_IP_TRAEFIK)"
+  fr_subnet="$(env_valeur "$env_file" FRONTAL_SUBNET)"
+  fr_hote_gitlab="$(env_valeur "$env_file" GITLAB_HOSTNAME)"
+  fr_hote_gitlab="${fr_hote_gitlab:-gitlab.localhost}"
+  fr_gitlab_url="$(env_valeur "$env_file" GITLAB_EXTERNAL_URL)"
+  fr_gitlab_url="${fr_gitlab_url:-$(url_derivee "$fr_hote_gitlab" "$(env_valeur "$env_file" TLS_MODE)")}"
+  fr_gitlab_url="${fr_gitlab_url%/}"
+
+  # a. Côté plateforme : Traefik démarré, rattaché au réseau du frontal à FRONTAL_IP_TRAEFIK
+  fr_traefik="$(dc ps -q --status running traefik)"
+  [[ -n "$fr_traefik" ]] || erreur "Plateforme : Traefik arrêté (make deploy ENV=$env)"
+  # Membres du réseau : « <identifiant> <adresse>/<préfixe> » par ligne
+  fr_membres="$(docker network inspect -f '{{range $id, $c := .Containers}}{{$id}} {{$c.IPv4Address}}{{"\n"}}{{end}}' \
+    "$FRONTAL_RESEAU" 2> /dev/null)" || erreur "Plateforme : réseau $FRONTAL_RESEAU absent (make deploy ENV=$env)"
+  [[ "$(ip_sur_reseau "$fr_traefik" "$FRONTAL_RESEAU")" == "$fr_ip_traefik" ]] \
+    || erreur "Plateforme : Traefik absent de $FRONTAL_RESEAU ou à une autre adresse que FRONTAL_IP_TRAEFIK=$fr_ip_traefik (make deploy ENV=$env)"
+  echo "    Plateforme : Traefik rattaché à $FRONTAL_RESEAU ($fr_ip_traefik)."
+
+  # b. Aucun port web publié sur l'hôte : seul le SSH de GitLab (« <service>:<port hôte>-><port>/<proto> »)
+  fr_ssh="$(env_valeur "$env_file" GITLAB_SSH_PORT)"
+  fr_publies="$(while read -r id; do
+    svc="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$id")"
+    # Lignes « 22/tcp -> 0.0.0.0:2222 » ou « 22/tcp -> [::]:2222 »
+    docker port "$id" | sed -n "s#^\([0-9]*/[a-z]*\) -> .*:\([0-9]*\)\$#$svc:\2->\1#p"
+  done < <(dc ps -q) | LC_ALL=C sort -u | paste -sd ' ' -)"
+  [[ "$fr_publies" == "gitlab:${fr_ssh:-2222}->22/tcp" ]] \
+    || erreur "Plateforme : ports publiés sur l'hôte « $fr_publies » (attendu : gitlab:${fr_ssh:-2222}->22/tcp seul ; make deploy ENV=$env)"
+  echo "    Aucun port web publié sur l'hôte : seul le SSH de GitLab ($fr_publies)."
+
+  # c. Frontal présent : un conteneur à FRONTAL_IP sur le réseau
+  grep -q " $fr_ip/" <<<"$fr_membres" \
+    || erreur "Frontal absent : aucun conteneur à FRONTAL_IP=$fr_ip sur $FRONTAL_RESEAU. Le smoke test en frontal exige un frontal en service : le démarrer (docs/frontal.md, « Contrat attendu du frontal »)"
+  echo "    Frontal présent sur $FRONTAL_RESEAU ($fr_ip)."
+
+  # Sonde HTTPS depuis gitlab-runner : <adresse> <hôte> <chemin> [ligne de configuration curl…] ; hôte
+  # imposé vers l'adresse sur le port 443, certificat validé (CA privée en custom). Configuration sur
+  # l'entrée standard (identifiants jamais en argument) ; sortie : en-têtes, corps, « CODE=<code HTTP> »,
+  # puis « RC=<code de sortie de curl> » (message de curl compris)
+  fr_ca=""
+  if [[ "$(env_valeur "$env_file" TLS_MODE)" == custom ]] && dc exec -T gitlab-runner test -s /etc/devops-platform/ca/ca.pem; then
+    fr_ca=/etc/devops-platform/ca/ca.pem
+  fi
+  sonde() {
+    local ip="$1" hote="$2" chemin="$3" config ligne
+    shift 3
+    config="url = $(cfg "https://$hote$chemin")"$'\n'
+    config+="resolve = $(cfg "$hote:443:$ip")"$'\n'
+    config+="max-time = 30"$'\n'
+    [[ -n "$fr_ca" ]] && config+="cacert = $(cfg "$fr_ca")"$'\n'
+    for ligne in "$@"; do config+="$ligne"$'\n'; done
+    # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+    dc exec -T gitlab-runner sh -c 'curl -sS -K - -D - -w "\nCODE=%{http_code}\n" 2>&1; echo "RC=$?"' <<<"$config" || true
+  }
+  rc_de() { sed -n 's/^RC=//p' <<<"$1" | tail -n1; }
+  # Échec de connexion par le frontal : cause probable selon le code de curl (la plateforme, elle, répond)
+  diagnostic_frontal() { # <réponse> <hôte>
+    local rc message
+    rc="$(rc_de "$1")"
+    message="$(grep '^curl: ' <<<"$1" | tail -n1)" || message=""
+    case "$rc" in
+      0) return 0 ;;
+      7) erreur "Frontal : rien n'écoute sur le port 443 de l'hôte ($fr_ip_publique:443, passerelle du réseau $fr_reseau_plateforme) : frontal arrêté ou ports non publiés ? ($message)" ;;
+      35) erreur "Frontal : poignée de main TLS refusée pour $2 : hostname non routé vers la plateforme (docs/frontal.md, contrat 2) ($message)" ;;
+      51 | 60) erreur "Frontal : certificat inattendu pour $2 : le frontal termine-t-il le TLS ? Passthrough exigé (docs/frontal.md, contrat 2) ($message)" ;;
+      *) erreur "Frontal : $2 injoignable par le frontal (curl $rc : $message)" ;;
+    esac
+  }
+
+  # d. Plateforme joignable sans frontal : GitLab par l'alias de Traefik (même chemin que le runner)
+  fr_ip_alias="$(dc exec -T gitlab-runner getent ahostsv4 "$fr_hote_gitlab" | awk '{ print $1; exit }')" || fr_ip_alias=""
+  [[ -n "$fr_ip_alias" ]] || erreur "Plateforme : IP de Traefik introuvable depuis gitlab-runner ($fr_hote_gitlab)"
+  rep="$(sonde "$fr_ip_alias" "$fr_hote_gitlab" /users/sign_in)"
+  [[ "$(rc_de "$rep")" == 0 && "$(code_de "$rep")" == 200 ]] \
+    || erreur "Plateforme en panne (sans frontal) : https://$fr_hote_gitlab/users/sign_in par l'alias de Traefik : HTTP $(code_de "$rep"), curl $(rc_de "$rep") (make status ENV=$env)"
+  echo "    Plateforme joignable sans frontal (GitLab par l'alias de Traefik : HTTP 200)."
+
+  # e. Par le frontal : chaque hostname de l'instance par son URL publique (443 de l'hôte, détenu par
+  #    le frontal, joint par la passerelle du réseau de la plateforme). Chaque sonde porte un marqueur
+  #    unique, retrouvé ensuite dans les logs d'accès de Traefik.
+  fr_reseau_plateforme="$(env_valeur "$env_file" PLATFORM_NETWORK)"
+  fr_reseau_plateforme="${fr_reseau_plateforme:-devops-platform}"
+  fr_ip_publique="$(docker network inspect -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' "$fr_reseau_plateforme" \
+    | tr ' ' '\n' | grep -E '^[0-9]+(\.[0-9]+){3}$' | head -n1)" || fr_ip_publique=""
+  [[ -n "$fr_ip_publique" ]] \
+    || erreur "Plateforme : passerelle IPv4 du réseau $fr_reseau_plateforme introuvable (docker network inspect $fr_reseau_plateforme)"
+  fr_jeton="$(date +%s)-$RANDOM"
+  declare -A fr_marques=()  # marqueur → libellé de la sonde
+  sonde_frontal() { # <hôte> <chemin sans paramètre> <code attendu> [ligne de configuration curl…] : réponse dans rep
+    local hote="$1" chemin="$2" attendu="$3" marque
+    shift 3
+    marque="$fr_jeton-${#fr_marques[@]}"
+    fr_marques[$marque]="$hote$chemin"
+    rep="$(sonde "$fr_ip_publique" "$hote" "$chemin?$FRONTAL_MARQUE=$marque" "$@")"
+    diagnostic_frontal "$rep" "$hote"
+    [[ "$(code_de "$rep")" == "$attendu" ]] \
+      || erreur "Frontal ou plateforme : https://$hote$chemin par le frontal : HTTP $(code_de "$rep") (attendu : $attendu ; par l'alias de Traefik, la plateforme répond)"
+  }
+  sonde_frontal "$fr_hote_gitlab" /users/sign_in 200
+  echo "    $fr_hote_gitlab : page de connexion de GitLab servie par le frontal (HTTP 200)."
+  # Initialisation MCP sans jeton : refusée par GitLab (le contrôle authentifié se fait à l'étape 9)
+  sonde_frontal "$fr_hote_gitlab" /api/v4/mcp 401 'header = "Content-Type: application/json"' \
+    'header = "Accept: application/json, text/event-stream"' \
+    "data = $(cfg '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"devops-platform-smoke","version":"1"}}}')"
+  echo "    $fr_hote_gitlab : serveur MCP de GitLab servi par le frontal (sans jeton : HTTP 401)."
+  # SonarQube : API (routeur exempté de la passerelle, authentification Basic du compte admin)
+  fr_hote_sonar="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
+  fr_hote_sonar="${fr_hote_sonar:-sonarqube.localhost}"
+  sonde_frontal "$fr_hote_sonar" /api/system/status 200 "user = $(cfg "$admin")"
+  [[ "$rep" == *'"status":"UP"'* ]] || erreur "$fr_hote_sonar/api/system/status par le frontal : statut UP attendu"
+  echo "    $fr_hote_sonar : API de SonarQube servie par le frontal (UP)."
+  # Services protégés : redirection vers l'autorisation GitLab (contrôles complets à l'étape 10, par le
+  # frontal)
+  for paire in "${SSO_HOSTNAMES[@]}"; do
+    [[ "${paire%%:*}" == SONARQUBE_HOSTNAME ]] && continue
+    h="$(env_valeur "$env_file" "${paire%%:*}")"
+    h="${h:-${paire#*:}}"
+    sonde_frontal "$h" / 302
+    [[ "$(entete_de "$rep" location)" == "$fr_gitlab_url/oauth/authorize?"* ]] \
+      || erreur "$h par le frontal : redirection vers $fr_gitlab_url/oauth/authorize attendue (passerelle d'authentification)"
+    echo "    $h : servi par le frontal, redirigé vers l'autorisation GitLab (HTTP 302)."
+  done
+  # Serveur MCP SonarQube : sans jeton, refusé (contrôle authentifié par le frontal à l'étape 9)
+  if [[ "$services" == *" sonarqube-mcp "* ]]; then
+    fr_hote_mcp="$(env_valeur "$env_file" SONARQUBE_MCP_HOSTNAME)"
+    fr_hote_mcp="${fr_hote_mcp:-sonarqube-mcp.localhost}"
+    sonde_frontal "$fr_hote_mcp" /mcp 401 'header = "Content-Type: application/json"' "data = $(cfg '{}')"
+    echo "    $fr_hote_mcp : serveur MCP SonarQube servi par le frontal (sans jeton : HTTP 401)."
+  fi
+
+  # f. Remise au proxy de la plateforme avec le PROXY protocol : chaque marqueur figure dans les logs
+  #    d'accès de Traefik (format par défaut : adresse du client en premier champ), avec une autre
+  #    adresse que celle du frontal
+  ip_journalisee() { # <marqueur> : adresse du client de la requête marquée (vide si absente)
+    dc logs --no-log-prefix --tail 5000 traefik 2> /dev/null | grep -F -- "$FRONTAL_MARQUE=$1 " | awk '{ print $1; exit }'
+  }
+  # Attente courte (journal écrit au fil de l'eau) : <commande…>, 6 essais à 3 s d'intervalle
+  attendre_journal() {
+    local essai
+    for essai in 1 2 3 4 5 6; do
+      "$@" && return 0
+      ((essai < 6)) && sleep 3
+    done
+    return 1
+  }
+  marques_journalisees() {
+    local m
+    for m in "${!fr_marques[@]}"; do [[ -n "$(ip_journalisee "$m")" ]] || return 1; done
+  }
+  attendre_journal marques_journalisees || true
+  for m in "${!fr_marques[@]}"; do
+    ip="$(ip_journalisee "$m")"
+    [[ -n "$ip" ]] || erreur "Frontal : ${fr_marques[$m]} servie, mais absente des logs d'accès de Traefik : requête non transmise au proxy de la plateforme ?"
+    [[ "$ip" != "$fr_ip" ]] \
+      || erreur "Frontal sans PROXY protocol : Traefik journalise l'adresse du frontal ($fr_ip) au lieu de celle du client (docs/frontal.md, contrat 3)"
+  done
+  echo "    ${#fr_marques[@]} requête(s) remises à Traefik par le frontal avec le PROXY protocol (client journalisé : $ip, pas $fr_ip)."
+
+  # g. Sentinelle sur le réseau du frontal, à une adresse fixe libre (jamais FRONTAL_IP : le frontal
+  #    doit pouvoir redémarrer) : web (:80) fermé ; connexion directe sans PROXY protocol admise mais
+  #    journalisée à son adresse ; en-tête PROXY forgé ignoré (adresse non usurpable)
+  retirer_sentinelles || erreur "suppression des sentinelles d'une exécution précédente impossible"
+  read -r -a fr_bornes <<<"$(cidr_bornes "$fr_subnet")"
+  fr_ip_sentinelle="" n=$((fr_bornes[1] - 1))
+  while ((n > fr_bornes[0] + 1)); do
+    ip="$(entier_ipv4 "$n")"
+    if [[ "$ip" != "$fr_ip" && "$ip" != "$fr_ip_traefik" ]] && ! grep -q " $ip/" <<<"$fr_membres"; then
+      fr_ip_sentinelle="$ip"
+      break
+    fi
+    n=$((n - 1))
+  done
+  [[ -n "$fr_ip_sentinelle" ]] || erreur "aucune adresse libre sur $FRONTAL_RESEAU ($fr_subnet) pour la sentinelle"
+  fr_image="$(docker inspect -f '{{.Config.Image}}' "$(dc ps -q gitlab-runner)")"
+  sentinelles=1
+  fr_sentinelle="$(docker run -d --rm --label "$SENTINELLE_LABEL=$env" --security-opt no-new-privileges \
+    --network "$FRONTAL_RESEAU" --ip "$fr_ip_sentinelle" --entrypoint sleep "$fr_image" 120)" \
+    || erreur "sentinelle de $FRONTAL_RESEAU non démarrée"
+  # Requête depuis la sentinelle : <URL> [ligne de configuration curl…] ; certificat non vérifié (seule
+  # compte l'adresse journalisée) ; sortie comme sonde
+  sonde_sentinelle() {
+    local config ligne
+    config="url = $(cfg "$1")"$'\n'
+    config+="max-time = 10"$'\n'
+    shift
+    for ligne in "$@"; do config+="$ligne"$'\n'; done
+    # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
+    docker exec -i "$fr_sentinelle" sh -c 'curl -sS -k -K - -o /dev/null -w "\nCODE=%{http_code}\n" 2>&1; echo "RC=$?"' <<<"$config" || true  # check-noms: id
+  }
+  rep="$(sonde_sentinelle "http://$fr_ip_traefik:80/")"
+  [[ "$(rc_de "$rep")" == 7 ]] \
+    || erreur "Plateforme : entrypoint web (:80) joignable sur $FRONTAL_RESEAU (curl $(rc_de "$rep"), HTTP $(code_de "$rep")) : HTTPS seul attendu (make deploy ENV=$env)"
+  echo "    Sentinelle ($fr_ip_sentinelle) : port 80 de Traefik fermé sur $FRONTAL_RESEAU."
+  for cas in sans-entete forge; do
+    marque="$fr_jeton-$cas"
+    options=("resolve = $(cfg "$fr_hote_gitlab:443:$fr_ip_traefik")")
+    [[ "$cas" == forge ]] && options+=("haproxy-clientip = $(cfg "$FRONTAL_IP_FORGEE")")
+    rep="$(sonde_sentinelle "https://$fr_hote_gitlab/users/sign_in?$FRONTAL_MARQUE=$marque" "${options[@]}")"
+    [[ "$(rc_de "$rep")" == 0 ]] || erreur "sentinelle : https://$fr_hote_gitlab par $fr_ip_traefik : curl $(rc_de "$rep")"
+    ip=""
+    journalisee() { ip="$(ip_journalisee "$marque")"; [[ -n "$ip" ]]; }
+    attendre_journal journalisee || erreur "requête de la sentinelle absente des logs d'accès de Traefik"
+    [[ "$ip" == "$fr_ip_sentinelle" ]] \
+      || erreur "Plateforme : connexion de la sentinelle ($cas) journalisée sous $ip au lieu de $fr_ip_sentinelle (PROXY protocol honoré hors de FRONTAL_IP ? make deploy ENV=$env)"
+  done
+  echo "    Sentinelle : connexion directe sans PROXY protocol admise, journalisée à sa propre adresse (limite"
+  echo "    documentée) ; en-tête PROXY forgé ($FRONTAL_IP_FORGEE) ignoré hors de FRONTAL_IP : adresse non usurpable."
+  retirer_sentinelles || erreur "suppression de la sentinelle de $FRONTAL_RESEAU impossible"
+  sentinelles=0
+fi
 
 # --- 2. Jeton d'accès personnel -------------------------------------------------------------------
 
@@ -354,9 +598,6 @@ lancer_sentinelle() { # <réseau> <alias> : identifiant sur stdout
   docker run -d --rm --label "$SENTINELLE_LABEL=$env" --network "$1" --network-alias "$2" \
     "$BUSYBOX_IMAGE" nc -lk -p "$SENTINELLE_PORT" -e true
 }
-ip_sur_reseau() { # <identifiant> <réseau>
-  docker inspect -f "{{(index .NetworkSettings.Networks \"$2\").IPAddress}}" "$1" 2> /dev/null
-}
 conso="$(lancer_sentinelle "$reseau_conso" smoke-consommateur)" || erreur "sentinelle de $reseau_conso non démarrée"
 job="$(lancer_sentinelle "$reseau_ci" smoke-job)" || erreur "sentinelle de $reseau_ci non démarrée"
 ip_conso="$(ip_sur_reseau "$conso" "$reseau_conso")" && [[ -n "$ip_conso" ]] \
@@ -381,7 +622,7 @@ sonar_hote="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
 # Port web sondé : 80 (entrypoint web), sauf en EXPOSITION=frontal où web n'écoute que sur la boucle
 # locale de Traefik (HTTPS seul, docs/frontal.md)
 port_web=80
-[[ "$(env_valeur "$env_file" EXPOSITION)" == frontal ]] && port_web=443
+[[ "$exposition" == frontal ]] && port_web=443
 # Contrôles positifs : écoute, résolution des alias et accès à Traefik (sinon un nc inutilisable ou une
 # sentinelle mal rattachée ferait passer les contrôles négatifs)
 attendu joignable "$conso" consommateur smoke-consommateur "$SENTINELLE_PORT"
@@ -663,6 +904,23 @@ else
   [[ "$CODE" == 200 && "$CORPS" == *'"isError":false'* && "$CORPS" == *"$SONAR_CLE"* ]] \
     || erreur "outil search_my_sonarqube_projects : projet $SONAR_CLE absent de la réponse (HTTP $CODE) : ${CORPS:0:300}"
   echo "    SonarQube : serveur MCP ${version_mcp:-?}, projet $SONAR_CLE listé par search_my_sonarqube_projects."
+  # En frontal : mêmes appels par l'URL publique du serveur MCP, à travers le frontal (fr_hote_mcp, étape
+  # 1 bis) ; jeton dans la configuration curl (entrée standard)
+  if [[ "$exposition" == frontal ]]; then
+    mcp_entetes=("header = $(cfg "Authorization: Bearer $mcp_sonar_jeton")" 'header = "Content-Type: application/json"'
+      'header = "Accept: application/json, text/event-stream"')
+    rep="$(sonde "$fr_ip_publique" "$fr_hote_mcp" /mcp "${mcp_entetes[@]}" "data = $(cfg "$MCP_INIT")")"
+    diagnostic_frontal "$rep" "$fr_hote_mcp"
+    [[ "$(code_de "$rep")" == 200 && "$rep" == *'"serverInfo"'* ]] \
+      || erreur "initialize refusé par le serveur MCP SonarQube par le frontal (https://$fr_hote_mcp/mcp) : HTTP $(code_de "$rep")"
+    rep="$(sonde "$fr_ip_publique" "$fr_hote_mcp" /mcp "${mcp_entetes[@]}" \
+      "data = $(cfg '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_my_sonarqube_projects","arguments":{}}}')")"
+    diagnostic_frontal "$rep" "$fr_hote_mcp"
+    [[ "$(code_de "$rep")" == 200 && "$rep" == *'"isError":false'* && "$rep" == *"$SONAR_CLE"* ]] \
+      || erreur "search_my_sonarqube_projects par le frontal (https://$fr_hote_mcp/mcp) : projet $SONAR_CLE absent (HTTP $(code_de "$rep"))"
+    mcp_entetes=() rep=""
+    echo "    SonarQube : mêmes appels MCP par l'URL publique, à travers le frontal (https://$fr_hote_mcp/mcp)."
+  fi
   sonar_api POST /api/user_tokens/revoke "$admin" "name=$MCP_NOM" || erreur "SonarQube injoignable"
   [[ "$CODE" == 204 ]] || erreur "HTTP $CODE à la révocation du jeton utilisateur $MCP_NOM"
   mcp_sonar_jeton=""
@@ -735,7 +993,8 @@ verrou_tenu
   || erreur "passerelle en mode refus : application OAuth absente ou différente (make bootstrap ENV=$env)"
 
 # Requêtes depuis le conteneur gitlab-runner (réseau de la plateforme), hostnames imposés vers l'IP de
-# Traefik (alias du hostname GitLab) : même chemin et même certificat qu'un navigateur. CA privée du
+# Traefik (alias du hostname GitLab), ou vers le frontal en EXPOSITION=frontal : même chemin et même
+# certificat qu'un navigateur. CA privée du
 # runner en TLS_MODE=custom (compose/tls/gitlab/custom.yml), magasin système sinon.
 tls_mode="$(env_valeur "$env_file" TLS_MODE)"
 schema="$(schema_tls "${tls_mode:-none}")"
@@ -748,6 +1007,9 @@ gitlab_url="${gitlab_url:-$(url_derivee "$gitlab_hote" "${tls_mode:-none}")}"
 gitlab_url="${gitlab_url%/}"
 ip_traefik="$(dc exec -T gitlab-runner getent ahostsv4 "$gitlab_hote" | awk '{ print $1; exit }')" || ip_traefik=""
 [[ -n "$ip_traefik" ]] || erreur "IP de Traefik introuvable depuis gitlab-runner ($gitlab_hote)"
+# Adresse des URLs publiques : Traefik (alias) en directe ; en frontal, le 443 de l'hôte, détenu par le
+# frontal (étape 1 bis) : toute l'étape passe par le frontal
+ip_publique="${fr_ip_publique:-$ip_traefik}"
 ca_sso=""
 if [[ "${tls_mode:-none}" == custom ]] && dc exec -T gitlab-runner test -s /etc/devops-platform/ca/ca.pem; then
   ca_sso=/etc/devops-platform/ca/ca.pem
@@ -765,14 +1027,12 @@ requete() {
   local hote="$1" chemin="$2" config ligne
   shift 2
   config="url = $(cfg "$schema://$hote$chemin")"$'\n'
-  config+="resolve = $(cfg "$hote:$port:$ip_traefik")"$'\n'
+  config+="resolve = $(cfg "$hote:$port:$ip_publique")"$'\n'
   [[ -n "$ca_sso" ]] && config+="cacert = $(cfg "$ca_sso")"$'\n'
   for ligne in "$@"; do config+="$ligne"$'\n'; done
   # shellcheck disable=SC2016 # script exécuté par le sh du conteneur
   dc exec -T gitlab-runner sh -c 'curl -sS -K - -D - -w "\nCODE=%{http_code}\n" || true' <<<"$config"
 }
-code_de() { sed -n 's/^CODE=//p' <<<"$1" | tail -n1; }
-entete_de() { grep -i "^$2:" <<<"$1" | tail -n1 | sed 's/^[^:]*: *//; s/\r$//'; }
 forges=()
 for f in "${SSO_FORGES[@]}"; do forges+=("header = $(cfg "$f")"); done
 
