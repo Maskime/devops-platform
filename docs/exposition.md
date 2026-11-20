@@ -2,9 +2,9 @@
 
 Traefik (`compose/proxy.yml`) est le seul point d'entrée web : il publie le port 80 (et 443 en HTTPS)
 et route chaque requête vers le service dont le hostname correspond (`*_HOSTNAME`). Ce qui dépend du
-mode TLS vit dans un overlay, `compose/tls/<mode>.yml`, fusionné avec `compose/proxy.yml` par
-`compose.yml`. Aucun autre service web ne publie de
-port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
+mode TLS vit dans un overlay, `compose/tls/<mode>.yml`, et ce qui dépend du mode d'exposition dans
+`compose/exposition/<mode>.yml`, fusionnés dans cet ordre avec `compose/proxy.yml` par `compose.yml`.
+Aucun autre service web ne publie de port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
 
 | Service | URL locale par défaut | Variable |
 |---|---|---|
@@ -42,6 +42,14 @@ port ; seul reste publié le SSH de GitLab (`GITLAB_SSH_PORT`).
     `ACME_EMAIL`, des `*_EXTERNAL_URL` en `https://` et refuse les hostnames locaux ou IP.
     Détails : [certificats Let's Encrypt](letsencrypt.md).
   - Toute autre valeur est refusée par `make deploy`.
+- **Mode d'exposition (`EXPOSITION`).**
+  - `directe` (défaut) : Traefik publie lui-même les ports 80 et 443 de l'hôte (ci-dessus).
+  - `frontal` : l'instance est placée derrière un frontal d'hôte, qui possède les ports 80 et 443 et
+    les partage avec des services voisins. Traefik ne publie aucun port web, n'écoute qu'en HTTPS et
+    reçoit le trafic du frontal en passthrough TLS, avec le PROXY protocol v2, sur le réseau
+    `devops-platform_frontal`. `TLS_MODE=custom`, ou `letsencrypt` avec `ACME_CHALLENGE=tls`.
+    Contrat du frontal, configuration de référence et limites : [frontal d'hôte](frontal.md).
+  - Toute autre valeur est refusée par `make deploy`.
 
 ## Authentification unique
 
@@ -62,10 +70,17 @@ Détails et limites : [GitLab derrière le proxy](gitlab-proxy.md).
 
 ## Surface d'exposition
 
-Sur l'hôte, seuls sont publiés **80** (Traefik), **443** (Traefik, en `TLS_MODE` `custom` ou `letsencrypt`) et le
-**SSH de GitLab** (`GITLAB_SSH_PORT`, défaut 2222). `make verify` contrôle, pour chaque
-`envs/*.env` et pour chaque mode TLS, chaque couple port publié → port du conteneur contre cette liste blanche, et refuse tout
-`network_mode` `host`, `service:…` ou `container:…` (qui la contournerait).
+Sur l'hôte, seuls sont publiés :
+
+| `EXPOSITION` | Ports publiés par la plateforme |
+|---|---|
+| `directe` | **80** (Traefik), **443** (Traefik, en `TLS_MODE` `custom` ou `letsencrypt`), **SSH de GitLab** (`GITLAB_SSH_PORT`, défaut 2222) |
+| `frontal` | **SSH de GitLab** seul : 80 et 443 appartiennent au frontal ; l'entrypoint `web` de Traefik n'écoute que sur sa boucle locale |
+
+`make verify` contrôle, pour chaque `envs/*.env` et pour chaque mode TLS et d'exposition, chaque
+couple port publié → port du conteneur contre la liste blanche du mode d'exposition. Il refuse tout
+`network_mode` `host`, `service:…` ou `container:…` (qui la contournerait). En frontal, il vérifie
+aussi que l'entrypoint `web` est limité à la boucle locale et que le PROXY protocol est configuré.
 
 - **Bases de données et services internes.** `sonarqube-db` (PostgreSQL) et Loki ne publient aucun
   port : ils ne sont joignables que depuis le réseau Docker de la plateforme. Le PostgreSQL et le Redis

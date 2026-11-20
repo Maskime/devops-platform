@@ -85,7 +85,9 @@ retomberait au redémarrage : le script s'arrête en citant ce fichier, sans le 
 
 Si **ufw** ou **firewalld** est actif, le script y autorise uniquement les ports de la plateforme :
 `80/tcp`, `443/tcp` (sauf `--sans-https`) et le port SSH de GitLab (zone par défaut et configuration
-permanente pour firewalld). Aucune règle n'est supprimée ; le SSH de l'hôte n'est pas touché.
+permanente pour firewalld). Aucune règle n'est supprimée ; le SSH de l'hôte n'est pas touché. Derrière
+un [frontal d'hôte](frontal.md) (`EXPOSITION=frontal`), 80 et 443 sont publiés par le frontal et non
+par la plateforme, mais doivent rester ouverts.
 
 Sans pare-feu actif, rien n'est fait : en activer un pourrait couper l'accès SSH au serveur.
 

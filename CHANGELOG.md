@@ -9,6 +9,14 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ### Ajouté
 
+- Exposition derrière un frontal d'hôte (`EXPOSITION=frontal`) : l'instance partage les ports 80/443
+  du serveur avec d'autres sites. Traefik ne publie plus de port web, n'écoute qu'en HTTPS et rejoint
+  le réseau `devops-platform_frontal` (`FRONTAL_SUBNET`, `FRONTAL_IP_TRAEFIK`), où il honore le PROXY
+  protocol de la seule `FRONTAL_IP`. Variables, modes TLS admis (`custom`, `letsencrypt` avec
+  `ACME_CHALLENGE=tls`) et adresses contrôlés par `make check-env`. `make verify` contrôle les ports
+  publiés de chaque mode d'exposition. Documentation : `docs/frontal.md` (contrat du frontal,
+  configuration Traefik v3 de référence) (US 15-3).
+
 - Logs des conteneurs de l'hôte hors plateforme : Promtail collecte aussi les conteneurs portant le
   label `devops-platform.logs=true` (job `host-containers`, labels `project` et `service`, sans
   identifiant de conteneur), avec des limites de débit par projet et globales qui préservent les logs

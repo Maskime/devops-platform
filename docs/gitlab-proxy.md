@@ -69,7 +69,9 @@ différemment), hors 80 et 443 (Traefik), et signale `22`, généralement pris p
 Traefik porte les `*_HOSTNAME` de l'instance en **alias réseau** (`compose/proxy.yml`). Dans ces
 réseaux, l'URL publique de GitLab mène donc à Traefik, par le même chemin et le même certificat que pour
 un client externe, sans dépendre du DNS ni du hairpin NAT de l'hôte. Le runner s'enregistre sur cette
-URL ; il dépend donc de Traefik pour joindre GitLab. En `TLS_MODE=custom` avec un certificat d'une CA
+URL ; il dépend donc de Traefik pour joindre GitLab. Derrière un [frontal d'hôte](frontal.md)
+(`EXPOSITION=frontal`), ce chemin ne passe pas par le frontal, mais Traefik n'écoute plus qu'en HTTPS :
+les URLs en `http://` des hostnames publics sont refusées. En `TLS_MODE=custom` avec un certificat d'une CA
 interne, le runner et les jobs vérifient ce certificat avec la [CA privée](certificats.md#ca-privée)
 fournie.
 

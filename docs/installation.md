@@ -80,6 +80,9 @@ Seuls ces ports sont publiés sur l'hôte. Les ouvrir dans tout pare-feu **en am
 | `GITLAB_SSH_PORT` (défaut 2222) | toujours | `git` en SSH ; pas 22, généralement pris par le sshd de l'hôte |
 | SSH de l'hôte (22) | instance distante | pilotage par `make` depuis le poste (déjà ouvert en général) |
 
+Derrière un [frontal d'hôte](frontal.md) (`EXPOSITION=frontal`), 80 et 443 sont publiés par le
+frontal, plus par la plateforme : mêmes ouvertures en amont.
+
 Sur le serveur, `host-prereqs.sh` ouvre ces ports dans ufw ou firewalld s'ils sont actifs. Les ports
 publiés par Docker contournent de toute façon ces pare-feu : voir [Exposition](exposition.md#surface-dexposition).
 
