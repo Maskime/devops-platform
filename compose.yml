@@ -17,6 +17,9 @@
 #                              fusionné avec compose/gitlab.yml dans le même include
 #   compose/tls/sonarqube/<mode>.yml  overlay de sonarqube propre au TLS_MODE (CA privée en custom),
 #                              fusionné avec compose/sonarqube.yml dans le même include
+#   compose/exposition/<mode>.yml  overlay de traefik propre à l'EXPOSITION (directe, frontal :
+#                              derrière un frontal d'hôte, docs/frontal.md), fusionné en dernier avec
+#                              compose/proxy.yml et compose/tls/<mode>.yml
 #
 # Toujours piloter la plateforme depuis ce fichier, avec le fichier d'environnement de l'instance :
 #   docker compose --env-file envs/<env>.env up -d                     # toutes les briques
@@ -60,8 +63,10 @@ include:
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
   - path: compose/socket-proxy.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env
-  # Proxy : overlay propre au mode TLS (compose/tls/<mode>.yml) fusionné avec compose/proxy.yml
+  # Proxy : overlays propres au mode TLS (compose/tls/<mode>.yml) puis au mode d'exposition
+  # (compose/exposition/<mode>.yml), fusionnés dans cet ordre avec compose/proxy.yml
   - path:
       - compose/proxy.yml
       - compose/tls/${TLS_MODE:-none}.yml
+      - compose/exposition/${EXPOSITION:-directe}.yml
     env_file: compose/projet-autorise/${COMPOSE_PROJECT_NAME}.env

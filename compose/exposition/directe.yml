@@ -1,0 +1,10 @@
+# =============================================================================
+# Overlay du proxy pour EXPOSITION=directe (défaut) : Traefik reçoit lui-même le trafic web de l'hôte
+# (ports 80 et 443 publiés par compose/proxy.yml et l'overlay du mode TLS). Rien à ajouter.
+# Fusionné avec compose/proxy.yml et compose/tls/<mode>.yml par l'include de compose.yml
+# (compose/exposition/${EXPOSITION}.yml) ; ne se lance pas seul. Modes d'exposition : docs/exposition.md.
+# =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-exposition-directe: "${PLATFORM_GARDE_FOU:?compose/exposition/directe.yml est un overlay du proxy de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
+services: {}
