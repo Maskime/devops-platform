@@ -92,7 +92,8 @@ documentée dans [`envs/.env.example`](envs/.env.example). Les principaux régla
 | [Fichier de sortie](docs/sortie-instance.md) | `outputs/<env>.env` pour les projets consommateurs : URLs, API GitLab, token d'analyse |
 | [Bootstrap SonarQube](docs/bootstrap-sonarqube.md) | Étape SonarQube : `vm.max_map_count`, compte admin, token d'analyse, mot de passe admin inconnu |
 | [Authentification unique](docs/sso.md) | Passerelle GitLab devant les services web : mécanisme, services exemptés, groupe, connexion à Portainer avec l'identité GitLab, durée de session, accès de secours, déconnexion ; connexion automatique et rôles Grafana ; connexion automatique à SonarQube (groupes, administrateurs) |
-| [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS, surface d'exposition |
+| [Exposition](docs/exposition.md) | Traefik, hostnames, URLs publiques, modes TLS et d'exposition, surface d'exposition |
+| [Frontal d'hôte](docs/frontal.md) | `EXPOSITION=frontal` : instance derrière un reverse proxy d'hôte partagé, contrat du frontal (passthrough SNI, PROXY protocol v2), configuration Traefik de référence, limites |
 | [Certificats fournis](docs/certificats.md) | `TLS_MODE=custom` : fichiers attendus, contrôles, renouvellement |
 | [Let's Encrypt](docs/letsencrypt.md) | `TLS_MODE=letsencrypt` : prérequis, challenge, stockage, renouvellement |
 | [GitLab derrière le proxy](docs/gitlab-proxy.md) | URL publique, nginx interne, SSH, runner, réseaux des jobs et des projets co-localisés |

@@ -1,0 +1,45 @@
+# =============================================================================
+# Overlay du proxy pour EXPOSITION=frontal : l'instance est placée derrière un frontal d'hôte, qui
+# reçoit le trafic web de l'hôte (80/443) et transmet à Traefik, en passthrough TLS (SNI) et avec le
+# PROXY protocol v2, celui des hostnames de l'instance. Contrat du frontal : docs/frontal.md.
+# Fusionné après compose/proxy.yml et compose/tls/<mode>.yml par l'include de compose.yml
+# (compose/exposition/${EXPOSITION}.yml) : ses valeurs l'emportent. Ne se lance pas seul.
+# TLS_MODE letsencrypt (ACME_CHALLENGE=tls) ou custom seulement : contrôlé par make check-env.
+# =============================================================================
+# Garde-fou : PLATFORM_GARDE_FOU n'est défini que par l'include de compose.yml
+x-garde-fou-exposition-frontal: "${PLATFORM_GARDE_FOU:?compose/exposition/frontal.yml est un overlay du proxy de compose.yml et ne se lance pas seul : make deploy ENV=<env>, ou docker compose --env-file envs/<env>.env … depuis la racine du repo, sans -f ni -p}"
+
+services:
+  traefik:
+    environment:
+      # Entrypoint web (:80, défini par compose/proxy.yml, redirigé vers HTTPS par l'overlay du mode
+      # TLS) limité à la boucle locale du conteneur : injoignable depuis tout réseau, frontal compris.
+      # Compose ne sait pas retirer une variable héritée (`!reset` est sans effet sur une clé
+      # d'environment) ; le port 80 et la redirection HTTPS sont à la charge du frontal.
+      TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: "127.0.0.1:80"
+      # En-tête PROXY protocol (v1 ou v2) honoré de la seule adresse du frontal : l'IP réelle du client
+      # remplace la sienne (logs d'accès, X-Forwarded-For transmis à GitLab). Un en-tête venu d'une autre
+      # adresse est ignoré ; une connexion sans en-tête reste admise (runner, jobs CI et projets
+      # co-localisés, par les alias réseau) : limites dans docs/frontal.md.
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_PROXYPROTOCOL_TRUSTEDIPS: ${FRONTAL_IP:?FRONTAL_IP obligatoire en EXPOSITION=frontal (voir envs/.env.example)}
+    # Aucun port web publié : 80 et 443 de l'hôte appartiennent au frontal (le SSH de GitLab reste
+    # publié par compose/gitlab.yml)
+    ports: !reset []
+    networks:
+      # Adresse fixe : Traefik ne peut jamais occuper FRONTAL_IP, réservée au frontal (Docker ne sait pas
+      # réserver une adresse pour un conteneur tiers)
+      frontal:
+        ipv4_address: ${FRONTAL_IP_TRAEFIK:?FRONTAL_IP_TRAEFIK obligatoire en EXPOSITION=frontal (voir envs/.env.example)}
+
+networks:
+  # Réseau du frontal, créé par make deploy : le frontal le rejoint comme réseau externe, à l'adresse
+  # FRONTAL_IP. Interne : aucune passerelle sortante (Traefik garde la sienne sur platform, ci et
+  # consumers ; le frontal publie ses ports par son propre réseau). Après création, changer
+  # FRONTAL_SUBNET impose de supprimer ce réseau (docs/frontal.md).
+  frontal:
+    name: devops-platform_frontal
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${FRONTAL_SUBNET:?FRONTAL_SUBNET obligatoire en EXPOSITION=frontal (voir envs/.env.example)}

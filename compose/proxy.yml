@@ -10,12 +10,14 @@ services:
 
   # ---------------------------------------------------------------------------
   # Traefik — reverse proxy, routage par hostname (*_HOSTNAME de l'instance)
-  # Seul service web à publier un port sur l'hôte. Les services exposés le déclarent par leurs
+  # Seul service web à publier un port sur l'hôte (aucun en EXPOSITION=frontal : overlay
+  # compose/exposition/frontal.yml, docs/frontal.md). Les services exposés le déclarent par leurs
   # labels traefik.* (traefik.enable=true, règle Host(`<hostname>`), port interne).
   # Configuration statique par variables TRAEFIK_* (et non par `command:`) : Traefik n'accepte qu'une
   # source (fichier, arguments ou variables) et l'overlay du mode TLS (compose/tls/<mode>.yml, fusionné
   # par l'include de compose.yml) complète `environment`, `ports` et `volumes` ; `command` serait
-  # remplacé en entier. Entrypoint web (:80, HTTP) commun à tous les modes.
+  # remplacé en entier. Entrypoint web (:80, HTTP) commun à tous les modes TLS ; limité à la boucle
+  # locale du conteneur en EXPOSITION=frontal (overlay compose/exposition/<mode>.yml, fusionné en dernier).
   # Routeurs publics : aucun label `entrypoints` ; ils suivent l'entrypoint par défaut (`web` en none,
   # `websecure` en HTTPS, marqué asDefault par l'overlay du mode TLS). Seuls les routeurs internes des
   # jobs CI (gitlab-interne, sonarqube-interne) déclarent `entrypoints: interne`.

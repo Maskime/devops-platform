@@ -85,11 +85,18 @@ ipv4_entier() { # <adresse>
 }
 
 # Sous-réseau <clé> (défaut <défaut>) d'un lien interne Traefik → service : CIDR IPv4, préfixe de 16 à 29
-# (au moins 6 adresses). Valeur effective sur stdout ; motif du refus sur stderr (code 1).
-sous_reseau_valide() { # <fichier> <clé> <défaut>
-  local cidr prefixe
+# (au moins 6 adresses). Défaut vide : variable obligatoire. <correction> remplace la ligne proposée en
+# cas de refus (défaut : « <clé>=<défaut> (ou commenter la ligne) »). Valeur effective sur stdout ; motif
+# du refus sur stderr (code 1).
+sous_reseau_valide() { # <fichier> <clé> <défaut> [<correction>]
+  local cidr prefixe correction="${4:-$2=$3 (ou commenter la ligne)}"
   cidr="$(env_valeur "$1" "$2")"
   cidr="${cidr:-$3}"
+  if [[ -z "$cidr" ]]; then
+    echo "$2 absente : obligatoire (CIDR IPv4, préfixe de /16 à /29)." >&2
+    echo "  Corriger dans $1 : $correction" >&2
+    return 1
+  fi
   prefixe="${cidr##*/}"
   if [[ "$cidr" =~ ^[0-9.]+/[0-9]{2}$ ]] && ipv4_entier "${cidr%/*}" > /dev/null \
     && ((10#$prefixe >= 16 && 10#$prefixe <= 29)); then
@@ -97,8 +104,16 @@ sous_reseau_valide() { # <fichier> <clé> <défaut>
     return 0
   fi
   echo "$2 invalide : $cidr (CIDR IPv4 attendu, préfixe de /16 à /29)." >&2
-  echo "  Corriger dans $1 : $2=$3 (ou commenter la ligne)" >&2
+  echo "  Corriger dans $1 : $correction" >&2
   return 1
+}
+
+# Chevauchement de deux CIDR valides (code 0 s'ils se chevauchent)
+cidr_chevauchent() { # <cidr> <cidr>
+  local a b
+  read -r -a a <<<"$(cidr_bornes "$1")"
+  read -r -a b <<<"$(cidr_bornes "$2")"
+  ((a[0] <= b[1] && b[0] <= a[1]))
 }
 
 # Bornes d'un CIDR valide : « première dernière » adresses (entiers) sur stdout
@@ -141,6 +156,68 @@ reseau_grafana_proxy_valide() { # <fichier>
     echo "  Corriger dans $1 : GRAFANA_PROXY_IP_TRAEFIK=172.31.254.30 (ou commenter la ligne)" >&2
     return 1
   fi
+}
+
+# Mode d'exposition (EXPOSITION, vide ou absente : directe) : directe ou frontal (docs/frontal.md).
+# Valeur sur stdout ; motif du refus sur stderr (code 1).
+exposition_valide() { # <fichier>
+  local exposition
+  exposition="$(env_valeur "$1" EXPOSITION)"
+  exposition="${exposition:-directe}"
+  case "$exposition" in
+    directe | frontal) printf '%s' "$exposition" ;;
+    *)
+      echo "EXPOSITION invalide : $exposition (valeurs admises : directe, frontal)." >&2
+      echo "  Corriger dans $1 : EXPOSITION=directe (ou frontal, derrière un frontal d'hôte : docs/frontal.md)" >&2
+      return 1
+      ;;
+  esac
+}
+
+# Réseau du frontal (EXPOSITION=frontal, docs/frontal.md) : sous-réseau FRONTAL_SUBNET obligatoire, sans
+# chevauchement avec les sous-réseaux fixés de l'instance (GITLAB_PROXY_SUBNET, GRAFANA_PROXY_SUBNET :
+# Docker refuserait de créer le réseau) ; adresses FRONTAL_IP (frontal) et FRONTAL_IP_TRAEFIK (Traefik)
+# obligatoires, distinctes, dans le sous-réseau, hors adresse réseau, broadcast et première adresse
+# (passerelle Docker). Les réseaux de sous-réseau dynamique (platform, ci, consumers, réseaux du
+# frontal) ne sont pas contrôlés. Motif du refus sur stderr (code 1).
+reseau_frontal_valide() { # <fichier>
+  local cidr autre cle defaut rang ip n erreurs=0 bornes
+  cidr="$(sous_reseau_valide "$1" FRONTAL_SUBNET "" "FRONTAL_SUBNET=172.31.253.0/29 (sous-réseau libre de l'hôte)")" || return 1
+  read -r -a bornes <<<"$(cidr_bornes "$cidr")"
+  for cle in GITLAB_PROXY_SUBNET:172.31.254.0/28 GRAFANA_PROXY_SUBNET:172.31.254.16/28; do
+    defaut="${cle#*:}" cle="${cle%%:*}"
+    autre="$(sous_reseau_valide "$1" "$cle" "$defaut" 2> /dev/null)" || continue
+    if cidr_chevauchent "$cidr" "$autre"; then
+      echo "FRONTAL_SUBNET ($cidr) chevauche $cle ($autre) : choisir des plages disjointes." >&2
+      echo "  Corriger dans $1 : FRONTAL_SUBNET=<sous-réseau libre, ex. 172.31.253.0/29>" >&2
+      erreurs=1
+    fi
+  done
+  declare -A vues=()
+  # <clé>:<rang de l'adresse proposée dans le sous-réseau>
+  for cle in FRONTAL_IP:2 FRONTAL_IP_TRAEFIK:3; do
+    rang="${cle#*:}" cle="${cle%%:*}"
+    ip="$(env_valeur "$1" "$cle")"
+    if [[ -z "$ip" ]]; then
+      echo "$cle absente : obligatoire en EXPOSITION=frontal (adresse de FRONTAL_SUBNET $cidr)." >&2
+    elif ! n="$(ipv4_entier "$ip")" || ((n <= bornes[0] + 1 || n >= bornes[1])); then
+      echo "$cle invalide : $ip (adresse IPv4 de FRONTAL_SUBNET $cidr attendue, hors adresse réseau," >&2
+      echo "  broadcast et première adresse, réservée à la passerelle Docker)." >&2
+    elif [[ -n "${vues[$n]:-}" ]]; then
+      echo "$cle invalide : $ip est aussi ${vues[$n]} (adresses du frontal et de Traefik distinctes)." >&2
+    else
+      vues[$n]="$cle"
+      continue
+    fi
+    echo "  Corriger dans $1 : $cle=<adresse de $cidr, ex. $(entier_ipv4 $((bornes[0] + rang)))>" >&2
+    erreurs=1
+  done
+  ((erreurs == 0))
+}
+
+# Entier → adresse IPv4 pointée
+entier_ipv4() { # <entier>
+  printf '%d.%d.%d.%d' $(($1 >> 24 & 255)) $(($1 >> 16 & 255)) $(($1 >> 8 & 255)) $(($1 & 255))
 }
 
 # Serveur MCP SonarQube (service sonarqube-mcp, profil Compose du même nom) : SONARQUBE_MCP_ENABLED

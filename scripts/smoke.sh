@@ -378,15 +378,19 @@ attendu() { # <joignable|injoignable> <sentinelle> <libellé> <hôte> <port>
 }
 gitlab_hote="$(env_valeur "$env_file" GITLAB_HOSTNAME)"
 sonar_hote="$(env_valeur "$env_file" SONARQUBE_HOSTNAME)"
+# Port web sondé : 80 (entrypoint web), sauf en EXPOSITION=frontal où web n'écoute que sur la boucle
+# locale de Traefik (HTTPS seul, docs/frontal.md)
+port_web=80
+[[ "$(env_valeur "$env_file" EXPOSITION)" == frontal ]] && port_web=443
 # Contrôles positifs : écoute, résolution des alias et accès à Traefik (sinon un nc inutilisable ou une
 # sentinelle mal rattachée ferait passer les contrôles négatifs)
 attendu joignable "$conso" consommateur smoke-consommateur "$SENTINELLE_PORT"
 attendu joignable "$job" job smoke-job "$SENTINELLE_PORT"
-for cible in "${gitlab_hote:-gitlab.localhost}:80" "${sonar_hote:-sonarqube.localhost}:80" \
+for cible in "${gitlab_hote:-gitlab.localhost}:$port_web" "${sonar_hote:-sonarqube.localhost}:$port_web" \
   gitlab.devops-platform.internal:8000 sonarqube.devops-platform.internal:8000; do
   attendu joignable "$conso" consommateur "${cible%:*}" "${cible##*:}"
 done
-attendu joignable "$job" job "${gitlab_hote:-gitlab.localhost}" 80
+attendu joignable "$job" job "${gitlab_hote:-gitlab.localhost}" "$port_web"
 # Contrôles négatifs : aucun trafic entre les deux réseaux, ni du consommateur vers les services internes
 attendu injoignable "$conso" consommateur smoke-job "$SENTINELLE_PORT"
 attendu injoignable "$conso" consommateur "$ip_job" "$SENTINELLE_PORT"
