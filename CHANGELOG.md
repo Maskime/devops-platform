@@ -7,6 +7,11 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/spec/v2
 
 ## [Non publié]
 
+## [0.6.0] - 2026-11-21
+
+Exposition derrière un frontal d'hôte et collecte des logs des conteneurs hors plateforme
+(épopée 15). Aucune image montée. Comportement inchangé tant que `EXPOSITION` n'est pas renseignée.
+
 ### Ajouté
 
 - Smoke test d'une instance derrière un frontal (`EXPOSITION=frontal`). Une étape dédiée vérifie :
@@ -606,7 +611,8 @@ Base de référence : extraction à l'identique de l'infrastructure de Software 
 
 - Portainer passe à la variante `2.45.1-alpine` (même version) pour permettre un healthcheck.
 
-[Non publié]: https://github.com/Maskime/devops-platform/compare/v0.5.1...HEAD
+[Non publié]: https://github.com/Maskime/devops-platform/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.6.0
 [0.5.1]: https://github.com/Maskime/devops-platform/releases/tag/v0.5.1
 [0.5.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Maskime/devops-platform/releases/tag/v0.4.0
