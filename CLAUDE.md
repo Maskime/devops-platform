@@ -60,7 +60,8 @@ Software Factory.
 
 - Épopées : issues avec le label `epic`, titrées `[Épopée N] …`, avec un milestone par épopée.
 - User stories : sub-issues de l'épopée, label `user-story`, titrées `[US N-X] …`.
-- Dette relevée en cours d'implémentation : issues avec le label `backlog`.
+- Dette relevée en cours d'implémentation : issues avec le label `backlog`. Le label
+  `pret-pour-agent` marque celles qu'un agent peut traiter seul, d'après le brief posté en commentaire.
 
 **Notation :** `us: N-X` désigne la user story X de l'épopée N.
 
@@ -74,4 +75,4 @@ n'est pas une commande : Claude le charge dès qu'il doit accéder à GitHub.
 | `/implement-us <N>-<X>` | Implémente une US (cycle défini dans `.claude/skills/implement-us/workflow.md`) et ouvre la PR |
 | `/plan-epic <N>` | Analyse les US d'une épopée et établit des vagues de livraison parallélisables |
 | `/launch-wave <N> [--nettoyer]` | Ouvre une session `/implement-us` par US de la vague courante (worktree + workspace herdr), ou nettoie les worktrees des US terminées |
-| `/triage-backlog` | Attribue une priorité (`high`, `moderate`, `low`) aux issues qui n'ont que le label `backlog` |
+| `/triage-backlog` | Attribue une priorité (`high`, `moderate`, `low`) aux issues qui n'ont que le label `backlog`, signale celles déjà résolues et poste un brief pour agent sur celles qui sont délégables |
